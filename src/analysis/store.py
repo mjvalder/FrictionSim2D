@@ -5,7 +5,9 @@ A result is the ``SinglefileData`` (a CSV) that the calcfunction
 ``Dict`` and a ``Dict`` of the analysis name, version and parameters. It sits
 in the Group ``friction2d/analyses/<dataset>``, with extras ``analysis``,
 ``version``, ``params_hash``, ``dataset``, ``n_rows`` and ``n_dropped``;
-the dropped ``(point_uuid, reason)`` pairs are its attribute ``dropped``.
+the dropped ``(point_uuid, reason)`` pairs are its attribute ``dropped``, the
+analysis' notes (:attr:`RunSource.notes <src.analysis.source.RunSource.notes>`)
+its attribute ``notes``.
 
 The profile must be loaded by the caller.
 """
@@ -44,7 +46,7 @@ _CSV_NAME = 'table.csv'
 
 #: The table and drops :func:`record_analysis` stores. Not calcfunction inputs:
 #: the table is what the analysis computed from them, not something it read.
-_PENDING: ContextVar[Tuple[bytes, List[List[str]]]] = ContextVar('_PENDING')
+_PENDING: ContextVar[Tuple[bytes, List[List[str]], List[str]]] = ContextVar('_PENDING')
 
 AnalysisLike = Union[Type[Analysis], Analysis]
 
@@ -72,9 +74,10 @@ def _from_csv(content: bytes) -> pd.DataFrame:
 def record_analysis(dataset, params):  # pylint: disable=unused-argument
     """The stored table of one analysis of ``dataset`` (the dataset's table
     ``Dict``) under ``params`` (``analysis``, ``version``, ``params``)."""
-    content, dropped = _PENDING.get()
+    content, dropped, notes = _PENDING.get()
     node = orm.SinglefileData(io.BytesIO(content), filename=_CSV_NAME)
     node.base.attributes.set('dropped', dropped)
+    node.base.attributes.set('notes', notes)
     return node
 
 
@@ -89,9 +92,11 @@ def _params_dict(params: Union[BaseModel, Mapping[str, Any], None]) -> Dict[str,
 def store_result(analysis: AnalysisLike, dataset: str,
                  params: Union[BaseModel, Mapping[str, Any], None],
                  table: pd.DataFrame, *,
-                 dropped: Sequence[Tuple[str, str]]) -> str:
+                 dropped: Sequence[Tuple[str, str]],
+                 notes: Sequence[str] = ()) -> str:
     """Store ``table`` as the result of ``analysis`` over ``dataset`` under
-    ``params``; return the result node's uuid.
+    ``params``, with its ``dropped`` pairs and ``notes``; return the result
+    node's uuid.
 
     Raises:
         LookupError: no dataset of that name.
@@ -101,7 +106,7 @@ def store_result(analysis: AnalysisLike, dataset: str,
     values = _params_dict(analysis.Params(**_params_dict(params)))
     digest = params_hash(values)
     pairs = [[str(uuid), str(reason)] for uuid, reason in dropped]
-    token = _PENDING.set((_to_csv(table), pairs))
+    token = _PENDING.set((_to_csv(table), pairs, [str(n) for n in notes]))
     try:
         node = record_analysis(
             dataset_table(dataset),
@@ -187,5 +192,6 @@ def run_analysis(name: str, dataset: str, params: Optional[dict] = None, *,
                              f'not {source.family!r} (dataset {dataset!r})')
         table = cls().compute(source, model)
         dropped = source.dropped
-    uuid = store_result(cls, dataset, values, table, dropped=dropped)
+        notes = list(getattr(source, 'notes', []))
+    uuid = store_result(cls, dataset, values, table, dropped=dropped, notes=notes)
     return _from_csv(orm.load_node(uuid).get_content(mode='rb'))

@@ -67,6 +67,12 @@ class RunSource:
             (str(r.point_uuid), str(r.verdict_status))
             for r in self.all_rows[~passed].itertuples()]
         self._fetch = fetch if fetch is not None else StoreFetcher()
+        #: The dataset the rows are (set by :meth:`from_dataset`; None otherwise),
+        #: for an analysis that reads another stored result of it.
+        self.dataset: Optional[str] = None
+        #: What an analysis records about its table beside the drops (a
+        #: column it left out and why); stored with the result.
+        self.notes: List[str] = []
 
     def __enter__(self) -> 'RunSource':
         return self
@@ -94,7 +100,9 @@ class RunSource:
         rows, _units = dataset_rows(name)
         excluded = _excluded_rows(dataset_table(name),
                                   {(r['calc_uuid'], r['point_uuid']) for r in rows})
-        return cls(pd.DataFrame(rows + excluded), None, StoreFetcher())
+        source = cls(pd.DataFrame(rows + excluded), None, StoreFetcher())
+        source.dataset = name
+        return source
 
     def frames(self, row: Any) -> Dict[str, pd.DataFrame]:
         """``tier -> DataFrame`` of one row's point."""
