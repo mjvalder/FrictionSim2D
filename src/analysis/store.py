@@ -7,7 +7,10 @@ in the Group ``friction2d/analyses/<dataset>``, with extras ``analysis``,
 ``version``, ``params_hash``, ``dataset``, ``n_rows`` and ``n_dropped``;
 the dropped ``(point_uuid, reason)`` pairs are its attribute ``dropped``, the
 analysis' notes (:attr:`RunSource.notes <src.analysis.source.RunSource.notes>`)
-its attribute ``notes``.
+its attribute ``notes``. The other stored results it read
+(:meth:`Analysis.depends_on <src.analysis.base.Analysis.depends_on>`) are
+inputs of the calcfunction, listed in its attribute ``depends`` (``name ->
+{uuid, version, params_hash}`` or None) and keyed in its extra ``depends``.
 
 The profile must be loaded by the caller.
 """
@@ -46,7 +49,8 @@ _CSV_NAME = 'table.csv'
 
 #: The table and drops :func:`record_analysis` stores. Not calcfunction inputs:
 #: the table is what the analysis computed from them, not something it read.
-_PENDING: ContextVar[Tuple[bytes, List[List[str]], List[str]]] = ContextVar('_PENDING')
+_PENDING: ContextVar[Tuple[bytes, List[List[str]], List[str], Optional[Dict[str, Any]]]] = \
+    ContextVar('_PENDING')
 
 AnalysisLike = Union[Type[Analysis], Analysis]
 
@@ -71,13 +75,16 @@ def _from_csv(content: bytes) -> pd.DataFrame:
 
 
 @calcfunction
-def record_analysis(dataset, params):  # pylint: disable=unused-argument
+def record_analysis(dataset, params, **depends):  # pylint: disable=unused-argument
     """The stored table of one analysis of ``dataset`` (the dataset's table
-    ``Dict``) under ``params`` (``analysis``, ``version``, ``params``)."""
-    content, dropped, notes = _PENDING.get()
+    ``Dict``) under ``params`` (``analysis``, ``version``, ``params``), from
+    the other stored results in ``depends``."""
+    content, dropped, notes, meta = _PENDING.get()
     node = orm.SinglefileData(io.BytesIO(content), filename=_CSV_NAME)
     node.base.attributes.set('dropped', dropped)
     node.base.attributes.set('notes', notes)
+    if meta is not None:
+        node.base.attributes.set('depends', meta)
     return node
 
 
@@ -89,14 +96,29 @@ def _params_dict(params: Union[BaseModel, Mapping[str, Any], None]) -> Dict[str,
     return dict(params)
 
 
+def depends_key(depends: Mapping[str, Any]) -> str:
+    """The extra ``depends`` of a result that read ``depends`` (name ->
+    node or None): the uuids as sorted-key JSON."""
+    return json.dumps({name: None if node is None else node.uuid
+                       for name, node in depends.items()}, sort_keys=True)
+
+
+def _depends_meta(node: Any) -> Optional[Dict[str, Any]]:
+    if node is None:
+        return None
+    return {'uuid': node.uuid, 'version': node.base.extras.get('version', None),
+            'params_hash': node.base.extras.get('params_hash', None)}
+
+
 def store_result(analysis: AnalysisLike, dataset: str,
                  params: Union[BaseModel, Mapping[str, Any], None],
                  table: pd.DataFrame, *,
                  dropped: Sequence[Tuple[str, str]],
-                 notes: Sequence[str] = ()) -> str:
+                 notes: Sequence[str] = (),
+                 depends: Optional[Mapping[str, Any]] = None) -> str:
     """Store ``table`` as the result of ``analysis`` over ``dataset`` under
-    ``params``, with its ``dropped`` pairs and ``notes``; return the result
-    node's uuid.
+    ``params``, with its ``dropped`` pairs and ``notes``, read from the stored
+    results ``depends`` (name -> node or None); return the result node's uuid.
 
     Raises:
         LookupError: no dataset of that name.
@@ -106,26 +128,33 @@ def store_result(analysis: AnalysisLike, dataset: str,
     values = _params_dict(analysis.Params(**_params_dict(params)))
     digest = params_hash(values)
     pairs = [[str(uuid), str(reason)] for uuid, reason in dropped]
-    token = _PENDING.set((_to_csv(table), pairs, [str(n) for n in notes]))
+    meta = ({name: _depends_meta(n) for name, n in depends.items()} if depends else None)
+    token = _PENDING.set((_to_csv(table), pairs, [str(n) for n in notes], meta))
     try:
         node = record_analysis(
             dataset_table(dataset),
             orm.Dict({'analysis': analysis.name, 'version': analysis.version,
                       'params': values}),
             # Never a cache hit: the table is not a function of the inputs.
-            metadata={'label': f'{analysis.name}:{dataset}', 'disable_cache': True})
+            metadata={'label': f'{analysis.name}:{dataset}', 'disable_cache': True},
+            **{name: n for name, n in (depends or {}).items() if n is not None})
     finally:
         _PENDING.reset(token)
-    node.base.extras.set_many({
-        'analysis': analysis.name, 'version': analysis.version, 'params_hash': digest,
-        'dataset': dataset, 'n_rows': int(len(table)), 'n_dropped': len(pairs)})
+    extras = {'analysis': analysis.name, 'version': analysis.version, 'params_hash': digest,
+              'dataset': dataset, 'n_rows': int(len(table)), 'n_dropped': len(pairs)}
+    if depends:
+        extras['depends'] = depends_key(depends)
+    node.base.extras.set_many(extras)
     group, _ = orm.Group.collection.get_or_create(f'{ANALYSIS_GROUP_PREFIX}{dataset}')
     group.add_nodes([node])
     return node.uuid
 
 
-def _find_node(name: str, dataset: str, digest: Optional[str], version: Optional[str]):
+def _find_node(name: str, dataset: str, digest: Optional[str], version: Optional[str],
+               depends: Optional[str] = None):
     filters: Dict[str, Any] = {'extras.analysis': name, 'extras.dataset': dataset}
+    if depends is not None:
+        filters['extras.depends'] = depends
     if digest is not None:
         filters['extras.params_hash'] = digest
     if version is not None:
@@ -168,7 +197,8 @@ def find_result(name: str, dataset: str, params_hash: Optional[str] = None,  # p
 def run_analysis(name: str, dataset: str, params: Optional[dict] = None, *,
                  force: bool = False) -> pd.DataFrame:
     """The table of analysis ``name`` over ``dataset``: the stored one with
-    the same name, version, params and dataset, else (or with ``force``)
+    the same name, version, params, dataset and read results
+    (:meth:`~src.analysis.base.Analysis.depends_on`), else (or with ``force``)
     computed from the dataset and stored. The table returned is the stored
     one read back, so a reuse and a fresh run return the same frame.
 
@@ -182,16 +212,20 @@ def run_analysis(name: str, dataset: str, params: Optional[dict] = None, *,
     model = cls.Params(**(params or {}))
     values = _params_dict(model)
     digest = params_hash(values)
+    depends = cls.depends_on(dataset)
     if not force:
-        node = _find_node(name, dataset, digest, cls.version)
+        node = _find_node(name, dataset, digest, cls.version,
+                          depends_key(depends) if depends else None)
         if node is not None:
             return _from_csv(node.get_content(mode='rb'))
     with RunSource.from_dataset(dataset) as source:
         if source.family not in cls.families:
             raise ValueError(f'{name} reads families {sorted(cls.families)}, '
                              f'not {source.family!r} (dataset {dataset!r})')
+        source.depends = depends
         table = cls().compute(source, model)
         dropped = source.dropped
         notes = list(getattr(source, 'notes', []))
-    uuid = store_result(cls, dataset, values, table, dropped=dropped, notes=notes)
+    uuid = store_result(cls, dataset, values, table, dropped=dropped, notes=notes,
+                        depends=depends)
     return _from_csv(orm.load_node(uuid).get_content(mode='rb'))

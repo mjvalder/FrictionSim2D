@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from importlib import import_module
-from typing import TYPE_CHECKING, ClassVar, Dict, FrozenSet, Literal, Tuple, Type
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, FrozenSet, Literal, Tuple, Type
 
 from pydantic import BaseModel
 
@@ -47,6 +47,14 @@ class Analysis(ABC):  # pylint: disable=too-few-public-methods
     @abstractmethod
     def compute(self, source: 'RunSource', params: BaseModel) -> 'pd.DataFrame':
         """The table of ``source`` under ``params`` (an instance of ``Params``)."""
+
+    @classmethod
+    def depends_on(cls, dataset: str) -> Dict[str, Any]:  # pylint: disable=unused-argument
+        """The other stored results of ``dataset`` this analysis reads, as
+        ``name -> result node`` (None: not stored). They are part of a
+        result's identity (a stored result is reused only while they are the
+        same) and are linked as inputs of the result. None by default."""
+        return {}
 
 
 #: name -> registered analysis class.

@@ -73,6 +73,9 @@ class RunSource:
         #: What an analysis records about its table beside the drops (a
         #: column it left out and why); stored with the result.
         self.notes: List[str] = []
+        #: The stored results the analysis reads (``Analysis.depends_on``), set
+        #: by :func:`~src.analysis.store.run_analysis`; None: look them up.
+        self.depends: Optional[Dict[str, Any]] = None
 
     def __enter__(self) -> 'RunSource':
         return self

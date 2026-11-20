@@ -25,14 +25,19 @@ def test_sliding_physics_without_contact_leaves_tau_out_with_a_note(store):  # n
     assert len(notes) == 1 and 'contact' in notes[0]
 
 
-def test_sliding_physics_joins_the_stored_contact(store):  # noqa: F811
+def _contact_table(first):
+    return pd.DataFrame([{'run_uuid': r, 'load': f, 'angle': 0.0, 'state': s,
+                          'contact_area': area}
+                         for r, f in zip(first['run_uuid'], first['load'])
+                         for s, area in (('load', 40.0 + f), ('final', 1.0))])
+
+
+def test_sliding_physics_recomputes_when_a_contact_result_appears(store):  # noqa: F811
     first = run_analysis('sliding_physics', 'paper', PERIOD)
-    contact = pd.DataFrame([{'run_uuid': r, 'load': f, 'angle': 0.0, 'state': s,
-                             'contact_area': area}
-                            for r, f in zip(first['run_uuid'], first['load'])
-                            for s, area in (('load', 40.0 + f), ('final', 1.0))])
-    store_result(get_analysis('contact'), 'paper', {}, contact, dropped=[])
-    table = run_analysis('sliding_physics', 'paper', PERIOD, force=True)
+    assert 'shear_strength_GPa' not in first.columns
+    contact_uuid = store_result(get_analysis('contact'), 'paper', {}, _contact_table(first),
+                                dropped=[])
+    table = run_analysis('sliding_physics', 'paper', PERIOD)      # no force
     by_load = table.set_index('load')
     for load in (30.0, 50.0):
         assert by_load.loc[load, 'contact_area_A2'] == 40.0 + load
@@ -40,4 +45,18 @@ def test_sliding_physics_joins_the_stored_contact(store):  # noqa: F811
             by_load.loc[load, 'lf_mean_nN'] / (40.0 + load) * 100.0)
     node = find_result_node('sliding_physics', 'paper')
     assert node.base.attributes.get('notes') == []
-    assert isinstance(orm.load_node(node.uuid), orm.SinglefileData)
+    contact = orm.load_node(contact_uuid)
+    assert node.base.attributes.get('depends') == {'contact': {
+        'uuid': contact_uuid, 'version': contact.base.extras.get('version'),
+        'params_hash': contact.base.extras.get('params_hash')}}
+    # the contact result is an input of the calcfunction that recorded this one
+    creator = node.creator
+    assert creator.inputs.contact.uuid == contact_uuid
+    # unchanged inputs: reused, not recomputed
+    again = run_analysis('sliding_physics', 'paper', PERIOD)
+    assert find_result_node('sliding_physics', 'paper').uuid == node.uuid
+    pd.testing.assert_frame_equal(again, table)
+    # a newer contact result: recomputed again
+    store_result(get_analysis('contact'), 'paper', {}, _contact_table(first), dropped=[])
+    run_analysis('sliding_physics', 'paper', PERIOD)
+    assert find_result_node('sliding_physics', 'paper').uuid != node.uuid

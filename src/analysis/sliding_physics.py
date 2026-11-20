@@ -15,14 +15,21 @@ source), on the window tier (and, for ``e_int_rel``, the peratom tier):
   :62), ``e_int_rel`` (:129);
 - phenomena (``taxlib/phenomena.py``): ``cof_se`` (``_se`` :18-23),
   ``superlubric_margin`` (:60), ``lattice_periodicity`` (``_periodicity`` :26-38).
+  ``superlubric_margin`` is computed as |mean lf| / its block standard error:
+  taxlib's |cof_mean| / cof_se with the load cancelled, so it is defined where
+  ``F_N_nN`` is NaN (a pressure-loaded sheet run) and cof_mean, cof_se are not.
 
 Units: forces nN, lengths A, energies eV, K in nN/A, T in K, stress GPa.
 
 The shear strength ``shear_strength_GPa`` = ``lf_mean_nN`` / ``contact_area_A2``
-is a join with the ``contact`` result stored for the same dataset (its
-``load`` state, matched on ``run_uuid``, ``load`` and ``angle``). Without one
-the two columns are left out and the result carries a note; contact is never
-computed here.
+is a join with the newest ``contact`` result stored for the same dataset
+(its ``load`` state, matched on ``run_uuid``, ``load`` and ``angle``; a run
+with no matching row is NaN with a ``nan_reason``). That result is part of
+this one's identity (:meth:`SlidingPhysics.depends_on`): it is linked as an
+input, and a stored sliding_physics result is reused only while it is the
+same one. Without one the two columns are left out and the result carries a
+note; contact is never computed here. Contact is AFM-only (tip-sheet), so a
+sheet-on-sheet result never has them.
 
 The sheet-on-sheet family has no tip: a value that reads a tip channel
 (``tipx``, ``tipz``, ``w_thermostat_tip``/``_sub``, ``E_int_tip_sheet``) is NaN
@@ -79,6 +86,9 @@ NO_WINDOW = 'no_window_tier'
 #: The note of a result over a dataset with no stored ``contact`` result.
 NO_CONTACT_NOTE = ('shear_strength_GPa, contact_area_A2: left out -- no stored contact '
                    'result for dataset {dataset!r} (run `analyse contact` first)')
+#: The note of a sheet-on-sheet result.
+SHEET_CONTACT_NOTE = ('shear_strength_GPa, contact_area_A2: left out -- contact is AFM-only '
+                      '(tip-sheet contact), so a sheetonsheet dataset has none')
 
 NAN = float('nan')
 
@@ -368,21 +378,47 @@ def run_values(family: str, frames: Dict[str, pd.DataFrame], row: Any,
     return out.values
 
 
-def _find_contact(name: str, dataset: str) -> Optional[pd.DataFrame]:
-    """The stored ``contact`` table of ``dataset``, or None."""
-    from .store import find_result  # pylint: disable=import-outside-toplevel
-    return find_result(name, dataset)
+def contact_result(dataset: str) -> Any:
+    """The newest stored ``contact`` result node of ``dataset``, or None."""
+    from .store import find_result_node  # pylint: disable=import-outside-toplevel
+    return find_result_node('contact', dataset)
+
+
+def _node_table(node: Any) -> pd.DataFrame:
+    from .store import _from_csv  # pylint: disable=import-outside-toplevel,protected-access
+    return _from_csv(node.get_content(mode='rb'))
+
+
+CONTACT_KEYS = ('run_uuid', 'load', 'angle')
 
 
 def join_contact(table: pd.DataFrame, contact: pd.DataFrame) -> pd.DataFrame:
     """``contact_area_A2`` of the matching ``load``-state contact row and
-    ``shear_strength_GPa`` = ``lf_mean_nN`` / it."""
-    keys = ['run_uuid', 'load', 'angle']
+    ``shear_strength_GPa`` = ``lf_mean_nN`` / it; a row with no match (or no
+    contact area) gets a ``nan_reason``.
+
+    Raises:
+        ValueError: the contact table has two ``load`` rows for one
+            ``(run_uuid, load, angle)``.
+    """
+    keys = list(CONTACT_KEYS)
     loaded = contact[contact['state'] == 'load'][keys + ['contact_area']]
-    loaded = loaded.drop_duplicates(keys).rename(columns={'contact_area': 'contact_area_A2'})
+    duplicated = loaded[loaded.duplicated(keys, keep=False)]
+    if not duplicated.empty:
+        raise ValueError(f'contact result has duplicate load rows for '
+                         f'{sorted(set(map(tuple, duplicated[keys].to_numpy().tolist())))}')
+    loaded = loaded.rename(columns={'contact_area': 'contact_area_A2'})
     out = table.merge(loaded, on=keys, how='left')
-    out['shear_strength_GPa'] = [shear_strength_gpa(lf, area) for lf, area in
-                                 zip(out['lf_mean_nN'], out['contact_area_A2'].astype(float))]
+    areas = out['contact_area_A2'].astype(float)
+    out['shear_strength_GPa'] = [shear_strength_gpa(lf, area)
+                                 for lf, area in zip(out['lf_mean_nN'], areas)]
+    reasons = []
+    for reason, area in zip(out['nan_reason'].fillna(''), areas):
+        extra = ('shear_strength_GPa: no contact row for (run_uuid, load, angle)'
+                 if np.isnan(area) else
+                 'shear_strength_GPa: no contact area' if area <= 0 else '')
+        reasons.append('; '.join(r for r in (reason, extra) if r))
+    out['nan_reason'] = reasons
     return out
 
 
@@ -392,10 +428,15 @@ class SlidingPhysics(Analysis):  # pylint: disable=too-few-public-methods
     strength from a stored contact result."""
 
     name = 'sliding_physics'
-    version = '1'
+    version = '2'
     level = 'run'
     families = frozenset({'afm', 'sheetonsheet'})
     Params = SlidingPhysicsParams
+
+    @classmethod
+    def depends_on(cls, dataset: str) -> Dict[str, Any]:
+        """The newest stored ``contact`` result of ``dataset`` (None: none)."""
+        return {'contact': contact_result(dataset)}
 
     def compute(self, source, params) -> pd.DataFrame:
         """One row per pass run at ``angle``; a run with no window tier is
@@ -421,8 +462,20 @@ class SlidingPhysics(Analysis):  # pylint: disable=too-few-public-methods
             out.append({**summary_identity(row),
                         **run_values(source.family, frames, row, source.run_fields(row), a)})
         table = pd.DataFrame(out)
+        return self._join(source, table)
+
+    def _join(self, source, table: pd.DataFrame) -> pd.DataFrame:
+        """``table`` with the shear strength of the contact result the
+        source was handed (``source.depends``), else looked up for its dataset."""
+        if source.family == 'sheetonsheet':
+            source.notes.append(SHEET_CONTACT_NOTE)
+            return table
+        depends = getattr(source, 'depends', None)
         dataset = getattr(source, 'dataset', None)
-        contact = _find_contact('contact', dataset) if dataset is not None else None
+        if depends is None:
+            depends = self.depends_on(dataset) if dataset is not None else {}
+        node = depends.get('contact')
+        contact = None if node is None else _node_table(node)
         if contact is None or contact.empty:
             source.notes.append(NO_CONTACT_NOTE.format(dataset=dataset))
         elif not table.empty:

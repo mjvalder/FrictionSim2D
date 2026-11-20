@@ -3,6 +3,7 @@ features and phenomena (`taxlib/scales.py`, `physics.py:54-62`,
 `features.py:58-129`, `phenomena.py:18-60`), each formula on synthetic arrays
 with a known answer, then the analysis over a fake fetcher."""
 import math
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -44,7 +45,7 @@ def test_sigma_th_and_friction_work():
     assert sp.friction_work(np.full(10, 2.0), 10.0) == pytest.approx(20.0 / EV)
 
 
-def test_energy_residual_is_zero_for_a_balanced_run_and_scaled_otherwise():
+def test_energy_residual_of_a_balanced_run_keeps_the_first_drive_step_and_is_scaled():
     n, dx, k, f_n = 200, 0.02, 1.0, 10.0
     lfx = np.linspace(0.5, 1.5, n)
     tipz = 5.0 - 0.001 * np.arange(n)
@@ -175,10 +176,13 @@ def _row(uuid, family='afm', load=10.0, status='complete', angle=0.0, **extra):
             'temperature': 300.0, 'load_achieved': None, **extra}
 
 
-def _sliding(rows, frames, family='afm', fields=None, dataset=None, **params):
+def _sliding(rows, frames, family='afm', fields=None, dataset=None, depends=None,
+             **params):
     cls = get_analysis('sliding_physics')
     source = RunSource(pd.DataFrame(rows), family, fetch=_Fetch(frames, fields))
     source.dataset = dataset
+    if depends is not None:
+        source.depends = depends
     params.setdefault('period_x', {'h_MoS2': 3.0})
     return cls().compute(source, cls.Params(**params)), source
 
@@ -226,22 +230,54 @@ def test_sliding_physics_lattice_a_from_taxlib_a():
     assert table.iloc[0]['a_A'] == 3.16
 
 
-def test_sliding_physics_joins_shear_strength_from_a_stored_contact(monkeypatch):
-    contact = pd.DataFrame([
-        {'run_uuid': 'r-p1', 'load': 10.0, 'angle': 0.0, 'state': 'load', 'contact_area': 50.0},
-        {'run_uuid': 'r-p1', 'load': 10.0, 'angle': 0.0, 'state': 'final', 'contact_area': 99.0}])
-    seen = []
+def _contact_node(rows):
+    """A stand-in for a stored contact result node: uuid, extras, CSV content."""
+    content = pd.DataFrame(rows).to_csv(index=False).encode('utf-8')
+    extras = {'version': '1', 'params_hash': 'abc'}
+    return SimpleNamespace(uuid='contact-uuid', base=SimpleNamespace(
+        extras=SimpleNamespace(get=lambda key, default=None: extras.get(key, default))),
+        get_content=lambda mode='rb': content)
 
-    def fake_find(name, dataset):
-        seen.append((name, dataset))
-        return contact
-    monkeypatch.setattr(sp, '_find_contact', fake_find)
-    table, source = _sliding([_row('p1')], {'p1': _afm_frames()}, dataset='paper')
-    assert seen == [('contact', 'paper')]
-    row = table.iloc[0]
-    assert row['contact_area_A2'] == 50.0
-    assert row['shear_strength_GPa'] == pytest.approx(row['lf_mean_nN'] / 50.0 * 100.0)
+
+def _contact_row(run, load, state='load', area=50.0, angle=0.0):
+    return {'run_uuid': run, 'load': load, 'angle': angle, 'state': state, 'contact_area': area}
+
+
+def test_sliding_physics_joins_shear_strength_from_a_stored_contact():
+    node = _contact_node([_contact_row('r-p1', 10.0),
+                          _contact_row('r-p1', 10.0, state='final', area=99.0)])
+    table, source = _sliding([_row('p1'), _row('p2', load=20.0)],
+                             {'p1': _afm_frames(), 'p2': _afm_frames()},
+                             depends={'contact': node})
+    by_load = table.set_index('load')
+    assert by_load.loc[10.0, 'contact_area_A2'] == 50.0
+    assert by_load.loc[10.0, 'shear_strength_GPa'] == pytest.approx(
+        by_load.loc[10.0, 'lf_mean_nN'] / 50.0 * 100.0)
+    assert 'shear_strength_GPa' not in by_load.loc[10.0, 'nan_reason']
+    # no contact row for (r-p2, 20 nN, 0 deg): NaN with its reason
+    assert np.isnan(by_load.loc[20.0, 'shear_strength_GPa'])
+    assert 'shear_strength_GPa: no contact row' in by_load.loc[20.0, 'nan_reason']
     assert source.notes == []
+
+
+def test_sliding_physics_looks_the_contact_up_when_not_handed_one(monkeypatch):
+    seen = []
+    node = _contact_node([_contact_row('r-p1', 10.0)])
+
+    def fake(dataset):
+        seen.append(dataset)
+        return node
+    monkeypatch.setattr(sp, 'contact_result', fake)
+    table, _ = _sliding([_row('p1')], {'p1': _afm_frames()}, dataset='paper')
+    assert seen == ['paper'] and table.iloc[0]['contact_area_A2'] == 50.0
+
+
+def test_join_contact_refuses_duplicate_contact_rows():
+    table = pd.DataFrame([{'run_uuid': 'r', 'load': 10.0, 'angle': 0.0, 'lf_mean_nN': 1.0,
+                           'nan_reason': ''}])
+    contact = pd.DataFrame([_contact_row('r', 10.0, area=50.0), _contact_row('r', 10.0, area=60.0)])
+    with pytest.raises(ValueError, match='duplicate'):
+        sp.join_contact(table, contact)
 
 
 def test_sliding_physics_sheet_tip_values_are_nan_with_a_reason():
@@ -255,7 +291,8 @@ def test_sliding_physics_sheet_tip_values_are_nan_with_a_reason():
     assert 'no tip' in row['nan_reason']
     for col in ('sigma_th_nN', 'W_fric_eV', 'cof_se', 'superlubric_margin', 'lf_mean_nN'):
         assert np.isfinite(row[col]), col
-    assert source.notes and 'shear_strength_GPa' not in table.columns
+    assert 'shear_strength_GPa' not in table.columns
+    assert len(source.notes) == 1 and 'AFM-only' in source.notes[0]
 
 
 def test_sliding_physics_sheet_pressure_load_has_no_f_n():
