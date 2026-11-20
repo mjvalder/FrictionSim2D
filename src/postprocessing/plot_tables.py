@@ -11,9 +11,10 @@ default CSV parser can be 1 ulp off the written value.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -50,22 +51,34 @@ def _load_aiida_profile(what: str) -> None:
     load_aiida_profile()
 
 
-def analysis_table(name: str, dataset: str, version: Any = None) -> pd.DataFrame:
-    """The newest stored table of analysis ``name`` over ``dataset``.
+def analysis_table(name: str, dataset: str, version: Any = None,
+                   params: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
+    """The newest stored table of analysis ``name`` over ``dataset`` under
+    exactly ``params`` (none: the analysis' defaults), as ``analyse run``
+    hashes them.
 
     Never computed here: a missing result raises naming the command that
-    computes it.
+    computes it; results stored only under other params raise naming them.
     """
     _load_aiida_profile(f'analysis {name}')
     # pylint: disable=import-outside-toplevel
     from ..analysis import catalogue  # noqa: F401  # pylint: disable=unused-import
     from ..analysis import store
-    table = store.find_result(name, dataset, version=version)
-    if table is None:
+    try:
+        node = store.select_result_node(name, dataset, params, version=version)
+    except (LookupError, ValueError) as exc:
+        raise PlotDataError(str(exc.args[0] if exc.args else exc)) from exc
+    if node is None:
         at = '' if version is None else f' (version {version})'
+        flags = ''.join(f' --param {k}={_param_text(v)}' for k, v in sorted((params or {}).items()))
         raise PlotDataError(f"no stored {name} over {dataset}{at}; run: "
-                            f"FrictionSim2D analyse run {name} {dataset}")
-    return table
+                            f"FrictionSim2D analyse run {name} {dataset}{flags}")
+    return store._from_csv(node.get_content(mode='rb'))  # pylint: disable=protected-access
+
+
+def _param_text(value: Any) -> str:
+    """A param value as ``--param`` takes it: JSON for a list or dict."""
+    return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
 
 
 def load_table(source: Any, base_dir: Path, required: Sequence[str] = ()) -> pd.DataFrame:
@@ -76,7 +89,7 @@ def load_table(source: Any, base_dir: Path, required: Sequence[str] = ()) -> pd.
     """
     source = _as_source(source)
     if source.analysis is not None:
-        table = analysis_table(source.analysis, source.dataset, source.version)
+        table = analysis_table(source.analysis, source.dataset, source.version, source.params)
         name = f'{source.analysis} over {source.dataset}'
     else:
         path = Path(source.file)

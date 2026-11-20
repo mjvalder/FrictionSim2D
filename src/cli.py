@@ -1734,15 +1734,15 @@ def _analysis_or_abort(name: str):
 
 
 def _stored_or_abort(name: str, dataset: str, profile: Optional[str], params=None):
-    """The newest stored result node of ``name`` over ``dataset``."""
+    """The newest stored result node of ``name`` over ``dataset`` under
+    exactly ``params`` (none: the defaults)."""
     from .aiida import load_aiida_profile  # noqa: PLC0415
     from .analysis import store  # noqa: PLC0415
-    from .analysis.base import get_analysis  # noqa: PLC0415
     load_aiida_profile(profile)
-    digest = None
-    if params is not None:
-        digest = store.params_hash(get_analysis(name).Params(**params).model_dump(mode='json'))
-    node = store.find_result_node(name, dataset, digest)
+    try:
+        node = store.select_result_node(name, dataset, params)
+    except (LookupError, ValueError) as exc:
+        raise click.ClickException(str(exc.args[0] if exc.args else exc)) from exc
     if node is None:
         raise click.ClickException(f"no stored result of {name} over {dataset}; "
                                    f"run: FrictionSim2D analyse run {name} {dataset}")
@@ -1778,15 +1778,14 @@ def analyse_run(name: str, dataset: str, params: Tuple[str, ...], force: bool,
     values = _parse_params(_analysis_or_abort(name), params)
     try:
         load_aiida_profile(profile)
-        table = store.run_analysis(name, dataset, values, force=force)
-        node = _stored_or_abort(name, dataset, profile, values)
+        node = store.result_node(name, dataset, values, force=force)
     except click.ClickException:
         raise
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Analysis failed")
         _raise_abort(f"❌ Analysis failed: {exc}", exc)
     extras = node.base.extras.all
-    click.echo(f"rows: {len(table)}")
+    click.echo(f"rows: {extras.get('n_rows', 0)}")
     click.echo(f"dropped: {extras.get('n_dropped', 0)}")
     click.echo(f"uuid: {node.uuid}")
 
@@ -1795,13 +1794,17 @@ def analyse_run(name: str, dataset: str, params: Tuple[str, ...], force: bool,
 @click.argument('name')
 @click.argument('dataset')
 @click.option('--rows', default=10, show_default=True, help='Rows of the table to print.')
+@click.option('--param', 'params', multiple=True, metavar='NAME=VALUE',
+              help='Parameter the result was run with (repeatable; default: the defaults).')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def analyse_show(name: str, dataset: str, rows: int, profile: Optional[str]):
+def analyse_show(name: str, dataset: str, rows: int, params: Tuple[str, ...],
+                 profile: Optional[str]):
     """Print the stored result of NAME over DATASET: metadata and head."""
     import io  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
-    node = _stored_or_abort(name, dataset, profile)
+    node = _stored_or_abort(name, dataset, profile,
+                            _parse_params(_analysis_or_abort(name), params))
     click.echo(f"uuid: {node.uuid}")
     for key, value in sorted(node.base.extras.all.items()):
         click.echo(f"{key}: {value}")
@@ -1813,11 +1816,15 @@ def analyse_show(name: str, dataset: str, rows: int, profile: Optional[str]):
 @click.argument('name')
 @click.argument('dataset')
 @click.argument('out', type=click.Path(dir_okay=False, path_type=Path))
+@click.option('--param', 'params', multiple=True, metavar='NAME=VALUE',
+              help='Parameter the result was run with (repeatable; default: the defaults).')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def analyse_export(name: str, dataset: str, out: Path, profile: Optional[str]):
+def analyse_export(name: str, dataset: str, out: Path, params: Tuple[str, ...],
+                   profile: Optional[str]):
     """Write the stored result of NAME over DATASET to OUT (CSV)."""
-    node = _stored_or_abort(name, dataset, profile)
+    node = _stored_or_abort(name, dataset, profile,
+                            _parse_params(_analysis_or_abort(name), params))
     out.write_bytes(node.get_content(mode='rb'))
     click.echo(f"wrote {out}")
 

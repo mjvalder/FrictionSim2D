@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -50,38 +49,8 @@ class PlotSummaryMixin(PlotterMixinBase):
         data_cache: dict[str, dict] = {}
 
         for series in external_series:
-            file_path = series.get('file')
-            if not file_path:
-                logger.warning("External series missing 'file' path. Skipping.")
-                continue
-
-            resolved_path = self._resolve_aux_file_path(str(file_path))
-            cache_key = str(resolved_path)
-            if cache_key not in data_cache:
-                try:
-                    with open(resolved_path, 'r', encoding='utf-8') as f:
-                        data_cache[cache_key] = json.load(f)
-                except (IOError, json.JSONDecodeError) as e:
-                    logger.warning(
-                        "Could not load external data from %s: %s",
-                        resolved_path,
-                        e,
-                    )
-                    continue
-
-            data = data_cache[cache_key]
-            for key in series.get('path', []):
-                if isinstance(data, dict) and key in data:
-                    data = data[key]
-                else:
-                    logger.warning(
-                        "External data path not found: %s",
-                        series.get('path'),
-                    )
-                    data = None
-                    break
-
-            if not isinstance(data, dict):
+            data = self._external_series_payload(series, data_cache)
+            if data is None:
                 continue
 
             x_key = series.get('x_key')
@@ -706,34 +675,8 @@ class PlotSummaryMixin(PlotterMixinBase):
 
         data_cache: dict[str, dict] = {}
         for series in plot_config.get('external_series', []):
-            file_path = series.get('file')
-            if not file_path:
-                color_idx += 1
-                continue
-
-            resolved_path = self._resolve_aux_file_path(str(file_path))
-            cache_key = str(resolved_path)
-            if cache_key not in data_cache:
-                try:
-                    with open(resolved_path, 'r', encoding='utf-8') as f:
-                        data_cache[cache_key] = json.load(f)
-                except (IOError, json.JSONDecodeError) as e:
-                    logger.warning(
-                        "Could not load external data '%s': %s",
-                        resolved_path,
-                        e,
-                    )
-                    color_idx += 1
-                    continue
-
-            data = data_cache[cache_key]
-            for key in series.get('path', []):
-                if isinstance(data, dict) and key in data:
-                    data = data[key]
-                else:
-                    data = None
-                    break
-            if not isinstance(data, dict):
+            data = self._external_series_payload(series, data_cache)
+            if data is None:
                 color_idx += 1
                 continue
 

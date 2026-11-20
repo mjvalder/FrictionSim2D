@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 from typing_extensions import Annotated
@@ -53,6 +53,9 @@ class ExternalSeries(BaseModel):
         None, description='JSON file, relative to the document')
     path: Optional[List[str]] = Field(
         None, description='Key path into that JSON')
+    dataset: Optional[str] = Field(
+        None, description='Instead of file: a data_dirs label read from the store; the '
+                          'series is its rows\' mean x_key/y_key per load, no plot filter')
     x_key: Optional[str] = None
     y_key: Optional[str] = None
     label: Optional[str] = None
@@ -66,6 +69,14 @@ class ExternalSeries(BaseModel):
     fit_line_style: Optional[str] = Field(None, description="Fit line style (default '--')")
     solid: Optional[bool] = Field(
         None, description='cof_histogram: draw filled like a dataset (this work), not hollow')
+
+    @model_validator(mode='after')
+    def _one_source(self):
+        if self.file is not None and self.dataset is not None:
+            raise ValueError('an external series names a file or dataset, not both')
+        if self.dataset is not None and self.path:
+            raise ValueError('path goes only with a file')
+        return self
 
 
 class SourceSpec(BaseModel):
@@ -340,8 +351,10 @@ class TableSource(BaseModel):
     Exactly one of ``file`` (a CSV, resolved like external-series files) or
     ``analysis`` (a stored result of that analysis over ``dataset``, the
     newest one of ``version`` -- by default the registered analysis' current
-    version). The plotter never computes an analysis: run it first with
-    ``FrictionSim2D analyse run <analysis> <dataset>``.
+    version -- under exactly ``params``, by default the analysis' defaults;
+    they are hashed as ``analyse run`` hashes them). The plotter never
+    computes an analysis: run it first with
+    ``FrictionSim2D analyse run <analysis> <dataset> [--param k=v ...]``.
     """
     model_config = _FORBID
 
@@ -349,6 +362,8 @@ class TableSource(BaseModel):
     analysis: Optional[str] = Field(None, description='Stored analysis result, by name')
     dataset: Optional[str] = Field(None, description='Dataset the analysis ran over')
     version: Optional[str] = Field(None, description="Analysis version (default: current)")
+    params: Optional[Dict[str, Any]] = Field(
+        None, description="The analysis' params the result was run with (default: its defaults)")
 
     @model_validator(mode='before')
     @classmethod
@@ -361,8 +376,8 @@ class TableSource(BaseModel):
             raise ValueError('a table source names exactly one of file or analysis')
         if self.analysis is not None and not self.dataset:
             raise ValueError(f'analysis {self.analysis!r} needs dataset')
-        if self.file is not None and (self.dataset or self.version):
-            raise ValueError('dataset and version go only with an analysis')
+        if self.file is not None and (self.dataset or self.version or self.params):
+            raise ValueError('dataset, version and params go only with an analysis')
         return self
 
     @model_serializer(mode='wrap')

@@ -11,6 +11,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -376,16 +377,22 @@ class PlotCommonMixin(PlotterMixinBase):
                 self._dataset_to_summary_rows(label, rows))
 
     def _load_analysis_label(self, label: str, uri: str) -> None:
-        """The summary rows of ``aiida://analysis/<name>/<dataset>``: the
-        stored table of a summary-shaped analysis (``period_summary``), never
+        """The summary rows of ``aiida://analysis/<name>/<dataset>[?k=v&...]``:
+        the stored table of a summary-shaped analysis (``period_summary``)
+        under exactly the query's params (none: the defaults), never
         computed here."""
         from .plot_tables import analysis_table  # pylint: disable=import-outside-toplevel
-        name, sep, dataset = uri[len(ANALYSIS_URI):].partition('/')
+        path, _, query = uri[len(ANALYSIS_URI):].partition('?')
+        name, sep, dataset = path.partition('/')
         if not (name and sep and dataset) or '/' in dataset:
             raise PlotDataError(
-                f"{label}: {uri} -- expected `{ANALYSIS_URI}<name>/<dataset>`")
+                f"{label}: {uri} -- expected `{ANALYSIS_URI}<name>/<dataset>[?k=v&...]`")
         try:
-            table = analysis_table(name, dataset)
+            params = dict(parse_qsl(query, keep_blank_values=True,
+                                    strict_parsing=True)) if query else {}
+            table = analysis_table(name, dataset, params=params)
+        except ValueError as exc:
+            raise PlotDataError(f"{label}: {uri} -- bad params: {exc}") from exc
         except PlotDataError as exc:
             raise PlotDataError(f"{label}: {exc}") from exc
         self._db_summary_rows.extend(
@@ -436,21 +443,29 @@ class PlotCommonMixin(PlotterMixinBase):
         except LookupError as exc:
             raise PlotDataError(f"{label}: {exc}") from exc
 
-    #: plot_config key -> run key, for the filters a dataset's rows are cut
-    #: down by before any frame is read.
-    _DATASET_PREFILTERS = {'filter_materials': 'id', 'filter_forces': 'force',
-                           'force': 'force', 'pressures': 'pressure',
-                           'filter_pressures': 'pressure', 'angle': 'angle',
+    #: plot_config key(s) -> run key, for the filters a dataset's rows are cut
+    #: down by before any frame is read. A tuple is read as the plots read
+    #: it: the first key set wins (`filter_forces or force`).
+    _DATASET_PREFILTERS = {'filter_materials': 'id', ('filter_forces', 'force'): 'force',
+                           ('pressures', 'filter_pressures'): 'pressure', 'angle': 'angle',
                            'filter_layer': 'layer', 'filter_speed': 'speed',
                            'filter_tip_radius': 'tip_radius'}
+    #: Run keys `plot_all_forces` lifts (plot_timeseries: every load is plotted).
+    _ALL_FORCES_LIFTS = frozenset({'force', 'pressure'})
 
     @classmethod
     def _row_may_match(cls, row: dict, plot_config: dict) -> bool:
         """False only when a filter the plot sets explicitly rules the row out
         -- the same matching as the plots' own run filters, so the rows kept
         are always a superset of the runs the plot selects."""
-        for key, run_key in cls._DATASET_PREFILTERS.items():
-            value = plot_config.get(key)
+        lifted = cls._ALL_FORCES_LIFTS if plot_config.get('plot_all_forces') else frozenset()
+        for keys, run_key in cls._DATASET_PREFILTERS.items():
+            if run_key in lifted:
+                continue
+            keys = keys if isinstance(keys, tuple) else (keys,)
+            value = plot_config.get(keys[0])
+            for key in keys[1:]:
+                value = value or plot_config.get(key)
             if value is None:
                 continue
             have = row.get(run_key)
@@ -1224,6 +1239,63 @@ class PlotCommonMixin(PlotterMixinBase):
     # =====================================================================
     # SUMMARY PLOT
     # =====================================================================
+
+    def _dataset_series_data(self, series: dict) -> dict:
+        """``{x_key: [...], y_key: [...]}`` of the external series whose
+        ``dataset`` names a plot label read from the store: the mean of each
+        key over that label's summary rows at each load, by increasing load.
+        None of the plot's filters apply (the label's rows are the series),
+        as in ``provenance_scripts/make_cof_histogram_mlip.py`` (``load_points``).
+
+        Raises:
+            PlotDataError: the label has no summary rows, or they lack a key.
+        """
+        label = series['dataset']
+        x_key, y_key = series.get('x_key'), series.get('y_key')
+        rows = [r for r in self._db_summary_rows if r.get('dataset_label') == label]
+        if not rows:
+            raise PlotDataError(
+                f"external series {series.get('label', label)!r}: no summary rows for "
+                f"the label {label!r}; name a data_dirs label read from the store")
+        frame = pd.DataFrame(rows)
+        missing = [k for k in (x_key, y_key, 'load') if not k or k not in frame.columns]
+        if missing:
+            raise PlotDataError(
+                f"external series {series.get('label', label)!r}: the rows of {label!r} "
+                f"lack {missing}")
+        means = frame.groupby('load', sort=True)[[x_key, y_key]].mean()
+        return {x_key: means[x_key].astype(float).tolist(),
+                y_key: means[y_key].astype(float).tolist()}
+
+    def _external_series_payload(self, series: dict, cache: dict) -> dict | None:
+        """The ``{key: values}`` mapping an external series reads its
+        ``x_key``/``y_key`` from: its ``dataset``'s per-load means
+        (:meth:`_dataset_series_data`), else the ``path`` into its JSON
+        ``file`` (read once per file into ``cache``). None, logged, when the
+        file or path is missing."""
+        if series.get('dataset'):
+            return self._dataset_series_data(series)
+        file_path = series.get('file')
+        if not file_path:
+            logger.warning("External series names no 'file' or 'dataset'. Skipping.")
+            return None
+        resolved_path = self._resolve_aux_file_path(str(file_path))
+        cache_key = str(resolved_path)
+        if cache_key not in cache:
+            try:
+                with open(resolved_path, 'r', encoding='utf-8') as f:
+                    cache[cache_key] = json.load(f)
+            except (IOError, json.JSONDecodeError) as e:
+                logger.warning("Could not load external data from %s: %s", resolved_path, e)
+                return None
+        data = cache[cache_key]
+        for key in series.get('path', []):
+            if isinstance(data, dict) and key in data:
+                data = data[key]
+            else:
+                logger.warning("External data path not found: %s", series.get('path'))
+                return None
+        return data if isinstance(data, dict) else None
 
     def _load_external_json(
         self, source_config: dict,

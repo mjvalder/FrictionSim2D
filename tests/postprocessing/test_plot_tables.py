@@ -206,16 +206,21 @@ def no_profile(monkeypatch):
 
 @pytest.fixture
 def stored(monkeypatch, no_profile):
-    """`find_result` over a dict of ``(name, dataset) -> table``."""
+    """`select_result_node` over a dict of ``(name, dataset) -> table``."""
+    from types import SimpleNamespace  # pylint: disable=import-outside-toplevel
+
     from src.analysis import store  # pylint: disable=import-outside-toplevel
     tables, calls = {}, []
 
-    def find(name, dataset, params_hash=None, version=None):
+    def select(name, dataset, params=None, version=None):
         calls.append((name, dataset, version))
         table = tables.get((name, dataset))
-        return None if table is None else table.copy()
+        if table is None:
+            return None
+        content = store._to_csv(table)  # pylint: disable=protected-access
+        return SimpleNamespace(get_content=lambda mode='rb': content)
 
-    monkeypatch.setattr(store, 'find_result', find)
+    monkeypatch.setattr(store, 'select_result_node', select)
     tables['calls'] = calls
     return tables
 
@@ -224,7 +229,7 @@ def test_table_source_takes_a_file_or_an_analysis():
     source = TableSource(analysis='cof_ranking', dataset='paper')
     assert source.file is None and source.analysis == 'cof_ranking'
     assert source.model_dump() == {'file': None, 'analysis': 'cof_ranking',
-                                   'dataset': 'paper', 'version': None}
+                                   'dataset': 'paper', 'version': None, 'params': None}
     assert TableSource.model_validate(source.model_dump()) == source
     assert TableSource(file='x.csv').model_dump() == 'x.csv', 'a file source stays a bare path'
     with pytest.raises(ValueError, match='exactly one of file or analysis'):

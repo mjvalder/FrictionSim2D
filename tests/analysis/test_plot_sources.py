@@ -51,7 +51,8 @@ def test_analysis_data_source_feeds_summary_rows(store, tmp_path):  # noqa: F811
     assert sorted(stored['force']) == [30.0, 50.0]
     assert 'dataset_label' not in stored
 
-    plotter = Plotter(data_dirs=['aiida://analysis/period_summary/paper'],
+    plotter = Plotter(data_dirs=['aiida://analysis/period_summary/paper'
+                                 '?period_x={"h_MoS2":3.16}'],
                       labels=['periods'], output_dir=str(tmp_path / 'plots'))
     frame = plotter._get_summary_data_df()  # pylint: disable=protected-access
 
@@ -63,3 +64,43 @@ def test_analysis_data_source_feeds_summary_rows(store, tmp_path):  # noqa: F811
     plotter.generate_plot({'plot_type': 'summary', 'filename': 'cof.png',
                            'x_axis': 'force', 'y_axis': 'cof'})
     assert (tmp_path / 'plots' / 'cof.png').is_file()
+
+
+def _probe_table(value):
+    return pd.DataFrame({'material': ['A'], 'eligible': [True], 'value': [value]})
+
+
+def test_table_source_selects_by_params(store, probe, tmp_path):  # noqa: F811
+    store_result(probe, 'paper', {}, _probe_table(1.0), dropped=[])
+    store_result(probe, 'paper', {'scale': 2.0}, _probe_table(2.0), dropped=[])   # newest
+
+    default = load_table(TableSource(analysis='probe', dataset='paper'), tmp_path)
+    scaled = load_table({'analysis': 'probe', 'dataset': 'paper', 'params': {'scale': 2}},
+                        tmp_path)
+    assert list(default['value']) == [1.0]
+    assert list(scaled['value']) == [2.0]
+    with pytest.raises(ValueError, match='params'):
+        TableSource(file='x.csv', params={'scale': 2})
+
+
+def test_table_source_refuses_when_only_other_params_are_stored(store, probe, tmp_path):  # noqa: F811,E501
+    store_result(probe, 'paper', {'scale': 2.0}, _probe_table(2.0), dropped=[])
+    with pytest.raises(PlotDataError, match=r'scale.*2\.0'):
+        load_table(TableSource(analysis='probe', dataset='paper'), tmp_path)
+
+
+def test_analysis_uri_carries_params(store, tmp_path):  # noqa: F811
+    run_analysis('period_summary', 'paper', {'period_x': {'h_MoS2': 3.16}})
+
+    with pytest.raises(PlotDataError, match='period_x'):     # the rows load at construction
+        Plotter(data_dirs=['aiida://analysis/period_summary/paper'],
+                labels=['periods'], output_dir=str(tmp_path / 'plots'))
+
+    uri = 'aiida://analysis/period_summary/paper?period_x={"h_MoS2": 3.16}'
+    plotter = Plotter(data_dirs=[uri], labels=['periods'], output_dir=str(tmp_path / 'plots'))
+    frame = plotter._get_summary_data_df()  # pylint: disable=protected-access
+    assert sorted(frame['force']) == [30.0, 50.0]
+
+    with pytest.raises(PlotDataError, match='bogus'):
+        Plotter(data_dirs=['aiida://analysis/period_summary/paper?bogus=1'],
+                labels=['periods'], output_dir=str(tmp_path / 'plots'))

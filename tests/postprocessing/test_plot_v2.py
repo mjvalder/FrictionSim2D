@@ -701,3 +701,21 @@ def test_stick_slip_time_keeps_the_run_clock_when_asked():
     clock = np.array([22000.0, 23000.0, 24000.0])
     assert list(Plotter._stick_slip_time(clock, 0.001, shift=True)) == [0.0, 1.0, 2.0]
     assert list(Plotter._stick_slip_time(clock, 0.001, shift=False)) == [22.0, 23.0, 24.0]
+
+
+def test_dataset_prefilter_mirrors_the_plots_force_filters():
+    """`_row_may_match` keeps a superset of what a plot selects: `filter_forces`
+    wins over `force` (the plots read `filter_forces or force`), and
+    `plot_all_forces` lifts the load filters (a timeseries then plots every load)."""
+    from src.postprocessing.plot_common import PlotCommonMixin
+    match = PlotCommonMixin._row_may_match  # pylint: disable=protected-access
+    row = {'force': 30.0, 'pressure': float('nan'), 'id': 'h_MoS2'}
+
+    assert match(row, {'filter_forces': [30.0], 'force': 10.0})
+    assert not match(row, {'filter_forces': [10.0], 'force': 30.0})
+    assert match(row, {'force': 30.0})
+    assert match(row, {'plot_all_forces': True, 'filter_forces': [10.0]})
+    assert match(row, {'plot_all_forces': True, 'pressures': [1.0]})
+    assert not match(row, {'plot_all_forces': True, 'filter_materials': ['h_WS2']})
+    pressure = {'pressure': 1.0, 'force': float('nan')}
+    assert match(pressure, {'pressures': [1.0], 'filter_pressures': [5.0]})

@@ -36,16 +36,21 @@ def probe(monkeypatch):
     calls = []
     monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: calls.append(profile))
 
-    def fake_run(name, dataset, params=None, *, force=False):
-        calls.append((name, dataset, params, force))
-        return TABLE
-
     node = SimpleNamespace(
         uuid='uuid-1', get_content=lambda mode='rb': TABLE.to_csv(index=False).encode(),
         base=SimpleNamespace(extras=SimpleNamespace(
             all={'n_rows': 2, 'n_dropped': 1, 'version': '3', 'dataset': 'paper'})))
-    monkeypatch.setattr(store, 'run_analysis', fake_run)
-    monkeypatch.setattr(store, 'find_result_node', lambda *a, **k: node)
+
+    def fake_run(name, dataset, params=None, *, force=False):
+        calls.append((name, dataset, params, force))
+        return node
+
+    def fake_select(name, dataset, params=None, version=None):
+        calls.append(('select', name, dataset, params))
+        return node
+
+    monkeypatch.setattr(store, 'result_node', fake_run)
+    monkeypatch.setattr(store, 'select_result_node', fake_select)
     return calls
 
 
@@ -92,9 +97,30 @@ def test_show(probe):
 
 
 def test_show_missing(probe, monkeypatch):
-    monkeypatch.setattr(store, 'find_result_node', lambda *a, **k: None)
+    monkeypatch.setattr(store, 'select_result_node', lambda *a, **k: None)
     result = CliRunner().invoke(cli, ['analyse', 'show', 'probe', 'paper'])
     assert result.exit_code != 0 and 'no stored result' in result.output
+
+
+def test_show_and_export_select_by_param(probe, tmp_path):
+    result = CliRunner().invoke(cli, ['analyse', 'show', 'probe', 'paper', '--param', 'window=7'])
+    assert result.exit_code == 0, result.output
+    assert probe[-1] == ('select', 'probe', 'paper', {'window': 7})
+    out = tmp_path / 'out.csv'
+    result = CliRunner().invoke(cli, ['analyse', 'export', 'probe', 'paper', str(out),
+                                      '--param', 'mode=b'])
+    assert result.exit_code == 0, result.output
+    assert probe[-1] == ('select', 'probe', 'paper', {'mode': 'b'})
+    result = CliRunner().invoke(cli, ['analyse', 'show', 'probe', 'paper', '--param', 'bogus=1'])
+    assert result.exit_code != 0 and 'bogus' in result.output
+
+
+def test_show_names_the_stored_params_when_the_defaults_are_absent(probe, monkeypatch):
+    def refuse(*a, **k):
+        raise LookupError('no stored probe over paper under defaults; stored under: {window=7}')
+    monkeypatch.setattr(store, 'select_result_node', refuse)
+    result = CliRunner().invoke(cli, ['analyse', 'show', 'probe', 'paper'])
+    assert result.exit_code != 0 and 'window=7' in result.output
 
 
 def test_export(probe, tmp_path):
