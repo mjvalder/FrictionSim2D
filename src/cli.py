@@ -1752,7 +1752,8 @@ def _stored_or_abort(name: str, dataset: str, profile: Optional[str], params=Non
 @analyse_group.command('list')
 def analyse_list():
     """List the registered analyses."""
-    from .analysis import base, catalogue  # noqa: PLC0415,F401
+    # catalogue registers the analyses on import.
+    from .analysis import base, catalogue  # noqa: PLC0415,F401  # pylint: disable=unused-import
     if not base.ANALYSES:
         click.echo("no analyses registered")
         return

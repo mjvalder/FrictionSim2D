@@ -741,8 +741,12 @@ FrictionSim2D aiida import-archive ~/transfer/260421-afm.aiida
 `aiida export LABEL` writes three things:
 
 - `<output>` — the `.aiida` archive: the set's Group, its CalcJobs and every
-  calcfunction reached from their outputs (verdicts, rulings, summaries), plus
-  what aiida's export closure adds (their inputs and outputs). Every node is a
+  calcfunction reached from their outputs (verdicts, rulings, summaries), the
+  stored analysis results of every dataset built from the set (Groups
+  `friction2d/analyses/<dataset>`, see
+  [postprocessing.md](postprocessing.md#analyses)), plus what aiida's export
+  closure adds (their inputs and outputs, so an analysis brings its
+  `record_analysis` node and the dataset table `Dict` it read). Every node is a
   core AiiDA type, so the archive imports and its data loads **without
   FrictionSim2D installed**; only `calc.process_class` and `calc.res` need the
   plugin.

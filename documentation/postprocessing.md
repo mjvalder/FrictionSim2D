@@ -244,6 +244,94 @@ Two smaller changes in the same direction:
 
 ---
 
+## Analyses
+
+An analysis turns one AiiDA dataset (`FrictionSim2D aiida dataset`, see
+[aiida.md](aiida.md#6-postprocessing-datasets-and-queries)) into one table. The code is
+`src/analysis/`; every analysis is registered in `src/analysis/catalogue.py`.
+
+- **Integrity-pass rule.** Every analysis reads only the dataset's points whose integrity
+  verdict is `pass`. Each point it leaves out is recorded as `(point_uuid, reason)` in the
+  result's `dropped` attribute (`n_dropped` extra). Two exceptions read every point,
+  failed ones included: `run_status` and `integrity_traces`.
+- **Stored and reused.** A result is a CSV (`SinglefileData`) made by the calcfunction
+  `record_analysis` from the dataset's table `Dict` and a params `Dict`, in the Group
+  `friction2d/analyses/<dataset>`. `analyse run` with the same name, version, params
+  and dataset (and the same stored results it reads) returns the stored table instead of
+  computing again; `--force` recomputes.
+- **Archives.** `FrictionSim2D aiida export <set>` carries the stored results of every
+  dataset built from that set, with their `record_analysis` nodes and the dataset table
+  `Dict`s they read.
+- **Families.** An analysis refuses a dataset of a family it does not read; no analysis
+  joins across simulation types, and only `pes_landscape` has PES columns.
+- **Levels.** `run` and `run_state` tables carry `run_uuid, material, layer, load,
+  load_kind, angle`; `material` tables carry `material, layer`.
+
+### Catalogue
+
+| Name | Level | Families | Computes |
+|---|---|---|---|
+| `run_status` | run_state | afm, sheetonsheet | The verdict status of every point, failed ones included. |
+| `integrity_traces` | run_state | afm, sheetonsheet | Window-tier traces and the stored integrity measures of every point with a trace, failed points included. |
+| `sheet_geometry` | material | afm, sheetonsheet | Lattice period (`period_x_top`) and surface geometry of each material's built sheet. |
+| `period_summary` | run | afm, sheetonsheet | Per run: COF, LF and NF over its whole lattice periods after the spring-loading transient; summary-shaped (`cof`, `lf`, `nf`), so plots read it as summaries. |
+| `cof_ranking` | material | afm | Each material's whole-period COF over the load window, and its rank. |
+| `contact` | run_state | afm | Tip-sheet contact, interlocking and LJ energy of the load and final snapshots. |
+| `stick_slip` | run | afm | Ring period, lateral-force period, slips and energy oscillation of the tip trajectory. |
+| `sliding_physics` | run | afm, sheetonsheet | Per-run scales and sliding descriptors (taxlib port), plus the shear strength joined from the newest stored `contact` result (left out, with a note, when none is stored). |
+| `pes_landscape` | run | pes_sheet, pes_tip | Barrier, corrugation, curvature and Prandtl-Tomlinson eta of each PES grid. |
+
+`FrictionSim2D analyse list` prints the name, version, level and families.
+
+### Parameters
+
+Pass each as `--param NAME=VALUE` (repeatable); a dict or list value is JSON text.
+
+- **Period source** (`period_summary`, `cof_ranking`, `contact`, `stick_slip`,
+  `sliding_physics`): where the lattice period `a_x` comes from.
+  - `period_x` (default none): material -> `period_x_top` (Å), used as given.
+  - `geometry_dataset` (default none): the dataset whose `sheet_geometry` supplies it
+    (run or reused). With neither, `sheet_geometry` is computed from the analysed dataset.
+  - `lattice` (default `{}`): material -> Å, the fallback for a material with no
+    geometry row. A run with neither is dropped: it has no whole periods.
+- `loads` (default `(10, 20, 30, 50)` nN): the load window of `cof_ranking`, `contact`,
+  `stick_slip`.
+- `angle` (default `0.0`): the scan angle read by `cof_ranking`, `contact`, `stick_slip`,
+  `sliding_physics`. Only 0° runs are cut into periods (`a_x` is along x).
+- `layer` (default `2`): the layer `cof_ranking` ranks.
+- `trib_index` (default none): `cof_ranking`'s tribology-index JSON (`materials`,
+  `tribIndex`, `dev`), given as content so the params hash covers it.
+- `taxlib_a` (default `{}`): material -> the lattice `a` taxlib scales by
+  (`stick_slip`, `sliding_physics`); a material not in it takes `a_x`.
+- `k`, `a` (no defaults): `pes_landscape`'s spring (eV/Å²) and lattice period (Å, one
+  number or material -> Å) of the eta; either missing leaves `pt_eta` NaN.
+- `run_status`, `integrity_traces`, `sheet_geometry`: no parameters.
+
+### `analyse` commands
+
+```bash
+FrictionSim2D analyse list
+FrictionSim2D analyse run NAME DATASET [--param NAME=VALUE ...] [--force] [--profile TEXT]
+FrictionSim2D analyse show NAME DATASET [--rows INT] [--profile TEXT]
+FrictionSim2D analyse export NAME DATASET OUT.csv [--profile TEXT]
+```
+
+- `run` prints the row count, the dropped count and the result's uuid.
+- `show` prints the newest stored result's extras and its first `--rows` (default 10) rows.
+- `export` writes the newest stored result's CSV.
+
+### Analyses as plot sources
+
+- A table field takes `TableSource(analysis=<name>, dataset=<dataset>)` (in JSON
+  `{"analysis": ..., "dataset": ..., "version": <optional>}`; default version: the
+  registered one), or a CSV path.
+- `aiida://analysis/<name>/<dataset>` in `data_dirs` reads a summary-shaped result
+  (`period_summary`) as that label's summary rows.
+- The plotter never computes an analysis; see
+  [Stored analyses as plot sources](#stored-analyses-as-plot-sources).
+
+---
+
 ## Plot documents
 
 A minimal document:

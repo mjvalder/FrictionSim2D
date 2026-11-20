@@ -527,8 +527,10 @@ FrictionSim2D aiida export SET_LABEL [-o OUTPUT] [--profile TEXT] [--force]
 - `--include-peratom` — keep the per-atom nodes (left out by default)
 - `--keep-hpc-paths` — do not anonymise hostnames, executables and paths
 
-The AiiDA User email is kept for attribution. Datasets are not included; they
-export separately (`src.aiida.export.export_dataset`, Python only). See
+The AiiDA User email is kept for attribution. Dataset Groups are not included; they
+export separately (`src.aiida.export.export_dataset`, Python only). The stored analysis
+results of every dataset built from the set are included (Groups
+`friction2d/analyses/<dataset>`, with the dataset table `Dict`s they read). See
 [aiida.md](aiida.md#9-archives).
 
 ### aiida import-archive
@@ -540,6 +542,47 @@ came across inside the archive:
 ```bash
 FrictionSim2D aiida import-archive ARCHIVE_PATH [--profile TEXT]
 ```
+
+## analyse
+
+Analyses of an AiiDA dataset, stored in the profile and reused on identical params. The
+catalogue, parameters and the integrity-pass rule:
+[postprocessing.md](postprocessing.md#analyses).
+
+### analyse list
+
+```bash
+FrictionSim2D analyse list
+```
+
+Prints each registered analysis: name, version, level, families.
+
+### analyse run
+
+```bash
+FrictionSim2D analyse run NAME DATASET [--param NAME=VALUE ...] [--force] [--profile TEXT]
+```
+
+- `--param NAME=VALUE` — an analysis parameter (repeatable; dict/list values as JSON)
+- `--force` — recompute even when a result with the same params is stored
+
+Prints the row count, the dropped count and the result's uuid.
+
+### analyse show
+
+```bash
+FrictionSim2D analyse show NAME DATASET [--rows INT] [--profile TEXT]
+```
+
+Prints the newest stored result's metadata and its first `--rows` (default 10) rows.
+
+### analyse export
+
+```bash
+FrictionSim2D analyse export NAME DATASET OUT [--profile TEXT]
+```
+
+Writes the newest stored result's CSV to `OUT`.
 
 ## postprocess
 
