@@ -259,13 +259,27 @@ An analysis turns one AiiDA dataset (`FrictionSim2D aiida dataset`, see
   `friction2d/analyses/<dataset>`. `analyse run` with the same name, version, params
   and dataset (and the same stored results it reads) returns the stored table instead of
   computing again; `--force` recomputes.
+- **Reuse is keyed on the dataset name**, not on its content: a dataset deleted and
+  rebuilt under the same name with other points reuses the old results. Rerun with
+  `--force` after rebuilding a dataset. Deleting a dataset
+  (`src.aiida.steps.delete_dataset`) deletes every analysis result computed from it,
+  with a warning and their count in its return value.
+- **Read results.** The period analyses (below) read a stored `sheet_geometry` result,
+  and `sliding_physics` the newest stored `contact` result. Each is linked as an input of
+  the result and is part of its reuse key: a new `sheet_geometry` result (or version)
+  makes them compute again.
 - **Archives.** `FrictionSim2D aiida export <set>` carries the stored results of every
   dataset built from that set, with their `record_analysis` nodes and the dataset table
-  `Dict`s they read.
+  `Dict`s they read. On `import-archive`, an analysis Group whose label already exists in
+  the profile is imported as `<label>_<n>` (aiida-core's collision rule). Its results are
+  then not found under `friction2d/analyses/<dataset>`: rerun them with `analyse run`.
 - **Families.** An analysis refuses a dataset of a family it does not read; no analysis
   joins across simulation types, and only `pes_landscape` has PES columns.
-- **Levels.** `run` and `run_state` tables carry `run_uuid, material, layer, load,
-  load_kind, angle`; `material` tables carry `material, layer`.
+- **Identity columns.** `run` and `run_state` tables carry `run_uuid, material, layer,
+  load, load_kind, angle`; `material` tables carry `material, layer`. Two exceptions,
+  keyed by `run_id` (`<material>/l<layers>/f<load>/a<angle>`, the frozen tables' id):
+  `integrity_traces` and `run_status`. `analyse run` refuses a non-empty table without
+  its identity columns.
 
 ### Catalogue
 
@@ -290,8 +304,9 @@ Pass each as `--param NAME=VALUE` (repeatable); a dict or list value is JSON tex
 - **Period source** (`period_summary`, `cof_ranking`, `contact`, `stick_slip`,
   `sliding_physics`): where the lattice period `a_x` comes from.
   - `period_x` (default none): material -> `period_x_top` (Å), used as given.
-  - `geometry_dataset` (default none): the dataset whose `sheet_geometry` supplies it
-    (run or reused). With neither, `sheet_geometry` is computed from the analysed dataset.
+  - `geometry_dataset` (default none): the dataset whose stored `sheet_geometry`
+    supplies it (run or reused). With neither, the analysed dataset's own stored
+    `sheet_geometry` supplies it (run or reused).
   - `lattice` (default `{}`): material -> Å, the fallback for a material with no
     geometry row. A run with neither is dropped: it has no whole periods.
 - `loads` (default `(10, 20, 30, 50)` nN): the load window of `cof_ranking`, `contact`,
@@ -305,28 +320,38 @@ Pass each as `--param NAME=VALUE` (repeatable); a dict or list value is JSON tex
   (`stick_slip`, `sliding_physics`); a material not in it takes `a_x`.
 - `k`, `a` (no defaults): `pes_landscape`'s spring (eV/Å²) and lattice period (Å, one
   number or material -> Å) of the eta; either missing leaves `pt_eta` NaN.
-- `run_status`, `integrity_traces`, `sheet_geometry`: no parameters.
+- `materials`, `layer` (default none: every point): the points `integrity_traces`
+  traces. `materials` is a list (JSON text or comma-separated on the command line), in
+  either spelling (`h-MoS2` or `h_MoS2`). The full table of a 156-material campaign is
+  about 1.4 million rows; select what a figure needs.
+- `run_status`, `sheet_geometry`: no parameters.
 
 ### `analyse` commands
 
 ```bash
 FrictionSim2D analyse list
 FrictionSim2D analyse run NAME DATASET [--param NAME=VALUE ...] [--force] [--profile TEXT]
-FrictionSim2D analyse show NAME DATASET [--rows INT] [--profile TEXT]
-FrictionSim2D analyse export NAME DATASET OUT.csv [--profile TEXT]
+FrictionSim2D analyse show NAME DATASET [--rows INT] [--param NAME=VALUE ...] [--profile TEXT]
+FrictionSim2D analyse export NAME DATASET OUT.csv [--param NAME=VALUE ...] [--profile TEXT]
 ```
 
 - `run` prints the row count, the dropped count and the result's uuid.
-- `show` prints the newest stored result's extras and its first `--rows` (default 10) rows.
-- `export` writes the newest stored result's CSV.
+- `show` prints the stored result's extras and its first `--rows` (default 10) rows.
+- `export` writes the stored result's CSV.
+- `show` and `export` read the newest result under exactly the `--param`s given, the
+  others at their defaults (hashed as `run` hashes them). With no `--param`, that is
+  the default-params result. When there is none but results under other params are
+  stored, they refuse and name those params.
 
 ### Analyses as plot sources
 
 - A table field takes `TableSource(analysis=<name>, dataset=<dataset>)` (in JSON
-  `{"analysis": ..., "dataset": ..., "version": <optional>}`; default version: the
-  registered one), or a CSV path.
-- `aiida://analysis/<name>/<dataset>` in `data_dirs` reads a summary-shaped result
-  (`period_summary`) as that label's summary rows.
+  `{"analysis": ..., "dataset": ..., "version": <optional>, "params": {<optional>}}`;
+  default version: the registered one), or a CSV path.
+- `aiida://analysis/<name>/<dataset>[?k=v&k2=v2]` in `data_dirs` reads a summary-shaped
+  result (`period_summary`) as that label's summary rows.
+- Both select by params as `analyse show` does: the result under exactly those params
+  (none: the defaults); results stored only under other params are refused, named.
 - The plotter never computes an analysis; see
   [Stored analyses as plot sources](#stored-analyses-as-plot-sources).
 
@@ -378,7 +403,9 @@ FrictionSim2D aiida export-results <label> <dir>
 - `aiida://analysis/<name>/<dataset>` in `data_dirs`: a summary-shaped analysis result
   (`period_summary`) becomes that label's summary rows, as `aiida://dataset/` does.
 - A table field (`ranking_file`, `traces_file`, ...) takes a path or
-  `{"analysis": <name>, "dataset": <dataset>, "version": <optional>}`.
+  `{"analysis": <name>, "dataset": <dataset>, "version": <optional>, "params": {...}}`.
+  URI query values are text, parsed by the analysis' params model (a dict or list as
+  JSON text).
 - `stickslip_period_histogram` and `contact_cof_scatter` read the load from `load_nN`, or
   from `force` as `stick_slip` and `contact` name it. Those analyses hold every layer:
   `filter_layer` keeps one.
@@ -386,6 +413,18 @@ FrictionSim2D aiida export-results <label> <dir>
   of `run_dir`; the integrity panel draws failed points too.
 - The plotter never computes an analysis: a missing result raises naming
   `FrictionSim2D analyse run <name> <dataset>`.
+
+### External series from a dataset
+
+An `external_series` entry (`summary`, `cof_histogram`) reads either a JSON `file` (+
+`path`) or a `dataset`: a `data_dirs` label read from the store. With `dataset`, the
+series is the mean of `x_key` and `y_key` over that label's summary rows at each load,
+by increasing load; none of the plot's filters apply. Example (the MLIP bars of the
+publication histogram):
+
+```json
+{"dataset": "deepmd", "x_key": "nf", "y_key": "lf_sx_sy", "label": "DeePMD + D3", "solid": true}
+```
 
 ---
 
