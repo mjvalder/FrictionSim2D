@@ -31,7 +31,7 @@ from ...core.mlip import is_mlip
 from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import (
     atom_count_and_z_extent, atomic2charge, charge2atom, get_model_dimensions,
-    get_num_atom_types, shift_atoms_to_z_zero,
+    get_num_atom_types, restore_masses_section, shift_atoms_to_z_zero,
 )
 from ...core.utils.paths import get_material_path
 from ...core.utils.structures import cifread
@@ -793,7 +793,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
 
     # Restore the real Masses section (ASE writes placeholder masses / omits it).
     real_masses = {t: masses.get(t, (1.0, 'X')) for t in range(1, n_types + 1)}
-    _restore_masses_section(output_path, real_masses)
+    restore_masses_section(output_path, real_masses)
     _snap_small_tilts(output_path)
 
 
@@ -948,44 +948,6 @@ def _snap_small_tilts(path: Path, tol: float = 0.05) -> None:
                 continue  # drop the tilt line -> orthogonal box
         out.append(line)
     path.write_text(''.join(out), encoding='utf-8')
-
-
-def _restore_masses_section(path: Path, masses: Dict[int, tuple]) -> None:
-    """Insert/replace the Masses section of a LAMMPS data file with real values.
-
-    ``ase_io.write`` for ``lammps-data`` omits (or writes placeholder) masses;
-    this writes ``type mass  # element`` lines so downstream element parsing works.
-
-    Args:
-        path: LAMMPS data file (modified in-place).
-        masses: mapping type-id -> (mass, element).
-    """
-    lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
-    out = []
-    skip_masses = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped == 'Masses':
-            skip_masses = True
-            continue
-        if skip_masses:
-            # Consume the existing (placeholder) Masses block until a blank-then-section.
-            if stripped and not stripped[0].isdigit():
-                skip_masses = False
-                # fall through to emit this line (likely 'Atoms ...')
-            else:
-                continue
-        out.append(line)
-
-    block = "Masses\n\n"
-    for t in range(1, (max(masses) if masses else 0) + 1):
-        mass, elem = masses.get(t, (1.0, 'X'))
-        block += f"{t} {mass:.6f}  # {elem}\n"
-    block += "\n"
-
-    text = ''.join(out)
-    text = re.sub(r'(^|\n)(Atoms)', r'\1' + block + r'\2', text, count=1)
-    path.write_text(text, encoding='utf-8')
 
 
 def _assign_pot_types_by_order(path: Path, order: List[str],

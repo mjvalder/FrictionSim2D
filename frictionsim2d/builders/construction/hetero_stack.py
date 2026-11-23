@@ -61,7 +61,6 @@ now says so where a reader looks first.
 from __future__ import annotations
 
 import logging
-import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,7 +86,8 @@ from ...interfaces.jinja import PackageLoader
 from .components import (
     apply_sheet_edge_types, build_monolayer, calculate_layer_shifts, carve_flake)
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
-from ...interfaces.ase import element_mass, read_lammps_data
+from ...interfaces.ase import read_lammps_data
+from ..utils.lammps_data import restore_masses_section
 
 if TYPE_CHECKING:                      # ase.io costs ~270 ms; annotations only
     from ase import Atoms
@@ -837,38 +837,6 @@ def _monolayer_to_atoms(mono: Dict[str, object]) -> Atoms:
     return atoms
 
 
-def _restore_masses_section(path: Path, masses: Dict[int, Tuple[float, str]], n_types: int) -> None:
-    """Insert a real ``Masses`` section (type mass # element) into a data file.
-
-    ``ase.io.write(format="lammps-data")`` omits masses; restoring them keeps
-    the file usable by LAMMPS and by downstream element parsing. Falls back to
-    the placeholder element's standard mass for any type absent from the source
-    Masses section (should not happen for build_monolayer output).
-    """
-    # Lazy: ase.data costs ~70-90 ms (measured with python -X importtime);
-    # deferred so this module stays cheap to import.
-    from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
-
-    if n_types < 1:
-        return
-    block = "Masses\n\n"
-    for t in range(1, n_types + 1):
-        if t in masses:
-            mass, elem = masses[t]
-        else:
-            elem = chemical_symbols[t]
-            mass = element_mass(elem)
-        block += f"{t} {mass:.6f}  # {elem}\n"
-    block += "\n"
-
-    text = path.read_text(encoding="utf-8")
-
-    # Insert immediately before the Atoms section header.
-    new_text, count = re.subn(r"(^|\n)(Atoms)", r"\1" + block + r"\2", text, count=1)
-    if count:
-        path.write_text(new_text, encoding="utf-8")
-
-
 def _write_supercell(
     atoms: Atoms,
     out_path: Path,
@@ -894,7 +862,7 @@ def _write_supercell(
         out_path.unlink()
     specorder = [chemical_symbols[t] for t in range(1, n_types + 1)]
     write(str(out_path), atoms, format="lammps-data", atom_style=atom_style, specorder=specorder)
-    _restore_masses_section(out_path, masses, n_types)
+    restore_masses_section(out_path, masses, n_types)
     return np.array(read(str(out_path), format="lammps-data").cell)[:2, :2]
 
 

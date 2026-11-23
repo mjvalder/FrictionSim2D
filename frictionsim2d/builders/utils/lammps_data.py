@@ -7,10 +7,12 @@ filed under core/utils/structures.py next to cifread -- they read LAMMPS data
 files, not structure files, and use no ASE.
 """
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from ...core.utils.tokens import is_int_token
+from ...interfaces.ase import element_mass
 
 logger = logging.getLogger(__name__)
 
@@ -284,3 +286,56 @@ def atom_count_and_z_extent(path: Union[str, Path]) -> Tuple[int, float]:
     if not z_values:
         return 0, 0.0
     return n_atoms, max(z_values) - min(z_values)
+
+
+def restore_masses_section(
+    path: Path,
+    masses: Dict[int, Tuple[float, str]],
+    n_types: Optional[int] = None,
+) -> None:
+    """Replace the Masses section of a LAMMPS data file with ``type mass  # element`` lines.
+
+    ``ase.io.write`` omits the masses; this restores them so the file is usable
+    by LAMMPS and by downstream element parsing. A type missing from ``masses``
+    falls back to the standard mass of the placeholder element ``Z = type``.
+
+    Args:
+        path: LAMMPS data file (modified in-place).
+        masses: Mapping type-id -> (mass, element).
+        n_types: Number of types to write; defaults to ``max(masses)``.
+    """
+    # Lazy: ase.data costs ~70-90 ms; deferred so this module stays cheap to import.
+    from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
+
+    if n_types is None:
+        n_types = max(masses, default=0)
+    if n_types < 1:
+        return
+
+    kept: List[str] = []
+    in_masses = False
+    for line in path.read_text(encoding='utf-8').splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped == 'Masses':
+            in_masses = True
+            continue
+        if in_masses:
+            # Drop the existing Masses block up to the next section header.
+            if stripped and not stripped[0].isdigit():
+                in_masses = False
+            else:
+                continue
+        kept.append(line)
+
+    block = "Masses\n\n"
+    for t in range(1, n_types + 1):
+        if t in masses:
+            mass, elem = masses[t]
+        else:
+            elem = chemical_symbols[t]
+            mass = element_mass(elem)
+        block += f"{t} {mass:.6f}  # {elem}\n"
+    block += "\n"
+
+    text = re.sub(r'(^|\n)(Atoms)', r'\1' + block + r'\2', ''.join(kept), count=1)
+    path.write_text(text, encoding='utf-8')
