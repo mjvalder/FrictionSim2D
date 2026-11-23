@@ -180,6 +180,45 @@ class SimulationBase(ABC):
             return 'unknown', False
         return commit, dirty
 
+    def _sheet_stack_materials(self) -> List[Any]:
+        """Provenance entries for the sheet stack and any hetero-flake sheets."""
+        # Lazy: the provenance models cost ~20 ms (pydantic model construction).
+        # pylint: disable-next=import-outside-toplevel
+        from ..data.provenance import material_provenance
+        config = self.config
+        sheets = list(getattr(config, 'sheets', None) or [config.sheet])
+        flake_sheets = list(getattr(config, 'flake_sheets', None) or [])
+        return ([material_provenance(s, 'sheet') for s in sheets]
+                + [material_provenance(fs, 'flake') for fs in flake_sheets])
+
+    def _build_provenance_record(self, materials: List[Any], **fields: Any) -> Any:
+        """A ``ProvenanceRecord`` with the identity fields every family shares.
+
+        ``fields`` are the per-family values; seeds, damping, substrate and
+        load default to ``None``.
+        """
+        # pylint: disable-next=import-outside-toplevel
+        from ..data.provenance import ProvenanceRecord, new_run_uuid
+        git_commit, git_dirty = self._git_identity()
+        values: Dict[str, Any] = {
+            'seed_thermal_tip': None, 'seed_thermal_sub': None, 'seed_velocity': None,
+            'substrate_realization_id': None, 'damping_ratio': None, 'damp_ev': None,
+            'load_requested': None,
+        }
+        values.update(fields)
+        return ProvenanceRecord(
+            run_uuid=new_run_uuid(),
+            family=self.FAMILY,
+            model=self.model,
+            materials=materials,
+            git_commit=git_commit,
+            git_dirty=git_dirty,
+            config_hash=hashlib.sha256(
+                self.config.model_dump_json().encode()).hexdigest(),
+            run_role='label',
+            **values,
+        )
+
     def _run_seed(self, channel: str) -> int:
         """A fresh random seed for one RNG channel, drawn once per build.
 

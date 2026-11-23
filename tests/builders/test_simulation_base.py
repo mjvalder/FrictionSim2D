@@ -144,3 +144,40 @@ def test_family_job_name_prefixes():
     }
     for cls, prefix in expected.items():
         assert cls.HPC_JOB_PREFIX == prefix, cls.__name__
+
+
+class _Cfg(SimpleNamespace):
+    def model_dump_json(self):
+        return '{"k": 1}'
+
+
+def _provenance_sim(tmp_path, **cfg):
+    sim = _ConcreteSimulation(_Cfg(**cfg), output_dir=tmp_path)
+    sim.FAMILY = "flake"
+    sim._seeds = {}
+    return sim
+
+
+def test_sheet_stack_materials_lists_sheets_then_hetero_flakes(tmp_path):
+    mk = lambda mat: SimpleNamespace(mat=mat, pot_path=None, pot_type="sw")
+    sim = _provenance_sim(tmp_path, sheet=mk("A"), sheets=[mk("A"), mk("B")],
+                          flake_sheets=[mk("C"), mk("D")])
+    assert [(m.name, m.role) for m in sim._sheet_stack_materials()] == [
+        ("A", "sheet"), ("B", "sheet"), ("C", "flake"), ("D", "flake")]
+
+
+def test_sheet_stack_materials_single_sheet_fallback(tmp_path):
+    sheet = SimpleNamespace(mat="A", pot_path=None, pot_type="sw")
+    sim = _provenance_sim(tmp_path, sheet=sheet, sheets=[])
+    assert [m.name for m in sim._sheet_stack_materials()] == ["A"]
+
+
+def test_build_provenance_record_fills_shared_identity(tmp_path):
+    sim = _provenance_sim(tmp_path)
+    sim.set_model("sheetonsheet")
+    record = sim._build_provenance_record(
+        [], layer_type_map={}, contact_cutoff=4.0, cutoff_source="x",
+        thermostat_scheme="t")
+    assert (record.family, record.model, record.run_role) == ("flake", "sheetonsheet", "label")
+    assert len(record.config_hash) == 64 and record.run_uuid
+    assert record.seed_velocity is None and record.load_requested is None

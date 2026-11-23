@@ -169,40 +169,19 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     Returns:
         The path written.
     """
-    # Deferred for the same reason AFM defers it: `frictionsim2d.data.provenance` costs
-    # ~15-23 ms (pydantic model construction) and only an actual build should
-    # pay it -- `--help` and every non-build subcommand instantiate nothing.
     # pylint: disable-next=import-outside-toplevel
-    from ...data.provenance import (ProvenanceRecord, material_provenance,
-                                   new_run_uuid, write_provenance)
-    import hashlib  # pylint: disable=import-outside-toplevel
+    from ...data.provenance import material_provenance, write_provenance
 
     config = builder.config
-    git_commit, git_dirty = builder._git_identity()  # pylint: disable=protected-access
-
     pressure = getattr(config.general, 'pressure', None)
     pressure_requested = (float(pressure)
                           if isinstance(pressure, (int, float)) else None)
 
-    # Every material of the built system (spec §3 F3: "covering every sheet,
-    # the flake, tip and substrate"), same shape as the AFM family's
-    # equivalent in AFMSimulation._write_provenance: the sheet stack, any
-    # hetero-flake materials, and the plain [Flake] shape spec.
-    #
-    # A SINGLE-material flake reuses [2D]'s mat/pot and so has none of its own
-    # in the raw config -- only FlakeSlideSimulation._filled_flake_config
-    # fills that in (from the SUBSTRATE sheet), which is why it is called here
-    # rather than silently dropping the flake from the record. It must only be
-    # called for that single-material case, though: `FlakeSlideSimulation
-    # .build()` itself gates it on `len(flake_sheets) != 2` (a hetero flake
-    # bypasses `_filled_flake_config` entirely and builds straight from
-    # `flake_sheets`, already recorded above) -- calling it unconditionally
-    # would fill the still-bare `config.flake` from the substrate sheet and
-    # record a spurious THIRD 'flake' entry alongside the two real ones.
-    sheets = list(getattr(config, 'sheets', None) or [config.sheet])
-    materials = [material_provenance(s, 'sheet') for s in sheets]
+    # A single-material flake has no mat/pot of its own: fill it from the
+    # substrate sheet. A hetero flake is already in the stack materials, so
+    # filling it again would record a third flake.
+    materials = builder._sheet_stack_materials()  # pylint: disable=protected-access
     flake_sheets = list(getattr(config, 'flake_sheets', None) or [])
-    materials += [material_provenance(fs, 'flake') for fs in flake_sheets]
     flake = getattr(config, 'flake', None)
     filled_flake_config = getattr(builder, '_filled_flake_config', None)
     if flake is not None and len(flake_sheets) != 2 and callable(filled_flake_config):
@@ -210,28 +189,13 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     if flake is not None and getattr(flake, 'mat', None):
         materials.append(material_provenance(flake, 'flake'))
 
-    record = ProvenanceRecord(
-        run_uuid=new_run_uuid(),
-        family=builder.FAMILY,
-        model=builder.model,
-        materials=materials,
-        seed_thermal_tip=None,
-        seed_thermal_sub=None,
-        seed_velocity=None,
+    record = builder._build_provenance_record(  # pylint: disable=protected-access
+        materials,
         seed_sheet_center=builder._seeds.get('sheet_center'),  # pylint: disable=protected-access
-        substrate_realization_id=None,
-        damping_ratio=None,
-        damp_ev=None,
-        git_commit=git_commit,
-        git_dirty=git_dirty,
-        config_hash=hashlib.sha256(
-            config.model_dump_json().encode()).hexdigest(),
         layer_type_map=sheet_layer_type_map(builder),
         contact_cutoff=contact_cutoff,
         cutoff_source=cutoff_source,
         thermostat_scheme=thermostat_scheme,
-        run_role='label',
-        load_requested=None,
         pressure_requested=pressure_requested,
         twist_angle=getattr(config.general, 'twist_angle', None),
         drive_k=drive_k,

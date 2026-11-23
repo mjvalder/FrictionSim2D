@@ -5,7 +5,6 @@ simulation. It coordinates the construction of the Tip, Substrate, and Sheet,
 generates the necessary potentials, and writes the LAMMPS input scripts.
 """
 
-import hashlib
 import json
 import logging
 from itertools import product
@@ -1117,31 +1116,10 @@ class AFMSimulation(SimulationBase):
         generated HPC job scripts call once LAMMPS has finished. A failure
         here fails the build — provenance is not optional.
         """
-        # Lazy: measured marginal cost of `from ...data.provenance import ...`
-        # after `import frictionsim2d.cli` (so lattice/potentials/etc. are already
-        # loaded, matching the real CLI-startup path) at ~15-23ms across
-        # repeated runs, all attributable to `frictionsim2d.data.provenance` itself (one
-        # new module -- pydantic's model-class construction cost, not further
-        # imports; `python -X importtime` shows self == cumulative for it).
-        # This method runs on every real build (called at the end of every
-        # write_inputs()), same as _build_obs_ctx above, so this only pays for
-        # code paths that instantiate a builder and build without going
-        # through write_inputs -- e.g. `--help` and other non-build
-        # subcommands. (`frictionsim2d/data/` also sits outside this package's pylint
-        # gate -- see CLAUDE.md's `pylint frictionsim2d/cli.py ... frictionsim2d/builders
-        # frictionsim2d/interfaces frictionsim2d/hpc` command list -- but that alone isn't the
-        # reason to keep this lazy: base.py already imports `data.models` at
-        # module scope, so a hard dependency on `frictionsim2d/data/` already exists
-        # here regardless.)
+        # lazy: pydantic model construction ~20 ms
         # pylint: disable-next=import-outside-toplevel
-        from ...data.provenance import (ProvenanceRecord, material_provenance,
-                                       new_run_uuid, sha256_file,
+        from ...data.provenance import (material_provenance, sha256_file,
                                        write_provenance)
-
-        # Shared with the sheet family's write_sheet_provenance, so both
-        # record build identity identically; git absence is recorded, never
-        # raised (see SimulationBase._git_identity).
-        git_commit, git_dirty = self._git_identity()
 
         # .get, not [n_layers]: the per-layer PotentialManager is populated in
         # build() (line ~99), and the PES-tip and freestanding builders reach
@@ -1171,19 +1149,9 @@ class AFMSimulation(SimulationBase):
         load_requested = (float(force)
                           if isinstance(force, (int, float)) else None)
 
-        # Every material of the built system (spec §3 F3): the sheet stack
-        # (one entry per [2D-N], or the single [2D] wrapped), any hetero-flake
-        # materials, the plain [flake] shape spec if present, the tip, and the
-        # substrate if present. Unlike the sheet family's [Flake] (whose
-        # mat/pot may be left unset to fall back to [2D] --
-        # FlakeSlideSimulation._filled_flake_config), an AFM [flake] has no
-        # such fallback: AFMSimulationConfig.validate_flake_material requires
-        # mat/cif_path/pot_path/pot_type to all be set together, so
-        # `flake.mat` is never None here once `flake is not None`.
-        sheets = list(self.config.sheets) or [self.config.sheet]
-        materials = [material_provenance(s, 'sheet') for s in sheets]
-        materials += [material_provenance(fs, 'flake')
-                     for fs in self.config.flake_sheets]
+        # An AFM [flake] has no substrate fallback: its mat is always set once
+        # the section exists.
+        materials = self._sheet_stack_materials()
         flake = self.config.flake
         if flake is not None and getattr(flake, 'mat', None):
             materials.append(material_provenance(flake, 'flake'))
@@ -1198,21 +1166,14 @@ class AFMSimulation(SimulationBase):
                 context['drive_method'], context['spring_ev'],
                 context['virtual_offset'])
 
-        record = ProvenanceRecord(
-            run_uuid=new_run_uuid(),   # one per L{n}: each layer count is a run
-            family=self.FAMILY,
-            model=self.model,
-            materials=materials,
+        record = self._build_provenance_record(
+            materials,
             seed_thermal_tip=context.get('seed_thermal_tip'),
             seed_thermal_sub=context.get('seed_thermal_sub'),
             seed_velocity=context.get('velocity_seed'),
             substrate_realization_id=sub_sha,
             damping_ratio=context.get('damping_ratio'),
             damp_ev=context.get('damp_ev'),
-            git_commit=git_commit,
-            git_dirty=git_dirty,
-            config_hash=hashlib.sha256(
-                self.config.model_dump_json().encode()).hexdigest(),
             layer_type_map=layer_type_map,
             contact_cutoff=context['obs_ctx']['contact_cutoff'],
             cutoff_source=getattr(self, '_contact_cutoff_source', 'unknown'),
@@ -1220,7 +1181,6 @@ class AFMSimulation(SimulationBase):
                 'langevin_y_tip_sub_nve_sheet'
                 if context.get('use_langevin') else
                 f"{self.config.settings.thermostat.type}_system"),
-            run_role='label',
             load_requested=load_requested,
             twist_angle=getattr(self.config.general, 'twist_angle', None),
             drive_k=drive_k,
