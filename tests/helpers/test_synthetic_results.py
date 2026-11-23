@@ -2,16 +2,16 @@
 use, not a degenerate tiered-friction file (fix round 1, Task 9 review).
 
 `write_results` builds `friction_*/raw_*/peratom_*` files from
-`src.core.observables.rename_map(family, tier)`, but neither PES family has
+`frictionsim2d.core.observables.rename_map(family, tier)`, but neither PES family has
 any `Observable` registered (`rename_map` returns `{}` for both), so it must
 refuse them instead of silently writing a header with no columns.
 `make_run` must route PES families to `write_pes_grid` instead, producing the
-single `results/pes_scan.csv` `src.postprocessing.pes_scan` actually reads.
+single `results/pes_scan.csv` `frictionsim2d.postprocessing.pes_scan` actually reads.
 """
 import pandas as pd
 import pytest
 
-from src.postprocessing.pes_scan import KIND_BY_TOPDIR, grid_descriptors
+from frictionsim2d.postprocessing.pes_scan import KIND_BY_TOPDIR, grid_descriptors
 from tests.helpers.synthetic_results import make_run, write_pes_grid, write_results
 
 _PES_RUNS = {
@@ -51,7 +51,7 @@ def test_make_run_writes_a_grid_pes_scan_reads(tmp_path, family):
     assert _EXPECTED_COLUMNS[family] <= set(df.columns)
     assert len(df) >= 4
 
-    # this is exactly what src.postprocessing.pes_scan.extract_all does per row
+    # this is exactly what frictionsim2d.postprocessing.pes_scan.extract_all does per row
     feats = grid_descriptors(df, KIND_BY_TOPDIR[family])
     assert 'pes_barrier_U' in feats
     if family == 'pes_tip':

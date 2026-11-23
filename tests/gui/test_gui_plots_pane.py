@@ -21,11 +21,11 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.controllers.plots import (PlotController, PlotFigure,  # noqa: E402
+from frictionsim2d.gui.controllers.plots import (PlotController, PlotFigure,  # noqa: E402
                                        PlotRequest)
-from src.gui.workspace import Workspace  # noqa: E402
-from src.postprocessing.plot_config import PlotDocument  # noqa: E402
-from src.postprocessing.read_data import DataReader  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.postprocessing.plot_config import PlotDocument  # noqa: E402
+from frictionsim2d.postprocessing.read_data import DataReader  # noqa: E402
 from tests.helpers.results_tree import make_family_run  # noqa: E402
 
 
@@ -121,7 +121,7 @@ class TestPlotController:
         left unwired, `running` stays True and the Render button stays
         disabled forever -- the same defect PreviewController had."""
         del qt_app
-        import src.gui.controllers.plots as plots_module
+        import frictionsim2d.gui.controllers.plots as plots_module
         monkeypatch.setattr(plots_module.sys, 'executable',
                             '/nonexistent/not-a-real-interpreter-xyz')
         controller = PlotController(workspace)
@@ -151,7 +151,7 @@ class TestPlotController:
         del qt_app
         # StickSlipPlot, not type(document.plots[0]) -- that is SummaryPlot,
         # whose plot_type is Literal['summary'] and rejects any other value.
-        from src.postprocessing.plot_config import StickSlipPlot
+        from frictionsim2d.postprocessing.plot_config import StickSlipPlot
         document.plots.append(StickSlipPlot(
             filter_size='nope', filename='bad.png'))
         controller = PlotController(workspace)
@@ -227,8 +227,8 @@ from PySide6.QtGui import QColor, QPixmap  # noqa: E402
 from PySide6.QtWidgets import (QComboBox, QLabel, QListWidget,  # noqa: E402
                                QPushButton, QScrollArea)
 
-from src.gui.widgets.plots import PlotsPane, discover_datasets  # noqa: E402
-from src.postprocessing.plot_config import PLOT_TYPES  # noqa: E402
+from frictionsim2d.gui.widgets.plots import PlotsPane, discover_datasets  # noqa: E402
+from frictionsim2d.postprocessing.plot_config import PLOT_TYPES  # noqa: E402
 
 
 class _StubController(QObject):
@@ -269,7 +269,7 @@ class _StubController(QObject):
             path.write_bytes(b'%PDF-stub')
 
     def start(self, request):
-        from src.gui.controllers.plots import PlotFigure
+        from frictionsim2d.gui.controllers.plots import PlotFigure
 
         self.requests.append(request)
         self.started.emit()
@@ -331,7 +331,7 @@ class TestPlotsPane:
         assert offered == list(PLOT_TYPES)
 
     def test_the_preset_combo_offers_none_plus_the_shipped_presets(self, pane):
-        from src.postprocessing.presets import PRESETS
+        from frictionsim2d.postprocessing.presets import PRESETS
 
         offered = [pane.preset_combo.itemText(i)
                    for i in range(pane.preset_combo.count())]
@@ -411,7 +411,7 @@ class TestPlotsPane:
         unpatched modal blocks this suite forever."""
         from PySide6.QtWidgets import QFileDialog
 
-        from src.postprocessing.plot_config import load_plot_document
+        from frictionsim2d.postprocessing.plot_config import load_plot_document
 
         target = tmp_path / 'kept.json'
         monkeypatch.setattr(QFileDialog, 'getSaveFileName',
@@ -508,7 +508,7 @@ class TestPlotsPane:
         assert 'stick_slip_analysis' in pane.form.sections
 
     def test_editing_the_form_reaches_the_document(self, pane):
-        from src.gui.controllers.plot_document import COMMON_SECTION
+        from frictionsim2d.gui.controllers.plot_document import COMMON_SECTION
 
         pane.plot_list.setCurrentRow(0)
         pane.form.document.set(COMMON_SECTION, 'filter_layer', 2)
@@ -528,7 +528,7 @@ class TestPlotsPane:
         assert len(pane.document().plots) == 1
 
     def test_changing_the_type_keeps_the_common_fields(self, pane):
-        from src.gui.controllers.plot_document import COMMON_SECTION
+        from frictionsim2d.gui.controllers.plot_document import COMMON_SECTION
 
         pane.plot_list.setCurrentRow(0)
         pane.form.document.set(COMMON_SECTION, 'filter_size', '100x100y')
@@ -539,7 +539,7 @@ class TestPlotsPane:
 
     def test_save_and_load_round_trip_the_same_json(self, pane, tmp_path):
         """G3: the GUI reads and writes exactly what `postprocess plot` reads."""
-        from src.postprocessing.plot_config import load_plot_document
+        from frictionsim2d.postprocessing.plot_config import load_plot_document
 
         path = pane.save_document(tmp_path / 'plots.json')
 
@@ -630,7 +630,7 @@ class TestPaneFitsOnAScreen:
 
     def test_the_pane_does_not_demand_more_height_than_a_screen(
             self, qt_app, workspace):
-        from src.gui.widgets.plots.pane import PlotsPane
+        from frictionsim2d.gui.widgets.plots.pane import PlotsPane
 
         pane = PlotsPane(workspace)
         assert pane.minimumSizeHint().height() <= self.SCREEN_HEIGHT, (
@@ -640,7 +640,7 @@ class TestPaneFitsOnAScreen:
 
     def test_the_main_window_does_not_demand_more_height_than_a_screen(
             self, qt_app, workspace):
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
 
         window = MainWindow(workspace)
         try:

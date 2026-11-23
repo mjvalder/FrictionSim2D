@@ -19,12 +19,12 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from src.potentials.manager import (
+from frictionsim2d.potentials.manager import (
     PotentialManager,
     POTENTIALS_WITH_INTERNAL_LJ,
     POTENTIALS_REQUIRING_LJ,
 )
-from src.core.config import ComponentConfig, SheetConfig, TipConfig
+from frictionsim2d.core.config import ComponentConfig, SheetConfig, TipConfig
 
 
 # =========================================================================
@@ -65,7 +65,7 @@ def make_component_config(tmp_path, pot_type, pot_path, kind='sheet'):
 
 def make_sub_config(tmp_path, pot_type, pot_path):
     """Minimal substrate config (Si), for multi-component cell tests."""
-    from src.core.config import SubstrateConfig
+    from frictionsim2d.core.config import SubstrateConfig
     return SubstrateConfig(mat='Si', pot_type=pot_type, pot_path=pot_path,
                            cif_path=_shipped_cif('Si.cif'),
                            thickness=10.0)
@@ -161,7 +161,7 @@ class TestNormalizationGuards:
         si_tip_config,
     ):
         """Mixed-case pot_type should map to a single lowercase usage key."""
-        from src.core.config import TipConfig
+        from frictionsim2d.core.config import TipConfig
         config_upper = TipConfig(
             mat=si_tip_config.mat, pot_type='SW', pot_path=si_tip_config.pot_path,
             cif_path=si_tip_config.cif_path, r=20.0, amorph='c', dspring=0.1, s=1.0
@@ -180,7 +180,7 @@ class TestNormalizationGuards:
     ):
         """Potential indexing should stay consistent when pot_type casing differs."""
         # Real Si.cif/Si.sw fixtures shared by both configs; only pot_type casing differs.
-        from src.core.config import TipConfig, SubstrateConfig
+        from frictionsim2d.core.config import TipConfig, SubstrateConfig
         config_upper = TipConfig(
             mat=si_tip_config.mat, pot_type='SW', pot_path=si_tip_config.pot_path,
             cif_path=si_tip_config.cif_path, r=20.0, amorph='c', dspring=0.1, s=1.0

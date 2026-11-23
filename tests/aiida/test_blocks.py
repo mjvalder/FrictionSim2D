@@ -9,17 +9,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.aiida.blocks import (
+from frictionsim2d.aiida.blocks import (
     BLOCK_KINDS, EXCLUDED, FIELD_MAP, PROVENANCE_EXCLUDED, PROVENANCE_MAP,
     PROVENANCE_SOURCED, SWEPT, UNRESOLVED, RunBlocks, assigned, block_hash,
     block_kind, leaf_field_paths, split_blocks, upgrade_block,
 )
-from src.aiida import block_schema
-from src.aiida.block_schema import defaults_for
-from src.core.config import (
+from frictionsim2d.aiida import block_schema
+from frictionsim2d.aiida.block_schema import defaults_for
+from frictionsim2d.core.config import (
     AFMSimulationConfig, GlobalSettings, SheetOnSheetSimulationConfig,
 )
-from src.data.provenance import (
+from frictionsim2d.data.provenance import (
     BuiltGeometry, ProvenanceRecord, material_provenance,
 )
 
@@ -394,7 +394,7 @@ def test_afm_layout_finds_provenance_one_level_up(afm, tmp_path):
 
 def test_provenance_copy_wins_over_config_path(afm, tmp_path):
     """The build-time copy is what the run read; the config path may have changed since."""
-    from src.data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
     cfg, st, prov = afm
     run, copy_path = _afm_tree(tmp_path, cfg)
     copy_path.write_text('# the cif the build used', encoding='utf-8')
@@ -411,7 +411,7 @@ def test_unresolved_file_is_recorded_and_logged(afm, caplog):
     moved = copy.deepcopy(cfg)
     moved['sheets'][0]['cif_path'] = '/gone/a.cif'
     moved['tip']['cif_path'] = '/gone/b.cif'
-    with caplog.at_level('WARNING', logger='src.aiida.blocks'):
+    with caplog.at_level('WARNING', logger='frictionsim2d.aiida.blocks'):
         blocks = _split(moved, st, prov).blocks
     assert blocks['material__sheet_0']['fields']['cif_sha256'] == f'{UNRESOLVED}a.cif'
     assert blocks['material__tip_0']['fields']['cif_sha256'] == f'{UNRESOLVED}b.cif'
@@ -421,7 +421,7 @@ def test_unresolved_file_is_recorded_and_logged(afm, caplog):
 def test_sheet_family_flake_without_material_is_filled_from_2d(tmp_path, mock_settings):
     """FlakeSlideSimulation._filled_flake_config fills [Flake] from [2D] field by field."""
     from types import SimpleNamespace  # pylint: disable=import-outside-toplevel
-    from src.builders.sheetonsheet.flake_slide import (  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.builders.sheetonsheet.flake_slide import (  # pylint: disable=import-outside-toplevel
         FlakeSlideSimulation)
     pot, cif = _files(tmp_path)
     obj = SheetOnSheetSimulationConfig(**{
@@ -615,7 +615,7 @@ def test_leaf_field_paths_reaches_nested_and_list_models():
 
 
 def test_a_new_field_is_caught():
-    from src.core.config import ThermostatSettings  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.core.config import ThermostatSettings  # pylint: disable=import-outside-toplevel
 
     class Grown(AFMSimulationConfig):
         brand_new: float = 1.0
@@ -794,7 +794,7 @@ def test_split_is_json_plain(afm):
 @pytest.mark.parametrize('module', ['blocks.py', 'block_schema.py'])
 def test_module_does_not_import_aiida(module):
     import ast  # pylint: disable=import-outside-toplevel
-    path = Path(__file__).resolve().parents[2] / 'src' / 'aiida' / module
+    path = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'aiida' / module
     tree = ast.parse(path.read_text(encoding='utf-8'))
     names = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import)
              for alias in node.names]

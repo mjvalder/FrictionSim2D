@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.postprocessing.plot_data import Plotter
+from frictionsim2d.postprocessing.plot_data import Plotter
 
 
 def _df():

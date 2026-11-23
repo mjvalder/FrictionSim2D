@@ -16,12 +16,12 @@
 #   binary     settings.yaml -> hpc.frameworks.<framework>.binary
 #              falling back to $LMP_<FRAMEWORK>, then hpc.lmp_binary, then `lmp`
 #              on PATH (which is all the classical `sw` path ever needs).
-#   flags/env  src/core/mlip.py -> get_mlip(framework).launcher  (MACE's
+#   flags/env  frictionsim2d/core/mlip.py -> get_mlip(framework).launcher  (MACE's
 #              `-k on g 1 -sf kk`, DeePMD's LAMMPS_PLUGIN_PATH export). Never
 #              re-spelled here: the registry is the single source of truth.
 #              See scripts/hpc/README.md and documentation/milestone0.md.
 #   workdir    the simulation root the HPC job scripts cd into
-#              (src/templates/hpc/pbs_combined.j2: decks are addressed
+#              (frictionsim2d/templates/hpc/pbs_combined.j2: decks are addressed
 #              relative to the directory holding <model>/).
 #
 # ENVIRONMENT
@@ -130,9 +130,9 @@ def note(msg):
 # --- launcher flags / env exports come from the MLIP registry ---------------
 flags, env_lines = "", []
 try:
-    from src.core.mlip import get_mlip, is_mlip
+    from frictionsim2d.core.mlip import get_mlip, is_mlip
 except Exception as exc:                      # pragma: no cover - defensive
-    note("could not import src/core/mlip.py (%s); using no launcher flags" % exc)
+    note("could not import frictionsim2d/core/mlip.py (%s); using no launcher flags" % exc)
     is_mlip = lambda _f: False                # noqa: E731
 if is_mlip(framework):
     launcher = get_mlip(framework).launcher
@@ -165,7 +165,7 @@ else:
              % (settings_path, exc))
         data = {}
     hpc = data.get("hpc") or {}
-    # Same rule as src.core.config.apply_framework_overlay: the framework's
+    # Same rule as frictionsim2d.core.config.apply_framework_overlay: the framework's
     # binary replaces hpc.lmp_binary; modules and env_lines are additive.
     # Switch clusters by pointing FRICTIONSIM_SETTINGS at another file.
     overlay = (hpc.get("frameworks") or {}).get(framework) or {}

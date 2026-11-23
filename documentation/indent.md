@@ -35,7 +35,7 @@ for `afm/indent.lmp`, emitted as `slide.in`, which per load does the following.
    the 1 ps campaign cadence for a `hold_steps` damped hold, 10 000 steps or 10 ps by
    default. The output uses the same ten-column
    `results/friction_f<load>_a0_s<speed>_layer<N>.txt` layout as the sliding campaign,
-   so the campaign reader ([`read_data.py`](../src/postprocessing/read_data.py)) parses
+   so the campaign reader ([`read_data.py`](../frictionsim2d/postprocessing/read_data.py)) parses
    it unchanged.
 
 **Phase 2 — retract**
@@ -127,9 +127,9 @@ Snap-in distance and approach/retract hysteresis need the approach branch, which
 retract does not record — the approach is the `system.in` aveforce ramp, which stores no
 per-step curve.
 
-The delivery maths lives in [`src/postprocessing/indent.py`](../src/postprocessing/indent.py),
-the builder in [`src/builders/afm/indent.py`](../src/builders/afm/indent.py), and the run-phase
-template in [`src/templates/afm/indent.lmp`](../src/templates/afm/indent.lmp).
+The delivery maths lives in [`frictionsim2d/postprocessing/indent.py`](../frictionsim2d/postprocessing/indent.py),
+the builder in [`frictionsim2d/builders/afm/indent.py`](../frictionsim2d/builders/afm/indent.py), and the run-phase
+template in [`frictionsim2d/templates/afm/indent.lmp`](../frictionsim2d/templates/afm/indent.lmp).
 
 ## Checks before trusting a run
 

@@ -1,4 +1,4 @@
-"""Tests for PES-scan descriptor extraction (src/postprocessing/pes_scan.py)."""
+"""Tests for PES-scan descriptor extraction (frictionsim2d/postprocessing/pes_scan.py)."""
 
 import math
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.postprocessing import pes_scan
+from frictionsim2d.postprocessing import pes_scan
 from tests.helpers.results_tree import make_family_run
 
 

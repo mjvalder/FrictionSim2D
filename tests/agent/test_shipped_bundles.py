@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip('pydantic_ai')
 
-from src.agent.bundles import MODELS_DIR, catalogue  # noqa: E402
-from src.agent.runtime import tool_schema_hash  # noqa: E402
+from frictionsim2d.agent.bundles import MODELS_DIR, catalogue  # noqa: E402
+from frictionsim2d.agent.runtime import tool_schema_hash  # noqa: E402
 
 SHIPPED = {name: tune for name, tune in catalogue(MODELS_DIR).items() if tune.bundle}
 

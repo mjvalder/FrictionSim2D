@@ -2,7 +2,7 @@
 
 Every `settings.yaml` section and its defaults.
 
-Settings are global to a run and loaded through `load_settings()` in `src/core/config.py`. Per-run parameters live in `.ini` files instead — see [configuration.md](configuration.md).
+Settings are global to a run and loaded through `load_settings()` in `frictionsim2d/core/config.py`. Per-run parameters live in `.ini` files instead — see [configuration.md](configuration.md).
 
 ## Where settings come from
 

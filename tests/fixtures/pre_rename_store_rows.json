@@ -1,0 +1,133 @@
+[
+ {
+  "angle": 90.0,
+  "angle_unit": "deg",
+  "calc_uuid": "5aa40819-e6b9-4a9e-bd6a-9fba3f955616",
+  "deck_name": "slide_p1gpa",
+  "drive.general.bond_spring": 80.0,
+  "drive.general.driving_spring": 800.0,
+  "drive.settings.simulation.constraint_mode": "none",
+  "drive.settings.simulation.drive_method": "fix_move",
+  "family": "sheetonsheet",
+  "geometry.flake.corner_hold": false,
+  "geometry.flake.corner_radius": 5.0,
+  "geometry.flake.corner_spring_k": 10.0,
+  "geometry.flake.rotation_deg": 0.0,
+  "geometry.flake.shape": "hexagon",
+  "geometry.general.finite_sheet": false,
+  "geometry.general.hetero_stacking": "grouped",
+  "geometry.general.twist_angle_tol": 2.0,
+  "geometry.general.twist_max_supercell": 12,
+  "geometry.general.twist_strain_tol": 0.02,
+  "geometry.lattice_match.area_tol": 0.1,
+  "geometry.lattice_match.max_supercell": 10,
+  "geometry.lattice_match.method": "zur_mcgill",
+  "geometry.lattice_match.strain_tol": 0.02,
+  "geometry.settings.geometry.finite_sheet_afm_edge_mode": "none",
+  "geometry.settings.geometry.finite_sheet_edge_spring_k": 10.0,
+  "geometry.settings.geometry.finite_sheet_edge_width": 4.0,
+  "geometry.settings.geometry.finite_sheet_sheetonsheet_edge_mode": "none",
+  "geometry.settings.geometry.lat_c_default": 6.0,
+  "geometry.settings.geometry.rigid_tip": false,
+  "geometry.settings.geometry.tip_reduction_factor": 2.25,
+  "geometry.settings.geometry.tip_start_clearance": 20.0,
+  "geometry.settings.quench.equilibrate_steps": 20000,
+  "geometry.settings.quench.melt_steps": 50000,
+  "geometry.settings.quench.melt_temp": 2500.0,
+  "geometry.settings.quench.quench_rate": 1000000000000.0,
+  "geometry.settings.quench.quench_slab_dims": [
+   200,
+   200,
+   50
+  ],
+  "geometry.settings.quench.quench_temp": 300.0,
+  "geometry.settings.quench.timestep": 0.001,
+  "geometry.sheet.stack_type": "AA",
+  "geometry.sheets.0.layers": 5,
+  "geometry.sheets.0.x": 100.0,
+  "geometry.sheets.0.y": 100.0,
+  "integration.settings.simulation.min_style": "cg",
+  "integration.settings.simulation.minimization_command": "minimize 1e-4 1e-8 1000000 1000000",
+  "integration.settings.simulation.neigh_modify_command": "neigh_modify    every 1 delay 0 check yes",
+  "integration.settings.simulation.neighbor_list": 0.3,
+  "integration.settings.simulation.ramp_max_iterations": 40,
+  "integration.settings.simulation.sheet_hold_steps": 20000,
+  "integration.settings.simulation.slide_run_steps": 500000,
+  "integration.settings.simulation.timestep": 0.001,
+  "interaction.general.interlayer_style": "lj",
+  "interaction.lj_override": {},
+  "interaction.settings.potential.d3_cn_cutoff": 8.0,
+  "interaction.settings.potential.d3_cutoff": 16.0,
+  "interaction.settings.potential.d3_damping": "bj",
+  "interaction.settings.potential.d3_functional": "pbe",
+  "interaction.settings.potential.lj_cutoff": 12.0,
+  "interaction.settings.potential.lj_type": "LJ_base",
+  "interaction.settings.potential.reaxff_mincap": 50,
+  "interaction.settings.potential.reaxff_safezone": 1.2,
+  "interaction.sheet.dispersion": "none",
+  "load": 1.0,
+  "load_kind": "pressure",
+  "load_unit": "GPa",
+  "material__sheet_0.cif_sha256": "5f616f04f1ea45fa178fabd6070b616c71c07214c0b78968e986e2a22fa55ee7",
+  "material__sheet_0.name": "h-MoS2",
+  "node_uuid": "0a6218b6-cfe8-4141-a4e0-b7879ea59c68",
+  "output.settings.output.channels": {
+   "peratom": true,
+   "raw": true,
+   "window": true
+  },
+  "output.settings.output.dump": {
+   "slide": true,
+   "system_init": true
+  },
+  "output.settings.output.dump_frequency": {
+   "slide": 10000,
+   "system_init": 10000
+  },
+  "output.settings.output.optional_channels": [],
+  "output.settings.output.results_frequency": 1000,
+  "output.settings.simulation.thermo": 10000,
+  "point_uuid": "52853836-1c76-5e0a-94f9-ddf3f330d89e",
+  "potential__sheet_0.pot_file_sha256": "d2da7e66c62043f1669866c6cf88fd6b509e322917b8d9af12e3cc6459e5cfae",
+  "potential__sheet_0.pot_type": "rebomos",
+  "protocol.general.interlayer_comparison": false,
+  "protocol.pes.eval_mode": "minimize",
+  "protocol.pes.grid_n": 12,
+  "protocol.pes.md_steps": 2000,
+  "protocol.pes.scan_cells": 1,
+  "protocol.pes.tip_load": 5.0,
+  "protocol.pes.z_relax": true,
+  "protocol.settings.simulation.halt_temperature_factor": 10.0,
+  "rel_path": "sheetonsheet/h-MoS2/100x_100y/K300",
+  "run_uuid": "c0c91874-8e85-437d-8ef2-1f653007d3de",
+  "schema_hash": "4f324fafefc63cf36d720532ca0189d13651ccf9debce29dd5781c8353f1056f",
+  "speed": 20.0,
+  "speed_unit": "m/s",
+  "superseded": false,
+  "thermostat.general.temp": 300.0,
+  "thermostat.settings.thermostat.langevin_boundaries": {
+   "sub": {
+    "fix": [
+     0.0,
+     0.3
+    ],
+    "thermo": [
+     0.3,
+     0.6
+    ]
+   },
+   "tip": {
+    "fix": [
+     3.0,
+     0.0
+    ],
+    "thermo": [
+     6.0,
+     3.0
+    ]
+   }
+  },
+  "thermostat.settings.thermostat.time_integration": "nvt",
+  "thermostat.settings.thermostat.type": "nose-hoover"
+ }
+]

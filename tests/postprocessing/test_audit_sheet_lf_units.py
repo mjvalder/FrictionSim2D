@@ -1,5 +1,5 @@
 """The unit-correction census must be reproducible, not a number in a doc."""
-from src.postprocessing.audit_lf_units import classify_file
+from frictionsim2d.postprocessing.audit_lf_units import classify_file
 
 HDR = "# Time-averaged data\n# TimeStep v_xfrict v_yfrict v_sx v_sy v_fz\n"
 

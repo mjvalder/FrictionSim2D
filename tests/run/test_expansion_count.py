@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import GeneralConfig, parse_config
-from src.core.config import write_config
-from src.run.expand import count_expansion
-from src.run.hpc_dispatch import count_generated_jobs
-from src.run.naming import loopability
-from src.run.simulate import run_simulations
+from frictionsim2d.core.config import GeneralConfig, parse_config
+from frictionsim2d.core.config import write_config
+from frictionsim2d.run.expand import count_expansion
+from frictionsim2d.run.hpc_dispatch import count_generated_jobs
+from frictionsim2d.run.naming import loopability
+from frictionsim2d.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -113,7 +113,7 @@ class TestNumberedSheetSectionsShareTheSheetRules:
 
     def test_a_hetero_config_reports_no_unsupported_lists(self):
         """What CLI/GUI validation actually asks."""
-        from src.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.controllers.document import ConfigDocument
 
         document = ConfigDocument(
             model='sheetonsheet',

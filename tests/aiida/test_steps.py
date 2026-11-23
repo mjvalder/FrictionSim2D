@@ -19,16 +19,16 @@ pytestmark = pytest.mark.aiida
 from aiida import orm  # noqa: E402
 from aiida.common import exceptions  # noqa: E402
 
-import src.aiida.steps as steps  # noqa: E402
-from src.aiida.block_schema import SUMMARY_UNITS  # noqa: E402
-from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.rulings import Policy  # noqa: E402
-from src.aiida.steps import (DATASET_PREFIX, apply_rulings, build_dataset,  # noqa: E402
+import frictionsim2d.aiida.steps as steps  # noqa: E402
+from frictionsim2d.aiida.block_schema import SUMMARY_UNITS  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.rulings import Policy  # noqa: E402
+from frictionsim2d.aiida.steps import (DATASET_PREFIX, apply_rulings, build_dataset,  # noqa: E402
                              clear_all_nodes, delete_dataset, delete_simulation_set,
                              is_provisional, latest_verdict,
                              merge_units, normalise_options, options_hash,
                              postprocess_group, summary_options)
-from src.postprocessing.read_data import DataReader  # noqa: E402
+from frictionsim2d.postprocessing.read_data import DataReader  # noqa: E402
 from tests.aiida.test_steps_integrity import (  # noqa: E402
     _pid, _tree, _verdicts_of, _write_ruling)
 from tests.helpers.results_tree import (  # noqa: E402
@@ -42,7 +42,7 @@ DEFAULT_OPTIONS = {'skip_fraction': 0.2}
 
 @pytest.fixture
 def no_profile_switch(monkeypatch):
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
@@ -231,7 +231,7 @@ def test_indent_summary_matches_the_datareader(aiida_profile_clean, no_profile_s
     (summary,) = _summaries(points[30.0])
     import pandas as pd
 
-    from src.postprocessing.indent import retract_features
+    from frictionsim2d.postprocessing.indent import retract_features
     expected = retract_features(pd.read_csv(curve))
     for key, value in expected.items():
         assert summary[key] == (None if value != value else pytest.approx(value)), key
@@ -364,7 +364,7 @@ def test_settings_skip_fraction_is_read_strictly(aiida_profile_clean, no_profile
     table = build_dataset('d', ['camp'], warnings=warnings)
     assert sum('default skip_fraction' in w for w in warnings) == 1
     assert table['policy']['summary_options'] == {'skip_fraction': 0.2}
-    with caplog.at_level(logging.WARNING, logger='src.aiida.steps'):
+    with caplog.at_level(logging.WARNING, logger='frictionsim2d.aiida.steps'):
         build_dataset('d2', ['camp'])
     assert any('default skip_fraction' in r.getMessage() and r.levelno == logging.WARNING
                for r in caplog.records)
@@ -534,8 +534,8 @@ def test_delete_dataset_counts_and_warns_of_the_analyses_it_takes(
         aiida_profile_clean, no_profile_switch, tmp_path, caplog):
     import pandas as pd
     pytest.importorskip('scipy')
-    from src.analysis.base import get_analysis
-    from src.analysis.store import ANALYSIS_GROUP_PREFIX, store_result
+    from frictionsim2d.analysis.base import get_analysis
+    from frictionsim2d.analysis.store import ANALYSIS_GROUP_PREFIX, store_result
     _tree(tmp_path, eject=(10.0,))
     import_root(tmp_path, label='camp')
     postprocess_group('camp')

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import AFMSimulationConfig, load_settings
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 from tests.helpers.hetero import MAT, POT, _afm_flake_raw, _afm_hetero_raw
 
 LMP = shutil.which("lmp_serial")
@@ -49,7 +49,7 @@ def test_afm_config_single_sheet_is_homogeneous():
 # --- Task 2: in-plane replication helpers ---
 
 def test_replication_factor_meets_two_diameter_rule():
-    from src.builders.afm.hetero import compute_replication_factors
+    from frictionsim2d.builders.afm.hetero import compute_replication_factors
     # footprint must be >= 4*r in each direction, min 1
     assert compute_replication_factors(lx=19.0, ly=22.0, tip_r=10.0) == (
         max(1, math.ceil(40.0 / 19.0)), max(1, math.ceil(40.0 / 22.0)))   # (3, 2)
@@ -61,9 +61,9 @@ def test_replication_factor_meets_two_diameter_rule():
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_replicated_data_has_no_pair_coeffs(tmp_path):
-    from src.builders.construction.hetero_stack import build_hetero_structure
-    from src.builders.afm.hetero import replicate_hetero_in_plane
-    from src.core.config import SheetOnSheetSimulationConfig
+    from frictionsim2d.builders.construction.hetero_stack import build_hetero_structure
+    from frictionsim2d.builders.afm.hetero import replicate_hetero_in_plane
+    from frictionsim2d.core.config import SheetOnSheetSimulationConfig
     raw = {
         "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
         "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
@@ -84,7 +84,7 @@ def test_replicated_data_has_no_pair_coeffs(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_build_replicates_and_orthogonal(tmp_path):
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
     sim._build_hetero_sheet(build_dir=Path(tmp_path) / "build")   # structure-only entry
@@ -95,12 +95,12 @@ def test_hetero_afm_build_replicates_and_orthogonal(tmp_path):
 
 
 def test_hetero_afm_rejects_triclinic_cell(tmp_path, monkeypatch):
-    from src.builders.afm import hetero as ha
+    from frictionsim2d.builders.afm import hetero as ha
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = ha.HeteroAFMSimulation(cfg, str(tmp_path))
 
     import numpy as np
-    from src.interfaces.ase import LammpsData
+    from frictionsim2d.interfaces.ase import LammpsData
 
     cell = np.eye(3) * 20.0
     cell[1, 0] = 5.0          # nonzero xy tilt -> triclinic
@@ -128,7 +128,7 @@ def _prep_layer_dirs(sim, n):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_potentials_layout_and_2D_group(tmp_path):
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
     build_dir = Path(tmp_path) / "build"
@@ -160,7 +160,7 @@ def test_hetero_afm_potentials_layout_and_2D_group(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_system_init_references_replicated_stack(tmp_path):
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     cfg.settings.hpc.modules = ["lammps"]           # HPC script gen needs a non-empty module list
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
@@ -181,7 +181,7 @@ def test_hetero_afm_job_name_differs_by_full_pair():
     material 2 must NOT produce the same HPC job name -- confirmed by
     construction (build both configs, compare _get_hpc_job_name()) per the
     review that found afm_h-MoS2 was emitted for both."""
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     raw_a = _afm_hetero_raw()
     raw_b = _afm_hetero_raw()
     raw_b["2D-2"]["mat"] = "h-WSe2"
@@ -200,7 +200,7 @@ def test_finite_hetero_afm_job_name_also_uses_full_pair():
     """FiniteHeteroAFMSimulation doesn't override _get_hpc_job_name -- it must
     inherit the fixed HeteroAFMSimulation._material_id, not AFMSimulation's
     single-sheet default."""
-    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     sim = FiniteHeteroAFMSimulation(cfg, "out")
     assert sim._get_hpc_job_name() == "afm_h-MoS2+h-WS2"
@@ -209,15 +209,15 @@ def test_finite_hetero_afm_job_name_also_uses_full_pair():
 # --- Task 6: routing ---
 
 def test_routing_selects_hetero_afm_for_two_materials():
-    from src.run.simulate import _select_afm_builder_cls
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is HeteroAFMSimulation
 
 
 def test_routing_keeps_homogeneous_afm_for_single_material():
-    from src.run.simulate import _select_afm_builder_cls
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.builders.afm import AFMSimulation
     cfg = AFMSimulationConfig(**_afm_homogeneous_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is AFMSimulation
 
@@ -273,7 +273,7 @@ def test_hetero_afm_runs_approach_indent_slide(tmp_path):
     templates (reused unchanged); ``slide_run_steps`` only shortens the already
     trivial (~0.3 s) slide phase.
     """
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     raw = _afm_hetero_raw()
     raw["general"]["force"] = 10.0          # single deployable load -> one ramp
     raw["general"]["temp"] = 1.0            # so the indent convergence loop settles
@@ -310,7 +310,7 @@ def test_hetero_afm_runs_approach_indent_slide(tmp_path):
     #     UNWRAPPED (raw amorphous-block coords span ~90-120 A in both this and the
     #     homogeneous AFM path); LAMMPS wraps them into the box on read_data, so the
     #     BOX height -- not the raw atom span -- is the meaningful thickness check.
-    from src.builders.construction.components import get_model_dimensions as _gmd
+    from frictionsim2d.builders.construction.components import get_model_dimensions as _gmd
     sub_dims = _gmd(run_dir / "build" / "sub.lmp")
     box_z = float(sub_dims["zhi"]) - float(sub_dims["zlo"])
     assert 10.0 <= box_z <= 22.0, \
@@ -331,7 +331,7 @@ def test_hetero_afm_runs_approach_indent_slide(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_uses_crystalline_matched_substrate(tmp_path):
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     raw = _afm_hetero_raw()
     raw["sub"]["amorph"] = "c"
     raw["sub"]["match"] = True
@@ -371,7 +371,7 @@ def test_hetero_afm_crystalline_runs_no_seam(tmp_path):
     30-min+ timeout was observed). Keeping the match strain low is what makes this
     end-to-end smoke both stable and reasonably fast.
     """
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     raw = _afm_hetero_raw()
     raw["sub"]["amorph"] = "c"
     raw["sub"]["match"] = True
@@ -431,7 +431,7 @@ def _fake_pm_with_sheet_block(block):
     resolve exactly as on a real build -- without a full LAMMPS assembly.
     """
     from types import SimpleNamespace
-    from src.potentials.manager import TypeRegistry
+    from frictionsim2d.potentials.manager import TypeRegistry
     reg = TypeRegistry()
     labels = []
     for pot_label, element, _mass, region in block:
@@ -462,7 +462,7 @@ def _write_data_with_masses(path, masses):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_finite_hetero_afm_builds_edge_typed_centered_patch(tmp_path):
     from ase.io import read
-    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
     cfg.settings.hpc.modules = ["lammps"]
@@ -481,7 +481,7 @@ def test_finite_hetero_layout_guard_covers_the_region_split(tmp_path):
     # future-works §2: with regions=[None,'edge'] the type count doubles but a
     # COUNT-only assert cannot catch an ordering divergence. Prove the
     # single-sourced numbering + the element-wise guard cover the region-split path.
-    from src.builders.afm.hetero import FiniteHeteroAFMSimulation, assert_sheet_block_matches_data
+    from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation, assert_sheet_block_matches_data
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
     cfg.settings.hpc.modules = ["lammps"]
@@ -497,7 +497,7 @@ def test_layout_guard_trips_on_equal_count_region_permutation(tmp_path):
     # NEGATIVE: a data file whose sheet block is a PERMUTATION of the PM's block at
     # equal count (the silent-corruption mode). The guard MUST raise; a count check
     # would not.
-    from src.builders.afm.hetero import assert_sheet_block_matches_data
+    from frictionsim2d.builders.afm.hetero import assert_sheet_block_matches_data
     pm = _fake_pm_with_sheet_block([("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
                                     ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
     data = _write_data_with_masses(
@@ -512,7 +512,7 @@ def test_layout_guard_trips_on_type_count_mismatch(tmp_path):
     # builders-afm.md finding 7: only the third (element-wise permutation)
     # branch had a dedicated negative test. The simpler count-mismatch guard
     # that precedes it (data file missing a whole sheet type) was untested.
-    from src.builders.afm.hetero import assert_sheet_block_matches_data
+    from frictionsim2d.builders.afm.hetero import assert_sheet_block_matches_data
     pm = _fake_pm_with_sheet_block([("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
                                     ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
     data = _write_data_with_masses(
@@ -527,7 +527,7 @@ def test_layout_guard_trips_on_block_offset_mismatch(tmp_path):
     # finding 7: the block-offset guard (sheet block must start at
     # offset + 1, i.e. right after sub+tip) was also untested. Equal counts,
     # matching masses in order -- only the wrong starting offset trips it.
-    from src.builders.afm.hetero import assert_sheet_block_matches_data
+    from frictionsim2d.builders.afm.hetero import assert_sheet_block_matches_data
     pm = _fake_pm_with_sheet_block([("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
                                     ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
     data = _write_data_with_masses(
@@ -544,7 +544,7 @@ def test_layout_guard_trips_on_block_offset_mismatch(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_finite_hetero_afm_renders_edge_fix(tmp_path):
-    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
     cfg.settings.hpc.modules = ["lammps"]
@@ -567,15 +567,15 @@ def test_finite_hetero_afm_renders_edge_fix(tmp_path):
 # --- D5 Task 3: routing (finite hetero before periodic hetero) ---
 
 def test_routing_finite_hetero_selects_finite_builder():
-    from src.run.simulate import _select_afm_builder_cls
-    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is FiniteHeteroAFMSimulation
 
 
 def test_routing_periodic_hetero_still_selects_d2():
-    from src.run.simulate import _select_afm_builder_cls
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     raw = _finite_hetero_afm_raw()
     raw["general"]["finite_sheet"] = False
     del raw["sub"]["x"]
@@ -615,7 +615,7 @@ def test_finite_hetero_afm_runs_with_edge_tether(tmp_path):
     Runtime ~140 s (dominated by ``system.in``'s hardcoded equilibration + load ramp +
     settling); ``slide_run_steps`` only shortens the trivial slide phase.
     """
-    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation
     raw = _finite_hetero_afm_raw()
     raw["general"]["force"] = 30.0        # firm press -> pins the free z drum-mode
     raw["general"]["temp"] = 1.0
@@ -692,7 +692,7 @@ def _afm_flake_cfg(twist=None):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_afm_flake_twist_rotates_and_runs(tmp_path):
     from ase.io import read
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     from tests.helpers.lattice import _flake_lattice_orientation
 
     sim = AFMSimulation(_afm_flake_cfg(twist=18.0), str(tmp_path / "tw"))
@@ -747,9 +747,9 @@ def test_hetero_stack_lands_the_intended_gap_above_the_substrate(tmp_path):
     the real ``_calculate_z_positions`` against a real PotentialManager (the one
     that supplies the gap), so nothing here restates the arithmetic under test.
     """
-    from src.builders.afm.hetero import HeteroAFMSimulation
-    from src.builders.construction.hetero_stack import register_sheet_block
-    from src.potentials.manager import PotentialManager
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.construction.hetero_stack import register_sheet_block
+    from frictionsim2d.potentials.manager import PotentialManager
 
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
@@ -784,7 +784,7 @@ def test_hetero_stack_lands_the_intended_gap_above_the_substrate(tmp_path):
 def test_hetero_z_placement_refuses_to_guess_the_stack_offset(tmp_path):
     """Without the measurement the old silent-7.5-A-error is the only thing
     that could be produced, so the placement refuses rather than assuming 0."""
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
     with pytest.raises(ValueError, match="_build_hetero_sheet must run"):
@@ -844,8 +844,8 @@ def _build_hetero_flake_components(out_dir, monkeypatch, twist=None):
     ``_maybe_twist_flake`` then run for real, needing no LAMMPS, so this test
     runs in the fast suite.
     """
-    from src.builders.construction import components
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.construction import components
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
 
     def _stub_tip(tip_cfg, build_dir, settings):        # noqa: ARG001
         build_dir = Path(build_dir)
@@ -879,7 +879,7 @@ def test_hetero_afm_build_components_builds_the_flake(tmp_path, monkeypatch):
     the ``if self.config.flake is not None`` branch from hetero.py fails it.
     """
     from ase.io import read
-    from src.builders.utils.lammps_data import get_model_dimensions
+    from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
 
     sim, (_tip_path, tip_radius, sub_path) = _build_hetero_flake_components(
         tmp_path, monkeypatch)
@@ -974,7 +974,7 @@ def test_hetero_afm_with_a_flake_builds_and_runs(tmp_path):
     a bigger flake on a bigger cell -- and needs the missing footprint
     validator to be posed properly.
     """
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     raw = _hetero_flake_raw()
     raw["general"]["force"] = 10.0
     raw["general"]["temp"] = 1.0
@@ -1012,7 +1012,7 @@ def test_hetero_afm_with_a_flake_builds_and_runs(tmp_path):
 
     # And it is placed ON the stack, not above the padded box: the flake's
     # lowest atom must sit within a bond-length-ish gap of the stack's highest.
-    from src.interfaces.ase import read_lammps_data
+    from frictionsim2d.interfaces.ase import read_lammps_data
     sheet_z = sim.z_positions[1]["sheet"]
     stack_top = read_lammps_data(sim._hetero_rep_path).positions[:, 2].max() + sheet_z
     flake_bottom = (read_lammps_data(sim.flake_path).positions[:, 2].min()
@@ -1040,7 +1040,7 @@ def test_hetero_afm_init_provenance_records_both_sheets(tmp_path):
     build, sheet 2's cif/potential files were silently never copied into
     provenance/. HeteroAFMSimulation inherits _init_provenance unmodified, so
     this proves the fix from the hetero AFM builder (the affected path)."""
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
     sim._init_provenance()
@@ -1056,7 +1056,7 @@ def test_afm_init_provenance_single_material_unchanged(tmp_path):
     """The single-material path must still record exactly what it recorded
     before this fix: the sheet under the plain 'sheet' component name (not
     'sheet_1'), plus tip/sub."""
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     cfg = AFMSimulationConfig(**_afm_homogeneous_raw(), settings=load_settings())
     sim = AFMSimulation(cfg, str(tmp_path))
 
@@ -1087,7 +1087,7 @@ def test_afm_init_provenance_single_material_unchanged(tmp_path):
 # construction below, mirroring examples/afm_flake_config.ini).
 
 def test_output_dir_differs_when_only_afm_flake_material_differs():
-    from src.run.naming import material_token, output_dir_for
+    from frictionsim2d.run.naming import material_token, output_dir_for
 
     raw_a = _afm_flake_raw()
     raw_b = _afm_flake_raw()
@@ -1105,7 +1105,7 @@ def test_output_dir_differs_when_only_afm_flake_material_differs():
 
 
 def test_hpc_job_name_differs_when_only_afm_flake_material_differs():
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
 
     raw_a = _afm_flake_raw()
     raw_b = _afm_flake_raw()
@@ -1126,8 +1126,8 @@ def test_hpc_job_name_differs_when_only_afm_flake_material_differs():
 
 def test_output_dir_and_job_name_unaffected_by_absent_afm_flake_section():
     """An AFM config with no [flake] section at all is unaffected."""
-    from src.run.naming import output_dir_for
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.run.naming import output_dir_for
+    from frictionsim2d.builders.afm import AFMSimulation
 
     raw = _afm_flake_raw()
     del raw["flake"]
@@ -1143,7 +1143,7 @@ def test_sheetonsheet_flake_omit_mat_directory_still_byte_identical():
     [Flake] section that omits mat (reuses the substrate's) still builds into
     today's directory -- unchanged by teaching flake_material_token about the
     AFM family's lowercase 'flake' key too."""
-    from src.run.naming import output_dir_for
+    from frictionsim2d.run.naming import output_dir_for
 
     no_flake = {"general": {"temp": 300}, "2D": {"mat": "h-MoS2", "x": 100, "y": 100}}
     reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}
@@ -1159,8 +1159,8 @@ def _hetero_afm_sim(tmp_path, monkeypatch, style, flake=False):
     The sheet-block guard reads hetero_rep.data, which only a real stack
     build writes; it is stubbed (the ilp full build below exercises it).
     """
-    import src.builders.afm.hetero as ha
-    from src.core.config import GlobalSettings
+    import frictionsim2d.builders.afm.hetero as ha
+    from frictionsim2d.core.config import GlobalSettings
     monkeypatch.setattr(ha, "_assert_sheet_block_matches_data", lambda *a, **k: None)
     raw = _afm_hetero_raw()
     raw["general"]["interlayer_style"] = style
@@ -1234,8 +1234,8 @@ def test_hetero_afm_flake_with_ilp_is_refused(tmp_path, monkeypatch):
 def test_molecule_id_band_entries_render():
     """common/molecule_ids.lmp's z-band form: types inside the band only."""
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader("src.templates"),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader("frictionsim2d.templates"),
                       trim_blocks=True, lstrip_blocks=True)
     out = env.from_string(
         "{% import 'common/molecule_ids.lmp' as m %}{{ m.emit_molecule_ids(g) }}"
@@ -1256,7 +1256,7 @@ def test_molecule_id_band_entries_render():
 def test_hetero_afm_ilp_build_carries_molecule_ids_in_the_load_file(tmp_path):
     """system.in sets the IDs by z-band and keeps them in load_*.data;
     slide.in reads them back rather than re-banding relaxed positions."""
-    from src.builders.afm.hetero import HeteroAFMSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
     raw = _afm_hetero_raw()
     raw["general"]["interlayer_style"] = "ilp"
     cfg = AFMSimulationConfig(**raw, settings=load_settings())

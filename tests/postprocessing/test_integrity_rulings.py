@@ -5,9 +5,9 @@ import pytest
 
 pytest.importorskip('scipy')
 
-from src.postprocessing.integrity_rulings import (  # noqa: E402
+from frictionsim2d.postprocessing.integrity_rulings import (  # noqa: E402
     RULINGS_FILE, apply_rulings, format_point_id, load_rulings, point_id)
-from src.postprocessing.read_data import DataReader  # noqa: E402
+from frictionsim2d.postprocessing.read_data import DataReader  # noqa: E402
 from tests.postprocessing.test_read_data_integrity import (  # noqa: E402
     _afm_tree, _point)
 
@@ -184,7 +184,7 @@ def test_quarantined_pass_is_not_an_override(tmp_path):
     assert p.integrity.original_status == 'quarantined'
 
 
-from src.postprocessing.integrity_rulings import Ruling, decide  # noqa: E402
+from frictionsim2d.postprocessing.integrity_rulings import Ruling, decide  # noqa: E402
 
 
 @pytest.mark.parametrize('status,ruling,expect', [

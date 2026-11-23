@@ -9,9 +9,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import src.analysis.catalogue  # noqa: F401  (registers the analyses)
-from src.analysis.base import get_analysis
-from src.analysis.source import RunSource
+import frictionsim2d.analysis.catalogue  # noqa: F401  (registers the analyses)
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.source import RunSource
 
 MEASURES = {'hole': 1.5, 'isolated': 0, 'ejected': 0, 'T_sigma': 0.4, 'gap_rise': 0.1}
 
@@ -107,7 +107,7 @@ def test_run_status_has_one_row_per_point_and_drops_none():
 
 
 def test_completion_status_maps_integrity_verdicts_to_complete():
-    from src.analysis.integrity_traces import completion_status
+    from frictionsim2d.analysis.integrity_traces import completion_status
     assert [completion_status(v) for v in ('complete', 'failed_integrity', 'quarantined',
                                            'halted', 'no_output')] == \
         ['complete', 'complete', 'complete', 'halted', 'no_output']
@@ -130,10 +130,10 @@ _ANALYSIS = Path('/home/matteo/mnt/PhD/Sync/Publication-data/publication_export/
 
 _PUB_SCRIPT = """
 import sys
-from src.aiida import load_aiida_profile
+from frictionsim2d.aiida import load_aiida_profile
 load_aiida_profile('friction2d_pub')
-from src.analysis.base import get_analysis
-from src.analysis.source import RunSource
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.source import RunSource
 dataset, traces, status = sys.argv[1:4]
 with RunSource.from_dataset(dataset) as source:
     for name, out in (('integrity_traces', traces), ('run_status', status)):

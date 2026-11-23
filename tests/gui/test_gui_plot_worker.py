@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.gui.plot_worker import main, run
-from src.postprocessing.read_data import DataReader
+from frictionsim2d.gui.plot_worker import main, run
+from frictionsim2d.postprocessing.read_data import DataReader
 from tests.helpers.results_tree import make_family_run
 
 

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-TEMPLATES = REPO / 'src' / 'templates'
+TEMPLATES = REPO / 'frictionsim2d' / 'templates'
 
 #: Every template that emits a tiled decomposition / RCB balance.
 TILED_TEMPLATES = [
@@ -55,7 +55,7 @@ def test_d3_cutoff_vs_box_is_validated():
     d3_cutoff, and the failure must be diagnosed up front rather than deep in a
     LAMMPS run.
     """
-    from src.core.mlip import check_d3_fits_box
+    from frictionsim2d.core.mlip import check_d3_fits_box
 
     # 16.0 cutoff + 0.3 skin = 16.3 required
     with pytest.raises(ValueError, match='(?i)d3_cutoff'):

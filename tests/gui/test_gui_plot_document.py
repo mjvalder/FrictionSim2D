@@ -7,11 +7,11 @@ and importable -- on a machine with no Qt at all.
 
 from __future__ import annotations
 
-from src.gui.controllers.plot_document import (COMMON_SECTION,
+from frictionsim2d.gui.controllers.plot_document import (COMMON_SECTION,
                                                MODEL_BY_PLOT_TYPE,
                                                PlotEditorDocument)
-from src.gui.schema.overrides import PLOT_MODEL, overrides_for
-from src.postprocessing.plot_config import PLOT_TYPES, SummaryPlot
+from frictionsim2d.gui.schema.overrides import PLOT_MODEL, overrides_for
+from frictionsim2d.postprocessing.plot_config import PLOT_TYPES, SummaryPlot
 
 
 def test_every_plot_type_has_a_model():

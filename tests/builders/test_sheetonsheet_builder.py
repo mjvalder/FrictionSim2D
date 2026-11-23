@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.core.config import SheetOnSheetSimulationConfig, load_settings
+from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
+from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
 
 # slide.lmp embeds two fresh `{{ range(1, 999999) | random }}` seeds on every
 # render (velocity create + langevin fix), so raw output can't be pinned
@@ -31,7 +31,7 @@ def _normalize_random_seeds(content: str) -> str:
 # on the `_make_sheetonsheet_config` fixture config (pressure=1.0), before
 # the scan_angle split was added. Pins that the unset (default) path is
 # byte-identical to today. Updated for Task 14: the three fix ave/time lines
-# now come from the observables registry (src/core/observables.py) via
+# now come from the observables registry (frictionsim2d/core/observables.py) via
 # emit_output_fixes(obs_ctx) -- column order changed, and COM_ctop/COM_cbot/
 # COM_bot were deleted as exact aliases of the layer-resolved COMs. Updated
 # again for Task 17: three new computes (T_center, T_layer_1, T_Ltop) and
@@ -632,9 +632,9 @@ def test_contact_cutoff_derives_from_the_uff_sigma_of_a_real_cif():
     """
     from itertools import product
 
-    from src.builders.afm.base import K_CONTACT, _CONTACT_CUTOFF_FALLBACK
-    from src.core.utils.structures import cifread
-    from src.potentials.utils import lj_params
+    from frictionsim2d.builders.afm.base import K_CONTACT, _CONTACT_CUTOFF_FALLBACK
+    from frictionsim2d.core.utils.structures import cifread
+    from frictionsim2d.potentials.utils import lj_params
 
     config = _real_material_config()
     builder = SheetOnSheetSimulation(config, output_dir="unused")
@@ -693,7 +693,7 @@ def test_sheetonsheet_outer_loop_pressure_splits_slide_per_pressure(tmp_path):
 
     Neither of the two SPLIT_OUTER_LOOPS values other than scan_angle was
     written by any test, while `SPLIT_OUTER_LOOPS` declares all three and
-    `src.run.expand._run_scripts_per_build` predicts job counts from that same
+    `frictionsim2d.run.expand._run_scripts_per_build` predicts job counts from that same
     declaration -- see test_..._matches_the_predicted_job_count below.
     """
     config = _make_sheetonsheet_config(tmp_path, layers=[3])
@@ -758,7 +758,7 @@ def test_sheetonsheet_outer_loop_split_matches_the_predicted_job_count(
     the two could drift silently -- the GUI would promise N scripts and the
     build would write M.
     """
-    from src.run.expand import _run_scripts_per_build
+    from frictionsim2d.run.expand import _run_scripts_per_build
 
     config = _make_sheetonsheet_config(tmp_path, layers=[3])
     setattr(config.general, field, values)
@@ -836,7 +836,7 @@ def test_sheetonsheet_reaxff_renders_the_charge_atom_style(tmp_path):
 # default path is pinned byte-identical to the pre-feature output.
 # --------------------------------------------------------------------------- #
 
-from src.core.config import GlobalSettings, read_config  # noqa: E402
+from frictionsim2d.core.config import GlobalSettings, read_config  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SHEET_LJ_SNAPSHOT = Path(__file__).parent / "data" / "sheet_lj_snapshot"
@@ -991,8 +991,8 @@ def test_stack_layers_template_sets_molecule_ids():
     """common/stack_layers.lmp (the in-process stacking script) gets them too,
     before its `run 0`, and keeps them out of the written data file."""
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader("src.templates"),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader("frictionsim2d.templates"),
                       trim_blocks=True, lstrip_blocks=True)
     ctx = dict(box_xlo=0, box_xhi=10, box_ylo=0, box_yhi=10, box_zhi=30,
                total_types=4, atom_style="atomic", base_layer_path="base.lmp",

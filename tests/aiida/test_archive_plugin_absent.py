@@ -24,8 +24,8 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida.export import export_archive  # noqa: E402
-from src.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.export import export_archive  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
 from tests.aiida.test_export import _run  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -41,7 +41,7 @@ _SCRIPT = textwrap.dedent('''
     import importlib_metadata as md
 
     def _ours(ep):
-        return ep.name.startswith('friction2d') or ep.value.startswith('src.')
+        return ep.name.startswith('friction2d') or ep.value.startswith('frictionsim2d.')
 
     def _filtered(module):
         def entry_points(**params):
@@ -55,9 +55,9 @@ _SCRIPT = textwrap.dedent('''
     md.entry_points = _filtered(md)
 
     try:
-        # (`import src` alone can succeed: another package ships a bare
-        # `src` namespace directory into site-packages.)
-        import src.aiida.calcjob  # noqa: F401
+        # (`import frictionsim2d` alone can succeed: another package ships a bare
+        # `frictionsim2d` namespace directory into site-packages.)
+        import frictionsim2d.aiida.calcjob  # noqa: F401
         plugin_importable = True
     except ImportError:
         plugin_importable = False
@@ -118,7 +118,7 @@ def _counts():
 
 def test_archive_imports_and_loads_without_the_plugin(aiida_profile_clean, tmp_path,
                                                       monkeypatch):
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
     root = tmp_path / 'sim'
     _run(root, loads=(10.0, 30.0))

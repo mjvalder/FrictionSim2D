@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.postprocessing.read_data import DataReader
-from src.postprocessing.run_status import (classify, expected_chains,
+from frictionsim2d.postprocessing.read_data import DataReader
+from frictionsim2d.postprocessing.run_status import (classify, expected_chains,
                                            halt_detail, mark_not_reached,
                                            point_key)
 from tests.helpers.results_tree import make_family_run, slide_config

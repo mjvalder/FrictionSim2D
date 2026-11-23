@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from src.interfaces.atomsk import AtomskWrapper
+from frictionsim2d.interfaces.atomsk import AtomskWrapper
 
 def test_atomsk_binary_not_found():
     """Ensure error is raised if atomsk is missing."""
@@ -41,7 +41,7 @@ def test_create_slab():
 import subprocess
 from pathlib import Path
 
-from src.interfaces.atomsk import AtomskError
+from frictionsim2d.interfaces.atomsk import AtomskError
 
 
 def _wrapper(monkeypatch, calls):

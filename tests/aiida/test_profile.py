@@ -1,4 +1,4 @@
-"""The AiiDA profile (`src/aiida/profile.py`): `aiida setup` makes SQLite by
+"""The AiiDA profile (`frictionsim2d/aiida/profile.py`): `aiida setup` makes SQLite by
 default and PostgreSQL only when asked; `aiida preflight` (spec §8, Task 15)
 reports what it found and never raises."""
 from types import SimpleNamespace
@@ -9,8 +9,8 @@ pytest.importorskip('aiida')
 
 from click.testing import CliRunner  # noqa: E402
 
-import src.aiida.profile as profile_mod  # noqa: E402
-from src.cli import cli  # noqa: E402
+import frictionsim2d.aiida.profile as profile_mod  # noqa: E402
+from frictionsim2d.cli import cli  # noqa: E402
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def test_cli_setup_passes_postgres_only_with_the_flag(monkeypatch):
 # --- preflight ------------------------------------------------------------------
 
 def test_preflight_never_raises_and_reports():
-    from src.aiida.profile import preflight
+    from frictionsim2d.aiida.profile import preflight
     rep = preflight()
     assert isinstance(rep.messages, list) and rep.messages
     assert isinstance(rep.profile_found, bool)
@@ -78,7 +78,7 @@ def test_preflight_never_raises_and_reports():
 
 
 def test_preflight_distinguishes_missing_from_broken(monkeypatch):
-    from src.aiida import profile as pf
+    from frictionsim2d.aiida import profile as pf
 
     class _EmptyConfig:
         profiles = []
@@ -92,7 +92,7 @@ def test_preflight_distinguishes_missing_from_broken(monkeypatch):
 
 
 def test_entry_points_check_runs():
-    from src.aiida.profile import preflight
+    from frictionsim2d.aiida.profile import preflight
     rep = preflight()
     assert any('entry point' in m.lower() for m in rep.messages)
 
@@ -107,7 +107,7 @@ def _fake_entry_points(table):
 
 
 def test_entry_points_need_the_calcjob_and_the_parser(monkeypatch):
-    from src.aiida.profile import _check_entry_points
+    from frictionsim2d.aiida.profile import _check_entry_points
     monkeypatch.setattr('importlib.metadata.entry_points', _fake_entry_points(
         {'aiida.calculations': ['friction2d.lammps']}))
     messages = []
@@ -116,7 +116,7 @@ def test_entry_points_need_the_calcjob_and_the_parser(monkeypatch):
 
 
 def test_a_friction2d_data_entry_point_fails_the_check(monkeypatch):
-    from src.aiida.profile import _check_entry_points
+    from frictionsim2d.aiida.profile import _check_entry_points
     monkeypatch.setattr('importlib.metadata.entry_points', _fake_entry_points({
         'aiida.calculations': ['friction2d.lammps'], 'aiida.parsers': ['friction2d.lammps'],
         'aiida.data': ['core.dict', 'friction2d.results']}))
@@ -126,7 +126,7 @@ def test_a_friction2d_data_entry_point_fails_the_check(monkeypatch):
 
 
 def test_the_current_entry_points_pass(monkeypatch):
-    from src.aiida.profile import _check_entry_points
+    from frictionsim2d.aiida.profile import _check_entry_points
     monkeypatch.setattr('importlib.metadata.entry_points', _fake_entry_points({
         'aiida.calculations': ['friction2d.lammps'], 'aiida.parsers': ['friction2d.lammps'],
         'aiida.data': ['core.dict']}))

@@ -3,11 +3,11 @@
 These files are the documented entry point for MLIP runs
 (``documentation/mlip.md``), so a config that no longer parses is a broken
 deliverable, not a stale sample. The loop below drives the *real* loading path
-that :func:`src.run.simulate.run_simulations` uses --
+that :func:`frictionsim2d.run.simulate.run_simulations` uses --
 
     parse_config -> expand_config_sweeps -> {AFM,SheetOnSheet}SimulationConfig
 
--- and then applies :func:`src.core.mlip.validate_mlip_cell`, which is where the
+-- and then applies :func:`frictionsim2d.core.mlip.validate_mlip_cell`, which is where the
 capability matrix's cell-level rules live (no MLIP beside a classical
 component, no multi-component full cell, one model per framework per cell).
 Together those are exactly the two gates an example has to clear before a
@@ -32,20 +32,20 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.core.config import (
+from frictionsim2d.core.config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
     parse_config,
 )
-from src.core.mlip import is_mlip, validate_mlip_cell
-from src.run.expand import expand_config_sweeps
-from src.run.naming import (
+from frictionsim2d.core.mlip import is_mlip, validate_mlip_cell
+from frictionsim2d.run.expand import expand_config_sweeps
+from frictionsim2d.run.naming import (
     AFM_LIKE_MODELS,
     mlip_flavor_from_pot_token,
     output_dir_for,
 )
-from src.run.simulate import _select_afm_builder_cls, _select_sheet_builder_cls
+from frictionsim2d.run.simulate import _select_afm_builder_cls, _select_sheet_builder_cls
 
 pytestmark = pytest.mark.integration
 

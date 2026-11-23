@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import (
+from frictionsim2d.core.config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
@@ -100,7 +100,7 @@ def _build(builder_cls, config, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_pes_sheet_full_cell_mace(tmp_path):
-    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
 
     config = SheetOnSheetSimulationConfig(**{
         'general': {'temp': 0.0},
@@ -126,7 +126,7 @@ def test_pes_sheet_mace_deck_has_directives_and_no_tiled(tmp_path):
     MLIP keys have to be threaded through it explicitly (a missing key renders
     an MLIP deck without ``atom_modify map``/``newton on`` and with ``tiled``).
     """
-    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
 
     config = SheetOnSheetSimulationConfig(**{
         'general': {'temp': 0.0},
@@ -150,7 +150,7 @@ def test_pes_sheet_mace_deck_has_directives_and_no_tiled(tmp_path):
 
 def test_pes_sheet_full_cell_deepmd(tmp_path):
     """The DeePMD half of the same row -- one instance, full element list."""
-    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
 
     config = SheetOnSheetSimulationConfig(**{
         'general': {'temp': 0.0},
@@ -172,7 +172,7 @@ def test_pes_sheet_full_cell_deepmd(tmp_path):
 
 
 def test_sheetonsheet_full_cell_deepmd(tmp_path):
-    from src.builders.sheetonsheet import SheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
 
     config = SheetOnSheetSimulationConfig(**{
         'general': {'temp': 300.0, 'pressure': 1.0},
@@ -192,7 +192,7 @@ def test_sheetonsheet_full_cell_deepmd(tmp_path):
 
 def test_pes_tip_deepmd_sheet_is_refused(tmp_path):
     """A tip PES scan is tip + sheet + substrate -- a partitioned cell."""
-    from src.builders.afm.pes_tip import PESTipSimulation
+    from frictionsim2d.builders.afm.pes_tip import PESTipSimulation
 
     config = AFMSimulationConfig(**{
         'general': {'temp': 300.0, 'force': 5.0, 'scan_speed': 2.0},
@@ -206,7 +206,7 @@ def test_pes_tip_deepmd_sheet_is_refused(tmp_path):
 
 
 def test_indent_deepmd_sheet_is_refused(tmp_path):
-    from src.builders.afm.indent import IndentSimulation
+    from frictionsim2d.builders.afm.indent import IndentSimulation
 
     config = AFMSimulationConfig(**{
         'general': {'temp': 300.0, 'force': 10.0, 'scan_speed': 2.0},
@@ -227,7 +227,7 @@ def test_hetero_sheetonsheet_deepmd_builds_as_one_full_cell(tmp_path):
     foundation model covers both. It needs a single instance whose type map
     spans both materials -- which is exactly what the builders now emit.
     """
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
 
     model = _model(tmp_path)
     config = SheetOnSheetSimulationConfig(**{
@@ -254,7 +254,7 @@ def test_hetero_sheetonsheet_deepmd_builds_as_one_full_cell(tmp_path):
 @needs_lmp
 def test_hetero_rejects_mace_beside_a_classical_material(tmp_path):
     """An MLIP may not share a hetero cell with SW."""
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
 
     config = SheetOnSheetSimulationConfig(**{
         'general': {'temp': 300.0, 'pressure': 1.0},
@@ -275,7 +275,7 @@ def test_hetero_rejects_mace_beside_a_classical_material(tmp_path):
 @needs_lmp
 def test_flake_slide_deepmd_builds_as_one_full_cell(tmp_path):
     """Sheet + flake is two components, and one instance now spans both."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     model = _model(tmp_path)
     config = SheetOnSheetSimulationConfig(**{
@@ -317,7 +317,7 @@ def test_hetero_virtual_type_is_gated_on_the_drive_method():
     """
     import inspect
 
-    from src.builders.construction import hetero_stack as hetero
+    from frictionsim2d.builders.construction import hetero_stack as hetero
 
     for func in (hetero.register_hetero_potentials,
                  hetero.register_hetero_flake_potentials):
@@ -356,7 +356,7 @@ def _assert_one_full_map(text):
 
 def test_pes_tip_all_deepmd_builds_as_one_full_cell(tmp_path):
     """`pes-tip` inherits the AFM build path, so v6 unblocks it for free."""
-    from src.builders.afm.pes_tip import PESTipSimulation
+    from frictionsim2d.builders.afm.pes_tip import PESTipSimulation
 
     config = _all_mlip_afm_like(tmp_path, {'pes': {'grid_n': 6}})
     _assert_one_full_map(_build(PESTipSimulation, config, tmp_path))
@@ -364,7 +364,7 @@ def test_pes_tip_all_deepmd_builds_as_one_full_cell(tmp_path):
 
 def test_indent_all_deepmd_builds_as_one_full_cell(tmp_path):
     """Same build path again -- indent is AFM_LIKE too."""
-    from src.builders.afm.indent import IndentSimulation
+    from frictionsim2d.builders.afm.indent import IndentSimulation
 
     config = _all_mlip_afm_like(tmp_path, {'indent': {}})
     _assert_one_full_map(_build(IndentSimulation, config, tmp_path))
@@ -372,7 +372,7 @@ def test_indent_all_deepmd_builds_as_one_full_cell(tmp_path):
 
 def test_amorphous_substrate_is_refused_in_the_afm_like_family(tmp_path):
     """v6 §5 applies to every AFM-like builder, not just `run afm`."""
-    from src.builders.afm.indent import IndentSimulation
+    from frictionsim2d.builders.afm.indent import IndentSimulation
 
     model = _model(tmp_path)
     config = AFMSimulationConfig(**{

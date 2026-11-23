@@ -25,23 +25,23 @@ pytestmark = [pytest.mark.aiida, pytest.mark.filterwarnings(
 
 from aiida import orm  # noqa: E402
 
-import src.aiida.export as export_mod  # noqa: E402
-from src.aiida.compare import load_blocks, load_blocks_from_sidecar  # noqa: E402
-from src.aiida.export import (  # noqa: E402
+import frictionsim2d.aiida.export as export_mod  # noqa: E402
+from frictionsim2d.aiida.compare import load_blocks, load_blocks_from_sidecar  # noqa: E402
+from frictionsim2d.aiida.export import (  # noqa: E402
     ExportClosureError, UncheckedPointsError, export_archive, export_dataset,
     export_results, import_archive, rebuild_set,
 )
-from src.aiida.ingest import import_root  # noqa: E402
-import src.aiida.query as query_mod  # noqa: E402
-import src.aiida.steps as steps_mod  # noqa: E402
-from src.aiida.query import related  # noqa: E402
-from src.analysis.store import (  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+import frictionsim2d.aiida.query as query_mod  # noqa: E402
+import frictionsim2d.aiida.steps as steps_mod  # noqa: E402
+from frictionsim2d.aiida.query import related  # noqa: E402
+from frictionsim2d.analysis.store import (  # noqa: E402
     ANALYSIS_GROUP_PREFIX, find_result, params_hash, store_result,
 )
-from src.aiida.steps import build_dataset, postprocess_group  # noqa: E402
-from src.aiida.store import BLOCK_HASH_EXTRA, verify  # noqa: E402
-from src.postprocessing.read_data import DataReader  # noqa: E402
-from src.postprocessing.integrity_rulings import RULINGS_FILE, format_point_id  # noqa: E402
+from frictionsim2d.aiida.steps import build_dataset, postprocess_group  # noqa: E402
+from frictionsim2d.aiida.store import BLOCK_HASH_EXTRA, verify  # noqa: E402
+from frictionsim2d.postprocessing.read_data import DataReader  # noqa: E402
+from frictionsim2d.postprocessing.integrity_rulings import RULINGS_FILE, format_point_id  # noqa: E402
 from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
 from tests.postprocessing.test_read_data_integrity import DECK, _afm_snapshots  # noqa: E402
@@ -57,7 +57,7 @@ CALCJOB_TYPE = 'process.calculation.calcjob.CalcJobNode.'
 @pytest.fixture
 def no_profile_switch(monkeypatch):
     """`aiida_profile_clean` is already loaded; do not load another."""
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
@@ -217,7 +217,7 @@ def test_an_unchecked_point_blocks_the_archive_unless_forced(aiida_profile_clean
     assert report.ok(), report.render()
     point = next(orm.load_node(u) for u in report.points
                  if orm.load_node(u).base.attributes.get('load') == 30.0)
-    from src.aiida.steps import latest_verdict
+    from frictionsim2d.aiida.steps import latest_verdict
     latest_verdict(point).base.extras.set('superseded', True)
 
     with pytest.raises(UncheckedPointsError) as caught:
@@ -409,7 +409,7 @@ def test_the_archive_carries_the_analyses_of_the_sets_datasets(
 
 def test_a_campaign_imported_into_another_profile_joins_its_shared_blocks(
         aiida_profile_clean, no_profile_switch, tmp_path):
-    from src.aiida.store import machine_computer
+    from frictionsim2d.aiida.store import machine_computer
     from tests.aiida.test_query import A_UUID, B_UUID, _campaign
 
     a = _campaign(tmp_path / 'A', A_UUID, machine_computer('localhost', {}),
@@ -591,7 +591,7 @@ def test_a_ruling_source_is_basenamed_in_the_archive(aiida_profile_clean,
         'point': format_point_id(rel, 'force', 10.0, 0.0, 2.0), 'ruling': 'pass',
         'note': 'viewer artefact', 'override': True}]), encoding='utf-8')
     assert import_root(root, label='camp', machine='mycluster').ok()
-    from src.aiida.steps import apply_rulings
+    from frictionsim2d.aiida.steps import apply_rulings
     assert apply_rulings('camp', review).applied == 1
 
     path = export_archive('camp', tmp_path / 'camp.aiida')
@@ -624,7 +624,7 @@ def test_the_ruling_ledgers_sources_are_basenamed_in_the_archive(
         review.write_text(yaml.safe_dump([{**entry, 'ruling': 'pass'}]), encoding='utf-8')
         reviews.append(review)
     assert import_root(root, label='camp', machine='mycluster').ok()
-    from src.aiida.steps import LEDGER_EXTRA, apply_rulings
+    from frictionsim2d.aiida.steps import LEDGER_EXTRA, apply_rulings
     for review in reviews:
         assert apply_rulings('camp', review).conflicts
     reviews[1].unlink()
@@ -685,7 +685,7 @@ def test_an_unknown_archive_layout_is_refused(aiida_profile_clean, no_profile_sw
 
 def test_a_dataset_archive_is_gated_judged_and_anonymised(aiida_profile_clean,
                                                           no_profile_switch, tmp_path):
-    from src.aiida.steps import latest_verdict
+    from frictionsim2d.aiida.steps import latest_verdict
     _hpc_tree(tmp_path / 'a', tiers=('window', 'peratom'))
     _run(tmp_path / 'b', 'h-WS2', loads=(10.0,))
     assert import_root(tmp_path / 'a', label='A', machine='mycluster').ok()
@@ -758,7 +758,7 @@ def test_a_failed_parse_stays_visible_without_paths(aiida_profile_clean, no_prof
     """A deck whose outputs fail to parse logs one ERROR line (no traceback); an
     older node's traceback log is cut to its first line, paths basenamed."""
     from aiida.common import timezone
-    import src.aiida.calcjob as calcjob
+    import frictionsim2d.aiida.calcjob as calcjob
 
     root = tmp_path / 'sim'
     run_dir = _run(root, loads=(10.0,))
@@ -774,8 +774,8 @@ def test_a_failed_parse_stays_visible_without_paths(aiida_profile_clean, no_prof
     assert 'Traceback' not in log.message and 'ValueError' in log.message
     orm.Log(timezone.now(), 'aiida.parser', 'ERROR', calc.pk,
             f'Parsing failed\nTraceback (most recent call last):\n  File '
-            f'"{REPO}/src/aiida/calcjob.py", line 1\nValueError: {Path.home()}/x',
-            metadata={'pathname': f'{REPO}/src/aiida/calcjob.py',
+            f'"{REPO}/frictionsim2d/aiida/calcjob.py", line 1\nValueError: {Path.home()}/x',
+            metadata={'pathname': f'{REPO}/frictionsim2d/aiida/calcjob.py',
                       'exc_text': f'File "{Path.home()}/envs/x.py"'}).store()
 
     path = export_archive('camp', tmp_path / 'camp.aiida', force=True)
@@ -812,7 +812,7 @@ def test_a_late_failure_leaves_nothing_at_the_targets(aiida_profile_clean,
     def broken_readme(*args, **kwargs):
         raise RuntimeError('readme failed')
     monkeypatch.undo()
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
     monkeypatch.setattr(export_mod, '_readme_text', broken_readme)
     with pytest.raises(RuntimeError, match='readme failed'):

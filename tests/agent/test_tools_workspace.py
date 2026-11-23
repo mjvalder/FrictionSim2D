@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from src.agent.changes import FsChangeSet
-from src.agent.sandbox import SandboxError
-from src.agent.tools.workspace import (describe_run, propose_copy_in,
+from frictionsim2d.agent.changes import FsChangeSet
+from frictionsim2d.agent.sandbox import SandboxError
+from frictionsim2d.agent.tools.workspace import (describe_run, propose_copy_in,
                                        propose_mkdir, workspace_overview)
 from tests.helpers.agent import make_deps
 
@@ -106,7 +106,7 @@ def test_overview_depth_is_clamped(deps):
 
 
 def test_overview_counts_are_capped(deps):
-    from src.agent.tools import workspace as ws_tools
+    from frictionsim2d.agent.tools import workspace as ws_tools
     big = deps.roots.workspace / 'big'
     big.mkdir()
     for i in range(ws_tools.MAX_COUNT + 5):

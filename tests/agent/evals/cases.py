@@ -21,16 +21,16 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, List, Optional, Tuple
 
-from src.agent.changes import ChangeSet, FsChangeSet, ToolInputError
-from src.agent.knowledge_index import load_knowledge
-from src.agent.materials_db import NO_KEY, MaterialsDBError
-from src.agent.plot_changes import PlotChange
-from src.agent.tools.materials import index_for, resolve_material
-from src.agent.tools.setup import make_sweep
-from src.core.scaling import ScaleContext, scale
-from src.core.utils.structures import cifread
-from src.postprocessing.plot_config import PLOT_TYPES
-from src.postprocessing.read_data import DataReader
+from frictionsim2d.agent.changes import ChangeSet, FsChangeSet, ToolInputError
+from frictionsim2d.agent.knowledge_index import load_knowledge
+from frictionsim2d.agent.materials_db import NO_KEY, MaterialsDBError
+from frictionsim2d.agent.plot_changes import PlotChange
+from frictionsim2d.agent.tools.materials import index_for, resolve_material
+from frictionsim2d.agent.tools.setup import make_sweep
+from frictionsim2d.core.scaling import ScaleContext, scale
+from frictionsim2d.core.utils.structures import cifread
+from frictionsim2d.postprocessing.plot_config import PLOT_TYPES
+from frictionsim2d.postprocessing.read_data import DataReader
 from tests.helpers.agent import FakeMaterialsClient, materials_factory
 from tests.helpers.results_tree import make_family_run
 

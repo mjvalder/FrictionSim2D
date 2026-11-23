@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from src.run.expand import expand_config_sweeps
-from src.run.naming import (
+from frictionsim2d.run.expand import expand_config_sweeps
+from frictionsim2d.run.naming import (
     LOOPABILITY, interlayer_dir_token, output_dir_for, parse_run_path,
 )
 from tests.run.test_potential_sweep import _minimal_afm_dict

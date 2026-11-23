@@ -6,9 +6,9 @@ import pytest
 from click.testing import CliRunner
 from pydantic import BaseModel
 
-from src.analysis import base, store
-from src.analysis.base import Analysis, register
-from src.cli import cli
+from frictionsim2d.analysis import base, store
+from frictionsim2d.analysis.base import Analysis, register
+from frictionsim2d.cli import cli
 
 TABLE = pd.DataFrame({'material': ['h_MoS2', 'h_WS2'], 'cof': [0.1, 0.2]})
 
@@ -34,7 +34,7 @@ def probe(monkeypatch):
             return TABLE
 
     calls = []
-    monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: calls.append(profile))
+    monkeypatch.setattr('frictionsim2d.aiida.load_aiida_profile', lambda profile=None: calls.append(profile))
 
     node = SimpleNamespace(
         uuid='uuid-1', get_content=lambda mode='rb': TABLE.to_csv(index=False).encode(),

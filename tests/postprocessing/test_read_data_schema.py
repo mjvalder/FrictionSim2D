@@ -1,7 +1,7 @@
 """Header-driven parser + strict LEGACY_2026 fallback (spec §1.1/§3.2, Task 3)."""
 import pytest
 
-from src.postprocessing.read_data import DataReader, SchemaError
+from frictionsim2d.postprocessing.read_data import DataReader, SchemaError
 
 LEGACY_10 = (
     "# Time-averaged data\n"
@@ -243,7 +243,7 @@ def test_correction_provenance_survives_json_export():
     # recognise the re-ingested run.
     import json
     import pandas as pd
-    from src.postprocessing.read_data import _NpEncoder
+    from frictionsim2d.postprocessing.read_data import _NpEncoder
 
     df = pd.DataFrame({'nf': [1.0], 'lfx': [2.0], 'lfy': [1.0]})
     df.attrs['lf_schema'] = 1
@@ -256,8 +256,8 @@ def test_correction_provenance_survives_json_export():
 def test_ev_a_to_nn_matches_the_corrector_constant():
     # the templates scale by EV_A_TO_NN; the corrector hard-codes its own
     # copy. If one is ever changed the other must move with it.
-    from src.data.models import EV_A_TO_NN
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.data.models import EV_A_TO_NN
+    from frictionsim2d.postprocessing.read_data import DataReader
     assert DataReader._LF_SCHEMA1_CORRECTION == EV_A_TO_NN
 
 
@@ -272,7 +272,7 @@ def test_legacy_lj_file_still_corrects_after_react_x_rename(tmp_path):
     for a real file's header. Until then this is a characterization test:
     it passes today because v_sx still survives unrenamed, and it must keep
     passing unchanged once Task 9 lands the react_x declaration."""
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
     # no schema marker => schema 1; lfx != v_sx => LJ branch
     f.write_text(
@@ -289,7 +289,7 @@ def test_legacy_lj_file_still_corrects_after_react_x_rename(tmp_path):
 def test_many_body_legacy_file_is_left_alone(tmp_path):
     # on the many-body branch the template defines xfrict AS v_sx, so the two
     # columns are bit-identical and there is nothing to correct
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
     f.write_text(
         "# Time-averaged data for fix fc_ave\n"
@@ -306,7 +306,7 @@ def test_audit_reads_native_names_not_renamed_ones():
     the react_x rename. Pinned so a later 'tidy-up' does not route it
     through _read_dataframe and silently change what it classifies."""
     import inspect
-    from src.postprocessing import audit_lf_units
+    from frictionsim2d.postprocessing import audit_lf_units
     src = inspect.getsource(audit_lf_units)
     assert "'v_sx'" in src and '_read_dataframe' not in src
 
@@ -322,7 +322,7 @@ def test_raw_tier_unidentifiable_branch_warns_after_react_x_rename(tmp_path, cap
     RAW-tier channel, so this calls _correct_legacy_lf_schema1 directly on a
     hand-built frame that anticipates that rename."""
     import pandas as pd
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
 
     df = pd.DataFrame({
         'raw_lfx': [2.0],
@@ -340,7 +340,7 @@ def test_raw_tier_unidentifiable_branch_warns_after_react_x_rename(tmp_path, cap
 
 
 def test_registry_is_the_only_sheet_rename_map():
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     assert not hasattr(DataReader, '_SHEET_COLUMN_RENAME'), (
         'the registry owns sheet renames now; a second hand-maintained map '
         'is what let rename_map shadow lfx and silently kill sheet COF')
@@ -352,7 +352,7 @@ def test_headerless_sheet_file_raises(tmp_path):
     match the 17-column list the positional fallback described. Guessing at a
     headerless sheet file is more dangerous than refusing it."""
     import pytest
-    from src.postprocessing.read_data import DataReader, SchemaError
+    from frictionsim2d.postprocessing.read_data import DataReader, SchemaError
     f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
     # line 2 must NOT start with '#': _read_dataframe takes the header path
     # whenever it does, and would happily name the columns after whatever
@@ -365,13 +365,13 @@ def test_headerless_sheet_file_raises(tmp_path):
 
 
 def test_sheet_positional_list_is_gone():
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     assert not hasattr(DataReader, '_SHEET_FILE_COLUMNS')
     assert DataReader._AFM_FILE_COLUMNS[:3] == ['time', 'nf', 'lfx']
 
 
 def test_family_marker_wins_over_path_inference(tmp_path):
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
     f.write_text(
         "# schema=2 lf_units=nN family=hetero\n"
@@ -383,13 +383,13 @@ def test_family_marker_wins_over_path_inference(tmp_path):
 
 def test_missing_family_marker_falls_back_to_the_traversal_vocabulary():
     # every one of the 7,171 retained sheet files predates the marker
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     assert DataReader._registry_sim_type('sheet', '# schema=2 lf_units=nN') == 'sheetonsheet'
     assert DataReader._registry_sim_type('tip', '') == 'afm'
 
 
 def test_unknown_family_marker_is_refused():
     import pytest
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     with pytest.raises(ValueError, match='family'):
         DataReader._registry_sim_type('sheet', '# family=bogus')

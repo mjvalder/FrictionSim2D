@@ -21,8 +21,8 @@ import numpy as np
 import pytest
 from ase.io import read
 
-from src.builders import components
-from src.core.config import SheetOnSheetSimulationConfig, load_settings
+from frictionsim2d.builders import components
+from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
@@ -88,11 +88,11 @@ def test_hetero_pes_sheet_mro_and_split_outer_loops():
     run-phase identity is the static scan's, and ``SPLIT_OUTER_LOOPS`` must stay
     ``frozenset()``: the scan replaces the run phase outright and never reads
     ``outer_loop``, so a non-empty value would make the GUI's job-count
-    prediction (``src.run.expand._run_scripts_per_build``) promise scripts the
+    prediction (``frictionsim2d.run.expand._run_scripts_per_build``) promise scripts the
     build never writes.
     """
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
-    from src.builders.sheetonsheet.pes_sheet import (
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import (
         HeteroPESSheetSimulation,
         PESGridMixin,
         PESSheetSimulation,
@@ -115,7 +115,7 @@ def test_hetero_pes_sheet_mro_and_split_outer_loops():
 def test_hetero_pes_sheet_run_script_count_is_one_per_build():
     """``outer_loop`` must not multiply the run scripts for the hetero PES scan,
     while ``pes.grid_n_refine`` must still add exactly one refinement script."""
-    from src.run.expand import _run_scripts_per_build
+    from frictionsim2d.run.expand import _run_scripts_per_build
 
     raw = _hetero_pes_raw()
     raw["general"]["outer_loop"] = "pressure"
@@ -131,31 +131,31 @@ def test_hetero_pes_sheet_run_script_count_is_one_per_build():
 # --- routing -----------------------------------------------------------------
 
 def test_routing_selects_hetero_pes_sheet_for_two_materials():
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
-    from src.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
     cfg = _hetero_pes_config()
     assert _select_sheet_builder_cls("pes_sheet", cfg) is HeteroPESSheetSimulation
 
 
 def test_routing_selects_hetero_pes_sheet_for_single_material_twist():
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
-    from src.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
     cfg = _twist_pes_config()
     assert len(cfg.sheets) == 1 and cfg.general.twist_angle is not None
     assert _select_sheet_builder_cls("pes_sheet", cfg) is HeteroPESSheetSimulation
 
 
 def test_routing_keeps_homogeneous_pes_sheet_for_single_material():
-    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
-    from src.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
     cfg = _single_material_pes_config()
     assert _select_sheet_builder_cls("pes_sheet", cfg) is PESSheetSimulation
 
 
 def test_routing_hetero_slide_unchanged_for_sheetonsheet():
     """The dynamic model must keep routing to the plain hetero slide builder."""
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
-    from src.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
     cfg = _hetero_pes_config(layers=(2, 2))
     assert _select_sheet_builder_cls("sheetonsheet", cfg) is HeteroSheetOnSheetSimulation
 
@@ -163,7 +163,7 @@ def test_routing_hetero_slide_unchanged_for_sheetonsheet():
 # --- layer gate ---------------------------------------------------------------
 
 def test_hetero_pes_sheet_min_layers_relaxed_to_two():
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     assert HeteroPESSheetSimulation.MIN_LAYERS == 2
 
 
@@ -172,7 +172,7 @@ def test_dynamic_hetero_slide_keeps_four_layer_gate(tmp_path):
     slide: a 1+1 dynamic hetero slide is physically meaningless (no fixed
     bottom + thermostatted middle + driven top) and must still be refused with
     the existing message."""
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
     assert HeteroSheetOnSheetSimulation.MIN_LAYERS == 4
     sim = HeteroSheetOnSheetSimulation(_hetero_pes_config(), str(tmp_path))
     with pytest.raises(ValueError, match=r"[Aa]t least 4"):
@@ -181,7 +181,7 @@ def test_dynamic_hetero_slide_keeps_four_layer_gate(tmp_path):
 
 def test_hetero_pes_sheet_rejects_non_bilayer(tmp_path):
     """More than one layer per material is not a PES bilayer."""
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     sim = HeteroPESSheetSimulation(_hetero_pes_config(layers=(2, 2)), str(tmp_path))
     with pytest.raises(ValueError, match="exactly 2 layers"):
         sim.build()
@@ -191,7 +191,7 @@ def test_hetero_pes_sheet_rejects_non_bilayer(tmp_path):
 
 def test_hetero_pes_sheet_job_name_carries_pair_token():
     """Two pairs sharing material 1 must not collide on the HPC job name."""
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation, PESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation, PESSheetSimulation
 
     raw_b = _hetero_pes_raw()
     raw_b["2D-2"]["mat"] = "h-WSe2"
@@ -222,7 +222,7 @@ def test_hetero_pes_sheet_build_emits_scan_over_interface_repeat(tmp_path):
     3. layer groups come from z-band regions (hetero layers share atom types);
     4. the scan period is the matched interface's COINCIDENCE cell.
     """
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
 
     cfg = _hetero_pes_config()
     sim = HeteroPESSheetSimulation(cfg, str(tmp_path))
@@ -327,7 +327,7 @@ def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
     """
     import subprocess
 
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
 
     raw = _hetero_pes_raw(grid_n=3)
     # The matched supercell must exceed the hetero cross-LJ cutoff
@@ -368,7 +368,7 @@ def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
 # the two attributes the guard reads are plain ones set in __init__.
 
 def _guarded_builder(tmp_path, *, cell, tilt=0.0):
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
 
     sim = HeteroPESSheetSimulation(_hetero_pes_config(), str(tmp_path))
     sim._hetero_coincidence_cell = cell
@@ -411,7 +411,7 @@ def test_guard_scannable_cell_refuses_a_write_before_build(tmp_path):
 
 # --------------------------------------------------------------------------- #
 # A [Flake] on a pes-sheet config is refused, not silently dropped
-# (builders-sheetonsheet.md B4-6). src/run/simulate.py routes on
+# (builders-sheetonsheet.md B4-6). frictionsim2d/run/simulate.py routes on
 # model == 'pes_sheet' BEFORE the [Flake] check, which is guarded on
 # model == 'sheetonsheet' -- so the same config builds a flake slide one way and
 # a flakeless bilayer scan the other. Neither sheet scan template reads a flake
@@ -449,7 +449,7 @@ def test_pes_sheet_refuses_a_flake_config(hetero, tmp_path):
     base in MRO order -- the property `test_hetero_pes_sheet_mro_and_split_
     outer_loops` already pins.
     """
-    from src.builders.sheetonsheet.pes_sheet import (
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import (
         HeteroPESSheetSimulation, PESSheetSimulation,
     )
 
@@ -468,7 +468,7 @@ def test_pes_sheet_refuses_a_flake_config(hetero, tmp_path):
 def test_pes_sheet_refuses_a_numbered_hetero_flake_too(tmp_path):
     """`[Flake-1]`/`[Flake-2]` carries no `flake` key, so a guard that only
     tested `config.flake` would let the hetero flake through the same hole."""
-    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
 
     cfg = _pes_sheet_cfg_with_flake(numbered=True)
     assert cfg.flake is None and len(cfg.flake_sheets) == 2   # the shape that would slip
@@ -478,7 +478,7 @@ def test_pes_sheet_refuses_a_numbered_hetero_flake_too(tmp_path):
 
 def test_pes_sheet_without_a_flake_still_constructs(tmp_path):
     """The guard must not over-fire: every shipped pes-sheet config is flakeless."""
-    from src.builders.sheetonsheet.pes_sheet import (
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import (
         HeteroPESSheetSimulation, PESSheetSimulation,
     )
 
@@ -494,8 +494,8 @@ def test_the_same_config_no_longer_routes_two_different_ways(tmp_path):
     The flake path is unchanged; the scan path now refuses instead of building
     the wrong thing.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
-    from src.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
 
     cfg = _pes_sheet_cfg_with_flake()
 
@@ -516,7 +516,7 @@ def test_hetero_pes_sheet_ilp_molecule_ids_and_energy(tmp_path):
         raw[sheet].update({"x": 20.0, "y": 20.0})
     cfg = SheetOnSheetSimulationConfig(**raw, settings=_settings())
     out = tmp_path / "run"
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     HeteroPESSheetSimulation(cfg, str(out)).build()
     assert "pair_coeff * * ilp/tmd" in (out / "lammps" / "system.in.settings").read_text()
     lines = (out / "lammps" / "slide.in").read_text().splitlines()
@@ -538,7 +538,7 @@ def test_hetero_pes_sheet_ilp_molecule_ids_and_energy(tmp_path):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_hetero_pes_sheet_lj_has_no_interlayer_block(tmp_path):
     out = tmp_path / "run"
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     HeteroPESSheetSimulation(_hetero_pes_config(), str(out)).build()
     slide = (out / "lammps" / "slide.in").read_text()
     assert "mol_ids" not in slide and "e_il" not in slide
@@ -552,9 +552,9 @@ def _hetero_pes_scan_written(tmp_path, monkeypatch, style):
     stack geometry is stubbed, so this runs in the fast suite.
     """
     from types import SimpleNamespace
-    from src.builders.construction.hetero_stack import register_hetero_potentials
-    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
-    from src.builders.utils.z_vacuum import ZBox
+    from frictionsim2d.builders.construction.hetero_stack import register_hetero_potentials
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from frictionsim2d.builders.utils.z_vacuum import ZBox
     raw = _hetero_pes_raw()
     raw["general"]["interlayer_style"] = style
     cfg = SheetOnSheetSimulationConfig(**raw, settings=_settings())

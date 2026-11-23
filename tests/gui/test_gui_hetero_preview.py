@@ -8,7 +8,7 @@ not by reading the code. Every one of the five modes routes a two-material
 config to a hetero builder, and each of those runs a real LAMMPS pass to
 assemble the stack. So the first class here builds one for real (no ovito stub,
 no fake data file: an ovito stub is exactly what would let a broken preview
-pass) and walks it through the same steps ``src.gui.preview_worker`` and
+pass) and walks it through the same steps ``frictionsim2d.gui.preview_worker`` and
 ``PreviewController._deliver`` do.
 
 All five modes are built, not a representative two. An earlier version of this
@@ -58,19 +58,19 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.core.config import write_config  # noqa: E402
-from src.gui.preview.assemble import (  # noqa: E402
+from frictionsim2d.core.config import write_config  # noqa: E402
+from frictionsim2d.gui.preview.assemble import (  # noqa: E402
     AssembledSystem, ComponentSlice, assemble,
 )
-from src.gui.preview.init_script import parse_assembly  # noqa: E402
-from src.gui.preview.settings_file import parse_identity  # noqa: E402
-from src.gui.preview_worker import run as run_preview_build  # noqa: E402
+from frictionsim2d.gui.preview.init_script import parse_assembly  # noqa: E402
+from frictionsim2d.gui.preview.settings_file import parse_identity  # noqa: E402
+from frictionsim2d.gui.preview_worker import run as run_preview_build  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MATERIALS = REPO_ROOT / 'examples' / 'materials'
 POTENTIALS = REPO_ROOT / 'examples' / 'potentials' / 'sw'
 
-#: `src.builders.hetero._run_lammps` shells out to this by name. Without it
+#: `frictionsim2d.builders.hetero._run_lammps` shells out to this by name. Without it
 #: the whole build half of this file is skipped -- see `_require_lammps`.
 LMP_SERIAL = shutil.which('lmp_serial')
 
@@ -79,7 +79,7 @@ LMP_SERIAL = shutil.which('lmp_serial')
 #: built from this cached structure. Missing, the AFM-family modes are skipped
 #: rather than failing on something that is not what they test.
 #: Amorphous cache lives in package data, not the examples library.
-AMORPHOUS_SI = (Path(str(resources.files('src.data'))) / 'materials' / 'amor_Si.lmp')
+AMORPHOUS_SI = (Path(str(resources.files('frictionsim2d.data'))) / 'materials' / 'amor_Si.lmp')
 
 AFM_FAMILY = ('afm', 'indent', 'pes_tip')
 
@@ -133,9 +133,9 @@ def _hetero_config(model: str) -> dict:
             'pot_type': 'sw', 'x': 12.0, 'y': 12.0, 'layers': [2],
         },
         # `pressure` is required for every `sheetonsheet` slide (plain or
-        # hetero; `src.builders.sheetonsheet.base.SheetOnSheetSimulation.
+        # hetero; `frictionsim2d.builders.sheetonsheet.base.SheetOnSheetSimulation.
         # REQUIRES_PRESSURE`) -- `run_simulations` refuses a config with none
-        # before building anything (`src.run.expand.missing_pressure`). It is
+        # before building anything (`frictionsim2d.run.expand.missing_pressure`). It is
         # set unconditionally here rather than only for `model == 'sheetonsheet'`
         # because it is harmless noise for the other four modes: the AFM family
         # loads via `[general] force`, not `pressure`, and `PESGridMixin`
@@ -293,7 +293,7 @@ def _panel(qt_app, monkeypatch):
     because a stub is what lets a broken viewport pass its own tests.
     """
     del qt_app
-    from src.gui.preview import viewport as vp  # noqa: PLC0415
+    from frictionsim2d.gui.preview import viewport as vp  # noqa: PLC0415
 
     monkeypatch.setattr(vp.ViewportPanel, '_update_pipeline', lambda self: None)
     monkeypatch.setattr(vp.ViewportPanel, '_ensure_widget', lambda self: None)

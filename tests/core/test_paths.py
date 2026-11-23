@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.utils.paths import get_material_path, get_potential_path, search_paths
+from frictionsim2d.core.utils.paths import get_material_path, get_potential_path, search_paths
 
 
 def test_search_paths_tries_base_dir_before_climbing_to_parents(tmp_path):

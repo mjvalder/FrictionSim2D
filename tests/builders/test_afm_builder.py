@@ -10,10 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.builders.afm import AFMSimulation
-from src.builders.construction import components
-from src.potentials.utils import normalize_potential_type
-from src.data.models import NM_TO_EV_A2
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.builders.construction import components
+from frictionsim2d.potentials.utils import normalize_potential_type
+from frictionsim2d.data.models import NM_TO_EV_A2
 from tests.builders.test_builders import MOS2_CIF, MOS2_POT
 from tests.helpers.afm import _make_afm_config, _prepare_builder_for_slide_write, _seed_builder_state
 
@@ -247,10 +247,10 @@ def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> 
             3.0,
         )
 
-    monkeypatch.setattr("src.builders.components.build_sheet", mock_build_sheet)
-    monkeypatch.setattr("src.builders.afm.AFMSimulation._init_provenance", lambda *_a, **_k: None)
+    monkeypatch.setattr("frictionsim2d.builders.components.build_sheet", mock_build_sheet)
+    monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation._init_provenance", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._get_substrate_box_dims",
+        "frictionsim2d.builders.afm.AFMSimulation._get_substrate_box_dims",
         lambda _self: {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zlo": -5.0, "zhi": 0.0},
     )
 
@@ -258,21 +258,21 @@ def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> 
         called["build_components"] += 1
         return tmp_path / "tip.lmp", 20.0, tmp_path / "sub.lmp"
 
-    monkeypatch.setattr("src.builders.afm.AFMSimulation._build_components", mock_build_components)
+    monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation._build_components", mock_build_components)
     monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._generate_potentials",
+        "frictionsim2d.builders.afm.AFMSimulation._generate_potentials",
         lambda _self, n: called["generate_potentials"].append(n) or object(),
     )
     monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._calculate_z_positions",
+        "frictionsim2d.builders.afm.AFMSimulation._calculate_z_positions",
         lambda _self, n, _r: called["z_positions"].append(n),
     )
     monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation.write_inputs",
+        "frictionsim2d.builders.afm.AFMSimulation.write_inputs",
         lambda _self, n: called["write_inputs"].append(n),
     )
     monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._generate_hpc_scripts",
+        "frictionsim2d.builders.afm.AFMSimulation._generate_hpc_scripts",
         lambda *_a, **_k: called.__setitem__("hpc", called["hpc"] + 1),
     )
 
@@ -537,7 +537,7 @@ def test_afm_slide_unset_outer_loop_matches_pinned_baseline(tmp_path: Path) -> N
 def test_afm_supports_angle_split_by_default() -> None:
     """AFMSimulation opts into the angle split; only opt-out subclasses (e.g.
     IndentSimulation, see tests/builders/test_indent_builder.py) drop it. The same
-    declaration drives the job-count prediction (src/run/expand.py)."""
+    declaration drives the job-count prediction (frictionsim2d/run/expand.py)."""
     assert 'scan_angle' in AFMSimulation.SPLIT_OUTER_LOOPS
     assert 'force' in AFMSimulation.SPLIT_OUTER_LOOPS
 
@@ -666,7 +666,7 @@ def test_afm_explicit_tip_y_ignores_tip_y_offset(tmp_path: Path) -> None:
 
 
 def _freestanding_afm_cfg(tmp_path, layers=(4,)):
-    from src.core.config import AFMSimulationConfig, load_settings
+    from frictionsim2d.core.config import AFMSimulationConfig, load_settings
     pot = tmp_path / "d.sw"; pot.write_text("# pot", encoding="utf-8")
     cif = tmp_path / "d.cif"; cif.write_text("# cif", encoding="utf-8")
     return AFMSimulationConfig(**{
@@ -681,7 +681,7 @@ def _freestanding_afm_cfg(tmp_path, layers=(4,)):
 
 
 def test_provenance_skips_absent_substrate(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     cfg = _freestanding_afm_cfg(tmp_path)
     builder = AFMSimulation(cfg, output_dir=str(tmp_path / "o"))
 
@@ -890,7 +890,7 @@ def test_afm_ilp_trilayer(tmp_path, monkeypatch):
 def test_afm_single_layer_ilp_noop(tmp_path, monkeypatch, caplog):
     """A monolayer has no sheet layers to couple: ilp builds exactly like lj, one log line."""
     lj = normalised_lammps_files(_small_afm(tmp_path / "lj", monkeypatch, [1], "lj"))
-    with caplog.at_level(logging.INFO, logger="src.builders.afm.base"):
+    with caplog.at_level(logging.INFO, logger="frictionsim2d.builders.afm.base"):
         ilp_out = _small_afm(tmp_path / "ilp", monkeypatch, [1], "ilp")
     ilp = normalised_lammps_files(ilp_out)
     assert ilp == lj

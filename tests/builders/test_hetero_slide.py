@@ -8,15 +8,15 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase.io import read, write
-from src.core.config import SheetOnSheetSimulationConfig, load_settings
-from src.builders.construction.hetero_stack import build_hetero_structure
-from src.builders.sheetonsheet.hetero import (
+from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
+from frictionsim2d.builders.construction.hetero_stack import build_hetero_structure
+from frictionsim2d.builders.sheetonsheet.hetero import (
     HeteroSheetOnSheetSimulation,
     compute_layer_zbands,
 )
-from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.run.hpc_dispatch import generate_hpc_scripts_for_root
-from src.run.simulate import _select_sheet_builder_cls
+from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
+from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root
+from frictionsim2d.run.simulate import _select_sheet_builder_cls
 from tests.helpers.hetero import (
     MAT,
     POT,
@@ -164,7 +164,7 @@ def test_layer_zbands_catches_puckered_layer_misgrouping(tmp_path):
 
 def _minimal_slide_context(layers):
     """Fill every key referenced by ``SheetOnSheetSimulation.write_inputs``'s
-    ``base_context`` (src/builders/sheetonsheet.py), plus ``layers`` (Task 1's
+    ``base_context`` (frictionsim2d/builders/sheetonsheet.py), plus ``layers`` (Task 1's
     ``compute_layer_zbands`` output), so ``hetero/slide.lmp`` can render
     without hitting an undefined Jinja variable.
     """
@@ -229,9 +229,9 @@ def _render_hetero_slide_for_test(context):
     """
     from jinja2 import Environment
 
-    from src.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
-    from src.builders.utils.obs_ctx import build_obs_ctx
-    from src.interfaces.jinja import PackageLoader
+    from frictionsim2d.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
+    from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
+    from frictionsim2d.interfaces.jinja import PackageLoader
 
     if "obs_ctx" not in context:
         interlayer = {"E_int_interlayer", "n_contact_il"}
@@ -249,7 +249,7 @@ def _render_hetero_slide_for_test(context):
             interface_layers=(n_layers // 2, n_layers // 2 + 1),
             extra_filter=lambda ob: ob.name not in interlayer,
         )}
-    env = Environment(loader=PackageLoader("src.templates"),
+    env = Environment(loader=PackageLoader("frictionsim2d.templates"),
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template("hetero/slide.lmp").render(context)
 
@@ -827,7 +827,7 @@ def _hetero_mos2_wse2_config(style="lj", wse2_g=None, **general):
     12 x 12, or 20 x 20 under ilp/kc: the build refuses a cell narrower than
     their 16 A cutoff + skin (tests/builders/test_interlayer_box_guard.py).
     """
-    from src.core.config import GlobalSettings
+    from frictionsim2d.core.config import GlobalSettings
     size = 20.0 if style in ("ilp", "kc") else 12.0
     settings = GlobalSettings()
     settings.hpc.modules = ["lammps"]
@@ -848,7 +848,7 @@ def _hetero_mos2_wse2_config(style="lj", wse2_g=None, **general):
 
 
 def _hetero_pm(tmp_path, style):
-    from src.builders.construction.hetero_stack import register_hetero_potentials
+    from frictionsim2d.builders.construction.hetero_stack import register_hetero_potentials
     cfg = _hetero_mos2_wse2_config(style)
     return register_hetero_potentials(cfg.sheets, cfg.settings, tmp_path,
                                       interlayer_general=cfg.general).pm
@@ -898,7 +898,7 @@ def test_hetero_interlayer_context_ljg_reaction_force(tmp_path):
     """lj_g: no molecule IDs, reaction force like lj, no energy compute."""
     cfg = _hetero_mos2_wse2_config("lj_g", wse2_g=120.0)
     sim = HeteroSheetOnSheetSimulation(cfg, "unused")
-    from src.builders.construction.hetero_stack import register_hetero_potentials
+    from frictionsim2d.builders.construction.hetero_stack import register_hetero_potentials
     pm = register_hetero_potentials(cfg.sheets, cfg.settings, tmp_path,
                                     interlayer_general=cfg.general).pm
     ctx = sim._interlayer_context(pm, _BANDS)

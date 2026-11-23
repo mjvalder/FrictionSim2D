@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from src.postprocessing.plot_config import load_plot_document
+from frictionsim2d.postprocessing.plot_config import load_plot_document
 
 PUB = Path(__file__).resolve().parents[2] / 'documentation' / 'publication'
 

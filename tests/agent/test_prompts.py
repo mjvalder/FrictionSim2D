@@ -1,7 +1,7 @@
 """The system prompt: role + knowledge, within the small-model budget."""
-from src.agent.prompts import (KNOWLEDGE_FILES, OLLAMA_BUDGET_TOKENS,
+from frictionsim2d.agent.prompts import (KNOWLEDGE_FILES, OLLAMA_BUDGET_TOKENS,
                                build_system_prompt, estimate_tokens)
-from src.gui.schema.simulation_types import FAMILIES
+from frictionsim2d.gui.schema.simulation_types import FAMILIES
 
 
 def test_ollama_prompt_within_budget():

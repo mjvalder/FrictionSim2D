@@ -1,4 +1,4 @@
-"""Unit tests for src.builders.utils.lammps_data.
+"""Unit tests for frictionsim2d.builders.utils.lammps_data.
 
 Moved verbatim from tests/core/test_utils.py (C-4): these classes exercise
 LAMMPS data-file surgery, not core.
@@ -7,9 +7,9 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from src.builders.utils.lammps_data import atomic2charge, atomic2molecular, charge2atom
-from src.builders.utils.lammps_data import get_model_dimensions
-from src.builders.utils.lammps_data import (
+from frictionsim2d.builders.utils.lammps_data import atomic2charge, atomic2molecular, charge2atom
+from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
+from frictionsim2d.builders.utils.lammps_data import (
     _is_lammps_section_header, atom_count_and_z_extent, get_num_atom_types, shift_atoms_to_z_zero)
 
 

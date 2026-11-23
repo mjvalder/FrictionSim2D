@@ -64,7 +64,7 @@ the interlayer separation and the in-plane lattice constant, which that script
 holds as module constants — but a test asserts the two agree atom-for-atom at
 the shared default (``a = 3.18 A``, separation ``6.15 A``).
 
-Only ASE + numpy are needed; ``src.core.mlip`` is imported read-only so the
+Only ASE + numpy are needed; ``frictionsim2d.core.mlip`` is imported read-only so the
 pair_style/pair_coeff/D3 strings come from the same registry the builders use.
 """
 
@@ -87,7 +87,7 @@ import numpy as np
 # The registry is the single source of truth for every MLIP string we emit
 # (and for the launcher flags / env exports). Never re-derive them here.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.core.mlip import (  # noqa: E402  (path shim must precede the import)
+from frictionsim2d.core.mlip import (  # noqa: E402  (path shim must precede the import)
     MLIP_REGISTRY,
     d3_coeff_line,
     d3_style_token,
@@ -120,7 +120,7 @@ class LogParseError(RuntimeError):
 class D3Settings:
     """The four D3 knobs, shaped like ``settings.potential``.
 
-    :func:`src.core.mlip.d3_style_token` takes a settings object and reads
+    :func:`frictionsim2d.core.mlip.d3_style_token` takes a settings object and reads
     ``settings.potential.d3_*``; exposing ``potential`` as self lets this
     standalone script reuse that function verbatim, so the argument order
     stays defined in exactly one place (it is the one Milestone 0 verifies).
@@ -717,7 +717,7 @@ def resolve_launcher(framework: str) -> Tuple[List[str], List[str]]:
     """Return ``(lmp_flags, env_warnings)`` from the registry's LauncherSpec.
 
     The flags (MACE's ``-k on g 1 -sf kk``) and the DeePMD
-    ``LAMMPS_PLUGIN_PATH`` export live in ``src/core/mlip.py``; this script
+    ``LAMMPS_PLUGIN_PATH`` export live in ``frictionsim2d/core/mlip.py``; this script
     never re-derives them. Env lines are *shell* lines, so they are reported
     rather than executed — export them in the calling shell (see
     ``documentation/milestone0.md``).

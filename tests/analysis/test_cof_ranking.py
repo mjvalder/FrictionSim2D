@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import src.analysis.catalogue  # noqa: F401  (registers the analyses)
-from src.analysis.base import get_analysis
-from src.analysis.periods import (NO_DRIVE_STEP, NO_PERIOD, PeriodParams, dominant_period,
+import frictionsim2d.analysis.catalogue  # noqa: F401  (registers the analyses)
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.periods import (NO_DRIVE_STEP, NO_PERIOD, PeriodParams, dominant_period,
                                   period_map, settle_skip, whole_periods)
-from src.analysis.source import RunSource
+from frictionsim2d.analysis.source import RunSource
 from tests.analysis.test_sheet_geometry import SETTINGS, _bilayer, _square
 
 #: dx = 2 m/s * 0.01 * (1000 steps * 0.001 ps) = 0.02 A per sample.
@@ -259,7 +259,7 @@ def _geometry_node(table):
 
 
 def test_period_map_geometry_dataset(monkeypatch):
-    from src.analysis import store
+    from frictionsim2d.analysis import store
     calls = []
 
     def fake(name, dataset, params=None, **kw):
@@ -281,7 +281,7 @@ def test_period_map_period_x_is_used_as_given():
 
 
 def test_period_map_lattice_fallback(monkeypatch):
-    from src.analysis import store
+    from frictionsim2d.analysis import store
     monkeypatch.setattr(store, 'result_node', lambda *a, **k: _geometry_node(pd.DataFrame(
         {'material': ['h_M'], 'layer': [2], 'period_x_top': [2.5]})))
 
@@ -292,7 +292,7 @@ def test_period_map_lattice_fallback(monkeypatch):
 
 
 def test_period_map_layer_fallback(monkeypatch):
-    from src.analysis import store
+    from frictionsim2d.analysis import store
     monkeypatch.setattr(store, 'result_node', lambda *a, **k: _geometry_node(pd.DataFrame(
         {'material': ['h_M', 'h_M', 'h_N', 'h_S'], 'layer': [1, 2, 1, 4],
          'period_x_top': [2.4, 2.5, 3.3, 5.0]})))
@@ -330,10 +330,10 @@ _LEGACY_PERIODS = _PUB / '261107_sheetonsheet/periods/outputs/output_full_100x10
 
 _PUB_SCRIPT = """
 import sys
-from src.aiida import load_aiida_profile
+from frictionsim2d.aiida import load_aiida_profile
 load_aiida_profile('friction2d_pub')
-from src.analysis.base import get_analysis
-from src.analysis.source import RunSource
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.source import RunSource
 name, dataset, out = sys.argv[1:4]
 # No period_x: each analysis takes a_x from the dataset's own sheet_geometry,
 # as `FrictionSim2D analyse run` would (computed here, never stored).

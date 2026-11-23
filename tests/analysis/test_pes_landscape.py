@@ -11,11 +11,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import src.analysis.catalogue  # noqa: F401  (registers the analyses)
-from src.analysis.base import get_analysis
-from src.analysis.pes_landscape import NO_GRID, pt_eta
-from src.analysis.source import RunSource
-from src.postprocessing import pes_scan
+import frictionsim2d.analysis.catalogue  # noqa: F401  (registers the analyses)
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.pes_landscape import NO_GRID, pt_eta
+from frictionsim2d.analysis.source import RunSource
+from frictionsim2d.postprocessing import pes_scan
 
 
 def _grid(kind='sheet', n=12, amp=1.0, period=3.0, amp_y=None):

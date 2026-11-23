@@ -15,8 +15,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.core.observables import FAMILIES
-from src.postprocessing.read_data import (SUMMARY_IDENTITY_COLUMNS,
+from frictionsim2d.core.observables import FAMILIES
+from frictionsim2d.postprocessing.read_data import (SUMMARY_IDENTITY_COLUMNS,
                                           SUMMARY_LF_COLUMNS,
                                           SUMMARY_POST_COLUMNS, DataReader,
                                           LoadPoint, RunFrames,
@@ -314,7 +314,7 @@ def test_metadata_carries_every_sweep_axis(tmp_path):
 
 
 def test_material_types_classifies_by_prefix():
-    from src.postprocessing.read_data import material_types
+    from frictionsim2d.postprocessing.read_data import material_types
 
     types = material_types(['h_MoS2', 't_CoTe2', 'b_SiSe', 'p_CS', 'AlSe'])
 
@@ -492,7 +492,7 @@ def test_summary_rows_come_from_summarise_run(tmp_path):
     summaries --
     rather than against `summarise_run` called again here, which would only
     prove the function is deterministic."""
-    from src.data.models import compute_friction_stats
+    from frictionsim2d.data.models import compute_friction_stats
 
     make_family_run(tmp_path, 'afm')
 
@@ -617,7 +617,7 @@ def test_the_regex_walk_is_gone():
     """These six patterns were the walk. Two of them carried real defects --
     _PATH_PATTERN_SHEET group 3 captured the K{T} token as the substrate, and
     neither path pattern had a pot_ or K{T} group at all."""
-    import src.postprocessing.read_data as rd
+    import frictionsim2d.postprocessing.read_data as rd
 
     for name in ('_FILE_PATTERN_TIP', '_FILE_PATTERN_TIP_ALT',
                  '_FILE_PATTERN_SHEET', '_FILE_PATTERN_SHEET_ALT',
@@ -626,7 +626,7 @@ def test_the_regex_walk_is_gone():
 
 
 def test_the_nested_tree_and_its_walk_are_gone(tmp_path):
-    import src.postprocessing.read_data as rd
+    import frictionsim2d.postprocessing.read_data as rd
 
     make_family_run(tmp_path, 'afm')
     reader = rd.DataReader(results_dir=str(tmp_path))
@@ -641,7 +641,7 @@ def test_the_nested_tree_and_its_walk_are_gone(tmp_path):
 def test_the_file_level_parser_survives():
     """Spec section 3: the file-level parser is untouched. 20 calls in
     test_read_data_schema.py drive it directly."""
-    import src.postprocessing.read_data as rd
+    import frictionsim2d.postprocessing.read_data as rd
 
     assert callable(rd.DataReader._read_dataframe)
     assert callable(rd.DataReader._registry_sim_type)

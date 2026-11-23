@@ -148,7 +148,7 @@ for DeePMD base.
 the same full-cell system. There are community segfault reports for this
 combination. This deck is also where the **`dispersion/d3` argument order is
 pinned** for the pinned-mainline build — the value the registry (`d3_style_token`
-in `src/core/mlip.py`) will emit.
+in `frictionsim2d/core/mlip.py`) will emit.
 
 **Command.** Requires the backported binary — no other build has both styles.
 
@@ -258,7 +258,7 @@ both `sheetonsheet` and `afm`.
 
 **Where it lives.** Plan Tasks 10 and 12 (`tests/builders/test_sheetonsheet_mlip.py`,
 `tests/builders/test_afm_mlip.py`) plus Task 14's `tests/builders/test_family_mlip.py`, which
-also carries the related hetero bug fix (then `hetero.py`, now `src/builders/construction/hetero_stack.py`): it registered the Virtual
+also carries the related hetero bug fix (then `hetero.py`, now `frictionsim2d/builders/construction/hetero_stack.py`): it registered the Virtual
 type *unconditionally*, instead of gating it on
 `drive_method == 'virtual_atom'` the way `sheetonsheet/base.py::_register_drive_atom`
 does.
@@ -355,7 +355,7 @@ loaded at runtime. This is the first build on which `pair_style deepmd` and
 `<damping> <functional> <rthr> <cn_thr>`, requires `units metal`, and squares
 both cutoffs internally. Accepted damping tokens are
 `original | zero | zerom | bj | bjm` (`original` and `zero` are synonyms).
-**This matches `src/core/mlip.py::d3_style_token` exactly** — no change needed.
+**This matches `frictionsim2d/core/mlip.py::d3_style_token` exactly** — no change needed.
 Our `d3_damping` Literal omits `zero`, which is harmless since `original` is
 the same thing.
 
@@ -499,7 +499,7 @@ table above is filled in:
    [`docs/superpowers/specs/2026-08-06-mlip-support-design.md`](../docs/superpowers/specs/2026-08-06-mlip-support-design.md):
    every *Conditional* cell becomes **Yes** or **No**, and the footnotes that
    justified "Conditional" are rewritten to cite this runbook's result instead.
-2. **Update the `supports_*` flags** in `src/core/mlip.py` — `supports_null`,
+2. **Update the `supports_*` flags** in `frictionsim2d/core/mlip.py` — `supports_null`,
    `supports_overlay`, and the virtual-atom support implied by M0.4 — so
    validation rejects at config time whatever Milestone 0 proved impossible.
    The flags are the single source of truth the builders and validators read;
@@ -604,7 +604,7 @@ settings file that defines `pair_style`, so LAMMPS aborted:
 ERROR: Must define pair_style before Pair Coeffs (read_data.cpp:782)
 ```
 
-Fixed by `write_data ... nocoeff` in `src/templates/common/stack_layers.lmp`,
+Fixed by `write_data ... nocoeff` in `frictionsim2d/templates/common/stack_layers.lmp`,
 pinned by `tests/builders/test_components_mlip.py::test_mlip_stacking_data_file_carries_no_pair_coeffs`.
 
 ### F2 — `comm_style tiled` is incompatible with `pair_deepmd` (OPEN)

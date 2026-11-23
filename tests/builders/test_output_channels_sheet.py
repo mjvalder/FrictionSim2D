@@ -23,8 +23,8 @@ it; see `_render_flake` below for the real-`obs_ctx` replacement.
 import pytest
 from jinja2 import Environment, meta
 
-from src.builders.utils.obs_ctx import build_obs_ctx
-from src.interfaces.jinja import PackageLoader
+from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
+from frictionsim2d.interfaces.jinja import PackageLoader
 
 
 def _fix_emitted(rendered: str, name: str) -> bool:
@@ -46,7 +46,7 @@ def _render_sheetonsheet(**channels) -> str:
     rather than a bare `channels` dict.
     """
     template = 'sheetonsheet/slide.lmp'
-    env = Environment(loader=PackageLoader('src.templates'),
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
@@ -81,7 +81,7 @@ def _render_hetero(**channels) -> str:
     same as the real builder.
     """
     template = 'hetero/slide.lmp'
-    env = Environment(loader=PackageLoader('src.templates'),
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
@@ -122,7 +122,7 @@ def _render_flake(**channels) -> str:
     is already empty -- there is nothing for a filter to drop.
     """
     template = 'flake/slide.lmp'
-    env = Environment(loader=PackageLoader('src.templates'),
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
@@ -246,7 +246,7 @@ def test_the_shared_group_group_compute_survives_disabling_peratom():
 # --- interlayer styles (spec 2026-11-11 §7, Task 7) -------------------------
 
 def _sheet_obs_ctx(tmp_path, interlayer_ctx, has_internal_lj=False, optional=()):
-    from src.builders.sheetonsheet import SheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
     from tests.builders.test_sheetonsheet_builder import _make_sheetonsheet_config
     cfg = _make_sheetonsheet_config(tmp_path, layers=[3])
     cfg.settings.output.optional_channels = list(optional)
@@ -279,8 +279,8 @@ def test_observables_lj_drops_a_requested_all_pairs_channel(tmp_path):
 
 
 def test_the_two_interlayer_energies_are_distinct_observables():
-    from src.core.observables import REGISTRY
-    from src.postprocessing.labels import ROLE_LABELS
+    from frictionsim2d.core.observables import REGISTRY
+    from frictionsim2d.postprocessing.labels import ROLE_LABELS
     iface, every = REGISTRY["E_int_interlayer"], REGISTRY["E_int_interlayer_all"]
     assert iface.rename_to != every.rename_to
     assert iface.role_key != every.role_key

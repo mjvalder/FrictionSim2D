@@ -14,9 +14,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.builders.construction import components
-from src.core.config import GlobalSettings, SheetConfig
-from src.potentials.manager import PotentialManager
+from frictionsim2d.builders.construction import components
+from frictionsim2d.core.config import GlobalSettings, SheetConfig
+from frictionsim2d.potentials.manager import PotentialManager
 
 REPO = Path(__file__).resolve().parents[2]
 MAT = REPO / "examples" / "materials"

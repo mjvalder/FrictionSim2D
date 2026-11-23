@@ -19,7 +19,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QModelIndex, Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.widgets.database.model import (  # noqa: E402
+from frictionsim2d.gui.widgets.database.model import (  # noqa: E402
     CURATED_COLUMNS, SORT_ROLE, Column, ResultSortProxyModel, ResultTableModel,
     columns_for_record, display_value, record_value, sort_value)
 
@@ -180,8 +180,8 @@ class TestStatusColour:
     """No inline hex anywhere: the three tokens live in style.py."""
 
     def test_status_level_maps_the_verdict_vocabulary(self):
-        from src.gui.widgets.database.model import STATUS_LEVELS, status_level
-        from src.postprocessing.run_status import STATUSES
+        from frictionsim2d.gui.widgets.database.model import STATUS_LEVELS, status_level
+        from frictionsim2d.postprocessing.run_status import STATUSES
 
         assert set(STATUS_LEVELS) == set(STATUSES)
         assert status_level({'status': 'complete'}) == 'ok'
@@ -190,20 +190,20 @@ class TestStatusColour:
         assert status_level({'status': 'truncated'}) == 'error'
 
     def test_an_unchecked_point_warns(self):
-        from src.gui.widgets.database.model import status_level
+        from frictionsim2d.gui.widgets.database.model import status_level
 
         assert status_level({'status': None}) == 'warn'
         assert status_level({}) == 'warn'
 
     def test_an_unknown_status_warns_rather_than_passing(self):
-        from src.gui.widgets.database.model import status_level
+        from frictionsim2d.gui.widgets.database.model import status_level
 
         assert status_level({'status': 'imported'}) == 'warn'
 
     def test_the_row_is_painted_with_the_style_token(self, qt_app):
         del qt_app
         from PySide6.QtGui import QColor
-        from src.gui.style import STATUS_ERROR_COLOR
+        from frictionsim2d.gui.style import STATUS_ERROR_COLOR
 
         model = ResultTableModel()
         model.set_records([dict(RECORDS[0], status='failed_integrity')])

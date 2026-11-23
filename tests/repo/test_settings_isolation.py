@@ -7,7 +7,7 @@ exists on the machine running it.
 import os
 from pathlib import Path
 
-from src.core.config import _global_settings_path, load_settings
+from frictionsim2d.core.config import _global_settings_path, load_settings
 
 
 def test_xdg_config_home_points_into_a_temp_dir():

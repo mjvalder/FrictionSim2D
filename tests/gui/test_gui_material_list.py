@@ -19,8 +19,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.controllers.document import ConfigDocument  # noqa: E402
-from src.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.gui.controllers.document import ConfigDocument  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -78,8 +78,8 @@ def _editor(qt_app, dirs):
     editor in another mode, and re-declaring the fixture per class is how the
     two would drift apart.
     """
-    from src.gui.schema.introspect import FieldKind, FieldSpec
-    from src.gui.widgets.materials import MaterialListEditor
+    from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec
+    from frictionsim2d.gui.widgets.materials import MaterialListEditor
 
     spec = FieldSpec(name='materials_list', key='materials_list',
                      kind=FieldKind.STR, required=False)
@@ -110,7 +110,7 @@ def pair_mode(editor, pairing: bool = True) -> None:
 def test_materials_row_is_first_in_2d_section():
     """The sweep is the first decision a [2D] section should ask -- it
     decides whether Structure/Potential below it are files or folders."""
-    from src.gui.schema.overrides import field_override
+    from frictionsim2d.gui.schema.overrides import field_override
 
     assert field_override('afm', '2D', 'materials_list').order == 0
 
@@ -120,8 +120,8 @@ def test_the_sweep_checkbox_carries_no_text_of_its_own(qt_app):
     names the checkbox -- giving the checkbox its own text too ('Sweep over
     many materials') was the duplicated wording the user's screenshot
     flagged."""
-    from src.gui.schema.introspect import FieldKind, FieldSpec
-    from src.gui.widgets.materials import MaterialListEditor
+    from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec
+    from frictionsim2d.gui.widgets.materials import MaterialListEditor
 
     spec = FieldSpec(name='materials_list', key='materials_list',
                      kind=FieldKind.STR, required=False)
@@ -134,8 +134,8 @@ def test_2d_section_row_order_is_checkbox_mat_list_then_paths(qt_app,
     """User's chosen layout: the checkbox governs the cells below it, so it
     stays first; the tick list (and its `.txt` picker) sit after `mat`, ahead
     of Structure/Potential type/Potential file."""
-    from src.gui.controllers.document import ConfigDocument
-    from src.gui.widgets.form import SectionForm
+    from frictionsim2d.gui.controllers.document import ConfigDocument
+    from frictionsim2d.gui.widgets.form import SectionForm
 
     monkeypatch.chdir(REPO_ROOT)
     document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -171,8 +171,8 @@ class TestMaterialsPathPicker:
         selection sets the text and raises editingFinished itself, since
         setText() alone would not."""
         from PySide6.QtWidgets import QFileDialog
-        from src.gui.schema.introspect import FieldKind, FieldSpec
-        from src.gui.widgets.materials import MaterialListEditor
+        from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec
+        from frictionsim2d.gui.widgets.materials import MaterialListEditor
 
         spec = FieldSpec(name='materials_list', key='materials_list',
                          kind=FieldKind.STR, required=False)
@@ -192,7 +192,7 @@ class TestMaterialsPathPicker:
         """The headline behaviour: browsing (or typing and finishing) to an
         existing curated `.txt` loads its names as the selection, driven
         through SectionForm exactly as a real editingFinished would."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -229,7 +229,7 @@ class TestMaterialsPathPicker:
         scanned -- the realistic order for "I already have a list, let me
         point the GUI at it" -- so no stem-based default is ever created
         along the way for the fix to coincidentally paper over."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -278,7 +278,7 @@ class TestMaterialsPathPicker:
         as a bare "0 of 0 usable" that looks like nothing happened. The
         orphan-scan guard must survive: nothing here is usable yet, so a
         commit still cannot destroy anything."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -326,7 +326,7 @@ class TestMaterialsPathPicker:
         The picker's own file is what has to survive here -- not the config's,
         which is untouched either way.
         """
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -380,7 +380,7 @@ class TestMaterialsPathPicker:
         pair file and the first rescan is the cleared selection being recorded
         as a deliberate one: otherwise the scan defaults to everything usable
         and the commit it emits writes three single names over the pairs."""
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -415,7 +415,7 @@ class TestMaterialsPathPicker:
         (hidden) tick list, leaving the pair table's row untouched -- and the
         next commit went down the pair branch and wrote that one pair over the
         three curated single materials."""
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -457,8 +457,8 @@ def test_path_editor_directory_mode(qt_app):
     pass if SectionForm never called it at all. See
     test_ticking_the_sweep_switches_structure_and_potential_to_folder_pickers
     below for the actual headline behaviour, driven through SectionForm."""
-    from src.gui.schema.introspect import FieldKind, FieldSpec
-    from src.gui.widgets.fields import build_editor
+    from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec
+    from frictionsim2d.gui.widgets.fields import build_editor
 
     ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
                                 kind=FieldKind.PATH, required=True))
@@ -484,8 +484,8 @@ def test_ticking_the_sweep_switches_structure_and_potential_to_folder_pickers(
     test_reloading_an_already_ticked_sweep_still_reapplies_folder_mode for
     the isolated case where the checkbox does not change and only load()'s
     own call is left to do it.)"""
-    from src.gui.controllers.document import ConfigDocument
-    from src.gui.widgets.form import SectionForm
+    from frictionsim2d.gui.controllers.document import ConfigDocument
+    from frictionsim2d.gui.widgets.form import SectionForm
 
     monkeypatch.chdir(REPO_ROOT)
     listing = tmp_path / 'mats.txt'
@@ -516,8 +516,8 @@ def test_reloading_an_already_ticked_sweep_still_reapplies_folder_mode(
     second time and _on_sweep_box_toggled's own call to _apply_sweep_mode()
     is never reached. Only load()'s own explicit call can be what puts the
     path editors back into folder mode here."""
-    from src.gui.controllers.document import ConfigDocument
-    from src.gui.widgets.form import SectionForm
+    from frictionsim2d.gui.controllers.document import ConfigDocument
+    from frictionsim2d.gui.widgets.form import SectionForm
 
     monkeypatch.chdir(REPO_ROOT)
     listing = tmp_path / 'mats.txt'
@@ -573,7 +573,7 @@ class TestWindowIntegration:
         """Create a MainWindow for testing."""
         monkeypatch.chdir(REPO_ROOT)
         workspace = Workspace.open(tmp_path / 'ws')
-        from src.gui.app import MainWindow  # noqa: PLC0415
+        from frictionsim2d.gui.app import MainWindow  # noqa: PLC0415
         window = MainWindow(workspace)
         yield window
         # closeEvent (Task 12) prompts to save when the document is dirty --
@@ -735,33 +735,33 @@ class TestScanningMaterialDirectories:
     time, surfaced up front instead."""
 
     def test_the_usable_materials_are_the_intersection(self, dirs):
-        from src.gui.controllers.materials import scan_material_directories
+        from frictionsim2d.gui.controllers.materials import scan_material_directories
 
         found = scan_material_directories(*dirs)
         assert [c.name for c in found if c.usable] == ['b-AlSb', 'h-MoS2', 't-MoS2']
 
     def test_a_structure_with_no_potential_is_reported_not_dropped(self, dirs):
         """Silently omitting it is how 'why is Si missing?' becomes a mystery."""
-        from src.gui.controllers.materials import scan_material_directories
+        from frictionsim2d.gui.controllers.materials import scan_material_directories
 
         si = next(c for c in scan_material_directories(*dirs) if c.name == 'Si')
         assert not si.usable
         assert 'potential' in si.reason
 
     def test_a_potential_with_no_structure_is_reported(self, dirs):
-        from src.gui.controllers.materials import scan_material_directories
+        from frictionsim2d.gui.controllers.materials import scan_material_directories
 
         ws2 = next(c for c in scan_material_directories(*dirs) if c.name == 'h-WS2')
         assert not ws2.usable
         assert 'structure' in ws2.reason
 
     def test_the_potential_extension_is_inferred(self, dirs):
-        from src.gui.controllers.materials import infer_potential_extension
+        from frictionsim2d.gui.controllers.materials import infer_potential_extension
 
         assert infer_potential_extension(dirs[1]) == '.sw'
 
     def test_a_mixed_potential_directory_takes_the_commonest_extension(self, tmp_path):
-        from src.gui.controllers.materials import infer_potential_extension
+        from frictionsim2d.gui.controllers.materials import infer_potential_extension
 
         directory = tmp_path / 'pots'
         directory.mkdir()
@@ -771,7 +771,7 @@ class TestScanningMaterialDirectories:
 
     def test_a_missing_directory_scans_empty_rather_than_raising(self, tmp_path):
         """The pickers are half-filled while the user is still choosing."""
-        from src.gui.controllers.materials import scan_material_directories
+        from frictionsim2d.gui.controllers.materials import scan_material_directories
 
         assert scan_material_directories(tmp_path / 'nope', tmp_path / 'also') == []
 
@@ -821,8 +821,8 @@ class TestApplyingMaterialDirectories:
 class TestMaterialListEditor:
 
     def test_it_starts_not_sweeping(self, qt_app):
-        from src.gui.schema.introspect import FieldKind, FieldSpec
-        from src.gui.widgets.materials import MaterialListEditor
+        from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec
+        from frictionsim2d.gui.widgets.materials import MaterialListEditor
 
         spec = FieldSpec(name='materials_list', key='materials_list',
                          kind=FieldKind.STR, required=False)
@@ -1012,8 +1012,8 @@ class TestPairTable:
         known then. Scanning is what makes the rest available -- without the
         combos being rebuilt, choosing the second member of a pair the user
         already started would be impossible."""
-        from src.gui.schema.introspect import FieldKind, FieldSpec
-        from src.gui.widgets.materials import MaterialListEditor
+        from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec
+        from frictionsim2d.gui.widgets.materials import MaterialListEditor
 
         unscanned = MaterialListEditor(
             FieldSpec(name='materials_list', key='materials_list',
@@ -1097,7 +1097,7 @@ class TestPairSweepCommit:
     @staticmethod
     def _pair_form(tmp_path, monkeypatch, dirs=None, pairs=None, listing=None):
         """A [2D]+[2D-2] indent config, its form built and the sweep ticked."""
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini',
@@ -1136,7 +1136,7 @@ class TestPairSweepCommit:
     def test_the_pair_table_appears_only_with_a_second_material(
             self, qt_app, dirs, tmp_path, monkeypatch):
         """Pair mode is sweeping AND a second sheet -- neither alone."""
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         listing = tmp_path / 'singles.txt'
@@ -1167,7 +1167,7 @@ class TestPairSweepCommit:
 
         The natural order for building a pair -- sweep, then second material,
         then the directories -- has to survive the rebuild."""
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini',
@@ -1286,7 +1286,7 @@ class TestPairSweepCommit:
         'everything usable' default while the commit ran down the
         single-material branch: the curated file came back as three unrelated
         single materials on the first commit after opening."""
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         curated = tmp_path / 'curated_pairs.txt'
@@ -1518,7 +1518,7 @@ class TestPairSweepCommit:
         sheet the pairs would be written as 'a + b' lines under a `{mat}`
         single-material template: a config `run.expand` refuses much later, with
         the GUI insisting it is fine."""
-        from src.gui.controllers.document import DocumentError  # noqa: PLC0415
+        from frictionsim2d.gui.controllers.document import DocumentError  # noqa: PLC0415
 
         form, editor = self._pair_form(
             tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
@@ -1596,7 +1596,7 @@ class TestSweepRoundTrip:
 
     def test_an_existing_list_becomes_the_selection(self, qt_app, dirs, tmp_path,
                                                     monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -1616,7 +1616,7 @@ class TestSweepRoundTrip:
 
     def test_committing_writes_the_list_and_the_templates(self, qt_app, dirs,
                                                           tmp_path, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -1636,7 +1636,7 @@ class TestSweepRoundTrip:
         form.deleteLater()
 
     def test_unticking_removes_the_sweep(self, qt_app, dirs, tmp_path, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -1658,7 +1658,7 @@ class TestSweepRoundTrip:
                                                    monkeypatch):
         """A config whose directories do not exist on this machine still has a
         real sweep. Committing must not delete it."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         listing = tmp_path / 'run_materials.txt'
@@ -1680,7 +1680,7 @@ class TestSweepRoundTrip:
                                                             tmp_path, monkeypatch):
         """Opening a config and pressing Render must not retarget the list the
         user maintains by hand."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         listing = tmp_path / 'material_list.txt'
@@ -1704,7 +1704,7 @@ class TestSweepRoundTrip:
         for whichever directory *does* resolve, all marked unusable -- so
         listed_names() is non-empty even though nothing here can actually be
         swept. That must not be read as 'the user emptied the sweep'."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         listing = tmp_path / 'run_materials.txt'
@@ -1732,7 +1732,7 @@ class TestSweepRoundTrip:
         """FINDING 2: materials_list pointing at a missing (or empty) .txt
         must not be read as 'nothing decided yet, select everything usable'.
         A typo in the path must not become a full sweep on the next commit."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -1754,7 +1754,7 @@ class TestSweepRoundTrip:
         remember what the document actually holds, not that return value, or
         the generic editor loop's write of editor.value() puts the absolute
         path back."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -1779,7 +1779,7 @@ class TestSweepRoundTrip:
         has both directories resolved. Committing while the box is ticked but
         the pickers are still empty must not silently revert a same-commit
         edit to 'mat'."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -1802,7 +1802,7 @@ class TestSweepRoundTrip:
         """FINDING 5a: unticking must do more than remove materials_list --
         mat/cif_path/pot_path are left holding {mat}, which makes the config
         invalid and forces the user to retype three fields by hand."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -1832,7 +1832,7 @@ class TestSweepRoundTrip:
         of whether a sweep was actually configured -- so opening such a
         config, then committing (e.g. by pressing Render) invented a
         materials_list nobody asked for."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
@@ -1861,7 +1861,7 @@ class TestSweepRoundTrip:
         """sheet_config.ini ships with {mat} in all three fields and no
         materials_list. Clearing placeholders on any unticked commit -- rather
         than on an actual untick -- destroys it on the first keystroke."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(
@@ -1884,7 +1884,7 @@ class TestSweepRoundTrip:
         typing (or browsing to) a directory and finishing the edit rescans,
         and committing turns what was picked into the {mat} templates -- with
         no directory-row editors of the sweep's own left to drive this from."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         cif_dir, pot_dir = dirs
@@ -1923,7 +1923,7 @@ class TestSweepRoundTrip:
         equally-wiped selection. Pinning both sides to the literal curated
         names, and re-reading the .txt from disk, is what actually catches
         that -- see the regression this guards in the commit history."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         structures, potentials = dirs
@@ -1953,7 +1953,7 @@ class TestNoCwdPollution:
     ticking a sweep on a brand-new config dropped a materials.txt wherever
     the app happened to be launched from -- a real 156-line file landed in
     the repo root exactly this way during a test run. Because
-    src.core.utils.search_paths resolves a relative name against the cwd
+    frictionsim2d.core.utils.search_paths resolves a relative name against the cwd
     before base_dir (deliberately, so that ordering is not touched here),
     the stray file silently shadowed other configs' own relative
     materials_list and broke an unrelated test
@@ -1963,7 +1963,7 @@ class TestNoCwdPollution:
     def test_ticking_a_sweep_on_an_unsaved_config_does_not_write_into_the_cwd(
             self, qt_app, dirs, monkeypatch):
         from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
-        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+        from frictionsim2d.gui.widgets.form import ConfigForm  # noqa: PLC0415
 
         monkeypatch.chdir(REPO_ROOT)
         # A real, blocking QMessageBox with no one to click it -- see the

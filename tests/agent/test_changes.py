@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.agent.changes import (ChangeSet, Op, ToolInputError, apply_changeset,
+from frictionsim2d.agent.changes import (ChangeSet, Op, ToolInputError, apply_changeset,
                                apply_fs_changeset, build_changeset,
                                build_fs_changeset, describe_change, fingerprint)
 from tests.helpers.agent import EXAMPLES, make_deps
@@ -237,7 +237,7 @@ def test_propose_passes_the_apply_mode(deps):
 
 
 def test_applied_summary_names_fields_and_model(deps):
-    from src.agent.changes import applied_summary
+    from frictionsim2d.agent.changes import applied_summary
     ops = [Op('set_model', value='sheetonsheet')] + [
         Op('set', 'general', key, value) for key, value in
         (('force', [5]), ('temp', 250), ('scan_speed', 3), ('scan_angle', 15), ('pressure', 1))]
@@ -253,7 +253,7 @@ def test_applied_summary_names_fields_and_model(deps):
 
 
 def test_applied_summary_marks_settings(deps):
-    from src.agent.changes import applied_summary
+    from frictionsim2d.agent.changes import applied_summary
     cs = build_changeset(deps, 's', [Op('settings_set', 'simulation', 'timestep', 0.002)])
     assert applied_summary(cs) == 'Set 1 field: settings [simulation] timestep'
 
@@ -302,7 +302,7 @@ def test_partial_apply_is_reported_as_partial(deps):
 
 
 def test_field_diff_is_public():
-    from src.agent.changes import field_diff
+    from frictionsim2d.agent.changes import field_diff
     out = field_diff('config', {'general': {'a': 1, 'b': 2}}, {'general': {'a': 1, 'b': 3}})
     assert [(d.section, d.key, d.before, d.after) for d in out] == [('general', 'b', 2, 3)]
 
@@ -351,7 +351,7 @@ def test_handles_are_capped_and_keep_their_instruction(deps):
 
 
 def test_copy_never_overwrites_a_file_that_appeared(deps, tmp_path):
-    from src.agent.changes import _copy_new
+    from frictionsim2d.agent.changes import _copy_new
     source, target = tmp_path / 'src.txt', tmp_path / 'dst.txt'
     source.write_text('new')
     target.write_text('mine')
@@ -417,7 +417,7 @@ def _current_umask():
 
 
 def test_write_new_gives_the_file_normal_permissions(tmp_path):
-    from src.agent.changes import _write_new
+    from frictionsim2d.agent.changes import _write_new
     target = tmp_path / 'x.cif'
     _write_new(target, 'data_x\n')
     assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~_current_umask()
@@ -426,7 +426,7 @@ def test_write_new_gives_the_file_normal_permissions(tmp_path):
 
 @pytest.mark.parametrize('code', [errno.EPERM, errno.ENOTSUP, errno.EXDEV, errno.ENOSYS])
 def test_write_new_falls_back_when_hard_links_are_unsupported(tmp_path, code):
-    from src.agent.changes import _write_new
+    from frictionsim2d.agent.changes import _write_new
 
     def no_links(_src, _dst):
         raise OSError(code, 'no hard links here')
@@ -442,7 +442,7 @@ def test_write_new_falls_back_when_hard_links_are_unsupported(tmp_path, code):
 
 
 def test_write_new_other_link_errors_still_raise(tmp_path):
-    from src.agent.changes import _write_new
+    from frictionsim2d.agent.changes import _write_new
 
     def broken(_src, _dst):
         raise OSError(errno.EIO, 'disk on fire')
@@ -453,7 +453,7 @@ def test_write_new_other_link_errors_still_raise(tmp_path):
 
 
 def test_a_failed_copy_leaves_no_partial_target_and_a_retry_works(tmp_path):
-    from src.agent.changes import _copy_new
+    from frictionsim2d.agent.changes import _copy_new
     source, target = tmp_path / 'src.txt', tmp_path / 'out' / 'dst.txt'
     target.parent.mkdir()
     source.write_text('payload')

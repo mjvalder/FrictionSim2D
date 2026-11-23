@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-FrictionSim2D = "src.cli:main"
+FrictionSim2D = "frictionsim2d.cli:main"
 
 [project.optional-dependencies]
 aiida = [
@@ -54,7 +54,7 @@ gui = [
 ]
 agent = [
   # The GUI assistant. pydantic-ai requires Python >= 3.11; the marker keeps
-  # `.[all]` installable on 3.9/3.10, where src.agent._AGENT_AVAILABLE is False.
+  # `.[all]` installable on 3.9/3.10, where frictionsim2d.agent._AGENT_AVAILABLE is False.
   "pydantic-ai-slim[openai,google,anthropic]~=2.56; python_version >= '3.11'",
   # anthropic 2.x made BetaMessageParam a Union; pydantic-ai 2.57 instantiates it
   # ("TypeError: Cannot instantiate typing.Union" on the first Claude turn).
@@ -74,10 +74,10 @@ all = [
 # AiiDA entry points — required for plugin discovery by aiida-core
 # ---------------------------------------------------------------------------
 [project.entry-points."aiida.calculations"]
-"friction2d.lammps" = "src.aiida.calcjob:LammpsFrictionCalcJob"
+"friction2d.lammps" = "frictionsim2d.aiida.calcjob:LammpsFrictionCalcJob"
 
 [project.entry-points."aiida.parsers"]
-"friction2d.lammps" = "src.aiida.calcjob:LammpsFrictionParser"
+"friction2d.lammps" = "frictionsim2d.aiida.calcjob:LammpsFrictionParser"
 
 # ---------------------------------------------------------------------------
 # Test configuration
@@ -96,22 +96,22 @@ markers = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["frictionsim2d"]
 
 # The shipped plot-settings presets are data, not modules, so
 # `packages` alone does not carry them into the wheel.
 [tool.hatch.build.targets.wheel.force-include]
-"src/postprocessing/presets" = "src/postprocessing/presets"
+"frictionsim2d/postprocessing/presets" = "frictionsim2d/postprocessing/presets"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/**"]
+include = ["frictionsim2d/**"]
 
 [tool.pylint.messages_control]
 # Gate command (codebase review; extended by the AiiDA data rework, Task 35,
-# 2026-09-22): pylint src/cli.py src/__init__.py src/core src/run
-# src/potentials src/lattice src/builders src/interfaces src/hpc src/aiida
-# src/data
-# src/aiida and src/data joined the gate at Task 35: this plan
+# 2026-09-22): pylint frictionsim2d/cli.py frictionsim2d/__init__.py frictionsim2d/core frictionsim2d/run
+# frictionsim2d/potentials frictionsim2d/lattice frictionsim2d/builders frictionsim2d/interfaces frictionsim2d/hpc frictionsim2d/aiida
+# frictionsim2d/data
+# frictionsim2d/aiida and frictionsim2d/data joined the gate at Task 35: this plan
 # rewrites both, so leaving them ungated would have exempted exactly the
 # code it produced. They were excluded before only because the 2026-09
 # codebase review scoped them out as "linted ad hoc"; nothing legacy is left
@@ -121,15 +121,15 @@ include = ["src/**"]
 # function or module. Their hit lists at the time of disabling are recorded
 # in docs/superpowers/reviews/findings.md. cyclic-import is deliberately NOT
 # here — the one surviving cycle is justified at its site with a module-level
-# pragma (src/builders/construction/components.py, mirroring src/lattice/apply.py
-# and src/run/expand.py).
+# pragma (frictionsim2d/builders/construction/components.py, mirroring frictionsim2d/lattice/apply.py
+# and frictionsim2d/run/expand.py).
 #
 # duplicate-code IS here, as the spec's end-of-Phase-2 treatment: every
 # surviving block is named below, so the gate reaches 0 without hiding what it
 # covers. A per-site pragma is not an option — pylint reports R0801 against an
-# unrelated module (src/hpc/manifest.py:1 in this tree), so a disable in ONE
+# unrelated module (frictionsim2d/hpc/manifest.py:1 in this tree), so a disable in ONE
 # file of a pair never fires; it only works in BOTH, which would mean pragmas
-# in ~11 files, i.e. most of src/builders, and no clearer than this list.
+# in ~11 files, i.e. most of frictionsim2d/builders, and no clearer than this list.
 #
 # COST, stated plainly: this is repo-wide, so a NEW duplication will not be
 # reported either. Re-check by running the gate with

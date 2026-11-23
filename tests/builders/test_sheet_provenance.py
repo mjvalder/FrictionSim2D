@@ -21,14 +21,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.builders.sheetonsheet.base import (
+from frictionsim2d.builders.sheetonsheet.base import (
     CUTOFF_NOT_APPLICABLE,
     SheetOnSheetSimulation,
     sheet_layer_type_map,
     write_sheet_provenance,
 )
-from src.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
-from src.data.provenance import ProvenanceRecord
+from frictionsim2d.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
+from frictionsim2d.data.provenance import ProvenanceRecord
 from tests.builders.test_sheetonsheet_builder import (
     _make_sheetonsheet_config,
     _prepare_builder_for_slide_write,
@@ -215,7 +215,7 @@ def test_a_single_material_flake_still_gets_a_flake_role_material(tmp_path):
     :func:`write_sheet_provenance` directly needs no geometry build, unlike
     :meth:`FlakeSlideSimulation.build`.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     from tests.builders.test_flake_slide import _flake_on_sheet_cfg
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
@@ -239,7 +239,7 @@ def test_a_hetero_flake_is_recorded_with_its_own_material(tmp_path):
     `_filled_flake_config` is a no-op here -- the plain `config.flake` (still
     unfilled, a pure shape spec) must not be recorded a SECOND time on top of
     the two real `flake_sheets` entries."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     from tests.builders.test_flake_slide import _flake_on_sheet_cfg
 
     cfg = _flake_on_sheet_cfg(hetero_flake=True)
@@ -260,7 +260,7 @@ def test_a_hetero_flake_is_recorded_with_its_own_material(tmp_path):
 # --------------------------------------------------------------------------
 
 def _pes_builder(tmp_path: Path):
-    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
     from tests.builders.test_pes_scan_builder import _sheet_cfg
 
     builder = PESSheetSimulation(_sheet_cfg(tmp_path, layers=[2]),
@@ -335,7 +335,7 @@ def test_only_layer_groups_are_read_not_every_group():
                     reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_the_hetero_builder_writes_a_record(tmp_path):
     from tests.builders.test_hetero_slide import _hetero_2p2_config
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
 
     builder = HeteroSheetOnSheetSimulation(_hetero_2p2_config(),
                                            str(tmp_path / "out"))
@@ -352,7 +352,7 @@ def test_the_hetero_builder_writes_a_record(tmp_path):
                     reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_the_flake_builder_writes_a_record(tmp_path):
     from tests.builders.test_flake_slide import _flake_on_sheet_cfg
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     builder = FlakeSlideSimulation(_flake_on_sheet_cfg(hetero_flake=False),
                                    str(tmp_path / "out"))
@@ -376,8 +376,8 @@ def test_a_sheet_run_is_enriched_after_the_run_instead_of_skipped(tmp_path):
     every real LAMMPS log opens with a version banner, and recording which
     LAMMPS produced a result is the point of the field.
     """
-    from src.builders.afm.base import enrich_provenance_post_run
-    from src.cli import _enrich_one_run
+    from frictionsim2d.builders.afm.base import enrich_provenance_post_run
+    from frictionsim2d.cli import _enrich_one_run
 
     run_dir, _slide, _b = _build_homogeneous(tmp_path)
     assert _record(run_dir).lammps_version is None, "build time: not yet known"
@@ -394,8 +394,8 @@ def test_a_sheet_run_is_enriched_after_the_run_instead_of_skipped(tmp_path):
 def test_a_sheet_run_with_no_log_is_reported_not_crashed(tmp_path):
     """The sweep must never report a completed simulation as failed over a
     provenance nicety."""
-    from src.builders.afm.base import enrich_provenance_post_run
-    from src.cli import _enrich_one_run
+    from frictionsim2d.builders.afm.base import enrich_provenance_post_run
+    from frictionsim2d.cli import _enrich_one_run
 
     run_dir, _slide, _b = _build_homogeneous(tmp_path)
     outcome, detail = _enrich_one_run(run_dir, None, enrich_provenance_post_run)
@@ -404,7 +404,7 @@ def test_a_sheet_run_with_no_log_is_reported_not_crashed(tmp_path):
 
 
 def test_sheet_provenance_records_drive_and_geometry(tmp_path):
-    from src.data.models import NM_TO_EV_A2
+    from frictionsim2d.data.models import NM_TO_EV_A2
 
     config_general = {"driving_spring": 50.0}
     run_dir, _slide, builder = _build_homogeneous(tmp_path, **config_general)
@@ -494,7 +494,7 @@ def test_afm_provenance_interlayer_block(tmp_path, monkeypatch):
 
 
 def test_interlayer_provenance_block_rules():
-    from src.builders.utils.interlayer import interlayer_provenance_block
+    from frictionsim2d.builders.utils.interlayer import interlayer_provenance_block
 
     class _PM:
         def interlayer_provenance(self):

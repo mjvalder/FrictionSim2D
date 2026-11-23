@@ -79,7 +79,7 @@ own; a `.stignore` at the repo root (never synced, gitignored) can exclude
 
 Not done yet, for later: publishing a bundle so a machine without the repo can
 `ollama pull` it. That is `ollama push <namespace>/fs2d-assistant:<tag>` from
-an ollama.com account, then an entry in `PUBLISHED` in `src/agent/bundles.py`
+an ollama.com account, then an entry in `PUBLISHED` in `frictionsim2d/agent/bundles.py`
 (the GUI then pulls it), plus a Hugging Face or Zenodo mirror of the GGUF and
 manifest for a citable DOI. A plain `ollama pull hf.co/...` is not enough:
 Ollama would build the chat template from the GGUF, not the bundle's
@@ -190,7 +190,7 @@ included) runs to its end. Turn lookups off with
 
 Asked for a "low", "mid" or "high" load (also small/light, moderate/medium/
 intermediate, large/heavy), the Assistant takes the values from reference
-bands in `src/core/scaling.py`, spread linearly over the band:
+bands in `frictionsim2d/core/scaling.py`, spread linearly over the band:
 
 | band | nominal pressure F/R² | at R = 25 Å | where the numbers come from |
 |---|---|---|---|

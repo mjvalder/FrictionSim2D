@@ -2,8 +2,8 @@
 import pytest
 from pydantic import ValidationError
 
-from src.agent.changes import ToolInputError
-from src.agent.tools.setup import (AFMSetupRequest, PESTipSetupRequest,
+from frictionsim2d.agent.changes import ToolInputError
+from frictionsim2d.agent.tools.setup import (AFMSetupRequest, PESTipSetupRequest,
                                    SheetSetupRequest, setup_afm, setup_pes_tip,
                                    setup_sheet)
 from tests.helpers.agent import make_deps
@@ -76,7 +76,7 @@ def test_afm_fills_tip_and_substrate_from_blank(deps, materials):
 
 
 def test_indent_and_pes_tip_fill_the_tip(deps):
-    from src.agent.tools.setup import IndentSetupRequest, setup_indent
+    from frictionsim2d.agent.tools.setup import IndentSetupRequest, setup_indent
     setup_indent(deps, IndentSetupRequest(materials=['h-MoS2'], potential_type='sw'))
     assert _ops(deps)[('sub', 'mat')] == 'Si'
     setup_pes_tip(deps, PESTipSetupRequest(materials=['h-MoS2'], potential_type='sw'))
@@ -149,7 +149,7 @@ def test_request_tip_radius_beats_the_default(deps):
     ('setup_pes_sheet', None, 'pes_sheet_config.ini', {('2D', 'x'): 30, ('2D', 'layers'): [2]}),
 ])
 def test_each_model_uses_its_own_example(deps, setup, request_, source, expected):
-    from src.agent.tools import setup as tools
+    from frictionsim2d.agent.tools import setup as tools
     if request_ is None:
         cls = {'setup_indent': tools.IndentSetupRequest,
                'setup_pes_sheet': tools.PESSheetSetupRequest}[setup]
@@ -168,7 +168,7 @@ def test_example_defaults_match_the_example_files():
     import configparser
     import json
     from pathlib import Path
-    from src.agent.tools.setup import EXAMPLE_DEFAULTS
+    from frictionsim2d.agent.tools.setup import EXAMPLE_DEFAULTS
     examples = Path(__file__).resolve().parents[2] / 'examples'
     for _model, (source, values) in EXAMPLE_DEFAULTS.items():
         parser = configparser.ConfigParser(inline_comment_prefixes=('#',))
@@ -184,7 +184,7 @@ def test_example_defaults_match_the_example_files():
 def test_pes_tip_override_is_explained(deps):
     """examples/pes_tip_config.ini's 60 x 60 sheet breaks the 2x-tip rule; the
     assistant raises it and says why instead of copying a failing value."""
-    from src.agent.tools import setup as tools
+    from frictionsim2d.agent.tools import setup as tools
     tools.setup_pes_tip(deps, tools.PESTipSetupRequest(materials=['h-MoS2'],
                                                        potential_type='sw', load_nN=2))
     cs = deps.pending[-1]

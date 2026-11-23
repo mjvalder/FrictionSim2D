@@ -11,10 +11,10 @@ import json
 
 import pytest
 
-from src.data.provenance import read_provenance
-from src.postprocessing.post_channels import (final_data_path, post_channels,
+from frictionsim2d.data.provenance import read_provenance
+from frictionsim2d.postprocessing.post_channels import (final_data_path, post_channels,
                                               post_channels_for, read_atom_z)
-from src.postprocessing.read_data import DataReader
+from frictionsim2d.postprocessing.read_data import DataReader
 from tests.helpers.results_tree import make_family_run, write_final_data
 
 
@@ -104,7 +104,7 @@ def test_post_channels_reach_run_summary_extras(tmp_path):
     """P6 puts these in RunFrames.post AND RunSummary.extras. Only the first
     half is this module's; the second is what carries them to the local store
     and the central DB, and without it they would stop at the CSV."""
-    from src.data.models import summarise_run
+    from frictionsim2d.data.models import summarise_run
 
     make_family_run(tmp_path, 'afm', final_data=True)
     run, = DataReader(results_dir=str(tmp_path)).runs
@@ -117,7 +117,7 @@ def test_post_channels_reach_run_summary_extras(tmp_path):
 
 
 def test_summarise_run_without_post_is_unchanged(tmp_path):
-    from src.data.models import summarise_run
+    from frictionsim2d.data.models import summarise_run
 
     make_family_run(tmp_path, 'afm', final_data=True)
     run, = DataReader(results_dir=str(tmp_path)).runs
@@ -126,7 +126,7 @@ def test_summarise_run_without_post_is_unchanged(tmp_path):
 
 
 def test_post_channels_for_reads_the_locator(tmp_path):
-    from src.run.tree import discover_runs
+    from frictionsim2d.run.tree import discover_runs
     make_family_run(tmp_path, 'afm', final_data=True)
     locator, = discover_runs(tmp_path)
 

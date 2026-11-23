@@ -1,4 +1,4 @@
-"""`src/aiida/rulings.py`, plain dicts only -- no AiiDA needed: the version
+"""`frictionsim2d/aiida/rulings.py`, plain dicts only -- no AiiDA needed: the version
 policy (which verdict and which summary "latest" means, critique I4) and the
 ruling ledger (which ruling should be in force, and how a source's rulings
 file updates it)."""
@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.aiida.rulings import (Clock, Policy, conflicts, drop_source, read_source,
+from frictionsim2d.aiida.rulings import (Clock, Policy, conflicts, drop_source, read_source,
                                ruling_order, select, stamp, why_in_force)
-from src.postprocessing.integrity_rulings import Ruling
+from frictionsim2d.postprocessing.integrity_rulings import Ruling
 
 OWN, O1, O2 = '/camp/integrity_rulings.yaml', '/rev/o1.yaml', '/rev/o2.yaml'
 PID = 'afm/x/L1|force=30|angle=0|speed=2'

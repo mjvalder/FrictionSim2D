@@ -4,7 +4,7 @@ import warnings
 
 import pytest
 
-from src.gui import quiet_console
+from frictionsim2d.gui import quiet_console
 
 
 @pytest.fixture(name='restore_logging')

@@ -133,7 +133,7 @@ and `created`. Each dataset is the Group `friction2d/datasets/<name>`.
 
 ### 2.2 What is stored and what is not
 
-One rule, `src/aiida/layout.py`, decides which files of a run are kept:
+One rule, `frictionsim2d/aiida/layout.py`, decides which files of a run are kept:
 `provenance.json`, `provenance/**`, `lammps/*.in`, `lammps/system.in.settings`,
 `lammps/run_*.log`, `results/*`, `data/hold_*.txt`, `data/final_*.data`,
 `data/load_*.data` and `build/*.lmp`.
@@ -150,7 +150,7 @@ One rule, `src/aiida/layout.py`, decides which files of a run are kept:
 
 ### 2.3 Credentials never enter the store
 
-Every file staged into a node goes through `src.aiida.data.redact.stage_file`.
+Every file staged into a node goes through `frictionsim2d.aiida.data.redact.stage_file`.
 
 - A settings or config document (`settings.yaml`, `config.json`, `*.ini`, any
   of those with an extra suffix, any file under `provenance/` outside `cif/`
@@ -208,7 +208,7 @@ campaigns.
 | `output` | run | dumps, frequencies, channels, `thermo` |
 | `realization` | run | the RNG seeds (`seed_thermal_tip`, `seed_thermal_sub`, `seed_velocity`, `seed_sheet_center`, the indent `seed`) and `substrate_realization_id` |
 
-The full field table, units and defaults are in `src/aiida/block_schema.py`
+The full field table, units and defaults are in `frictionsim2d/aiida/block_schema.py`
 (`FIELD_MAP`, `UNITS`). How they are derived from a run is in
 [provenance.md](provenance.md#from-provenance-to-blocks).
 
@@ -563,7 +563,7 @@ In an anonymised archive every file path in the ledger is its basename.
 ### 5.4 Which verdict counts: the policy
 
 A point can hold several live verdicts (checker, ruled, withdrawn, and those of
-a newer threshold set). `src/aiida/rulings.py` picks one by **declared version,
+a newer threshold set). `frictionsim2d/aiida/rulings.py` picks one by **declared version,
 never by creation time**:
 
 1. the highest `thresholds_version`, then the highest `code_version`: a newer
@@ -612,11 +612,11 @@ FrictionSim2D aiida list-sets
 
 ### 6.1 `related()`: the runs that differ only in X
 
-From Python (`src.aiida.query`):
+From Python (`frictionsim2d.aiida.query`):
 
 ```python
-from src.aiida import load_aiida_profile
-from src.aiida.query import point_table, related
+from frictionsim2d.aiida import load_aiida_profile
+from frictionsim2d.aiida.query import point_table, related
 
 load_aiida_profile()
 table = point_table()                                   # one row per live point
@@ -788,7 +788,7 @@ Pass `--keep-hpc-paths` to keep all of these as recorded.
 is kept on every node, for attribution, and the README says so.
 
 **Datasets export separately.** A set archive never includes dataset Groups or
-their tables. `src.aiida.export.export_dataset(name, path)` (Python only, no CLI
+their tables. `frictionsim2d.aiida.export.export_dataset(name, path)` (Python only, no CLI
 command yet) archives one dataset on its own, with the verdicts of every member
 point, across every set it was built from; it is gated, anonymised, per-atom
 free and documented the same way.

@@ -14,7 +14,7 @@ record feeds the AiiDA store.
 
 ## The provenance record — schema 2.2.0
 
-Provenance is a Pydantic model, `ProvenanceRecord` (`src/data/provenance.py`),
+Provenance is a Pydantic model, `ProvenanceRecord` (`frictionsim2d/data/provenance.py`),
 written by the builder at build time as `provenance.json`. A missing required
 field fails the *build*, not later analysis.
 
@@ -99,7 +99,7 @@ file on disk is never rewritten. A 1.x file predates `family`/`model`/
 `materials`, so on such a file the function:
 
 - fills in `family`/`model` from its keyword arguments (callers such as
-  `src.run.tree.discover_runs` pass the run's own tokens),
+  `frictionsim2d.run.tree.discover_runs` pass the run's own tokens),
 - turns the old single `pot_path`/`pot_type`/`pot_resolution_route`/
   `pot_file_sha256` quadruple into one `MaterialProvenance` entry with
   `role='sheet'` and `name=material_name`.
@@ -142,7 +142,7 @@ directly off disk for a tree that was never imported.
 ### From provenance to blocks
 
 The import splits the three documents with one table,
-`src/aiida/block_schema.py`:
+`frictionsim2d/aiida/block_schema.py`:
 
 - **Blocks** (`FIELD_MAP`). Every requested leaf of the run's config model
   (`AFMSimulationConfig` or `SheetOnSheetSimulationConfig`) and of

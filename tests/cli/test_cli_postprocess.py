@@ -7,7 +7,7 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from src.cli import cli
+from frictionsim2d.cli import cli
 from tests.helpers.results_tree import make_family_run
 
 
@@ -136,7 +136,7 @@ def test_preset_is_applied_and_settings_win_over_it(runner, tmp_path,
         def generate_plot(self, spec):
             pass
 
-    import src.postprocessing as pp
+    import frictionsim2d.postprocessing as pp
     monkeypatch.setattr(pp, 'Plotter', _Plotter, raising=False)
 
     doc = _document(tmp_path, tmp_path / 'ds')
@@ -167,7 +167,7 @@ def test_an_unknown_preset_is_refused(runner, tmp_path):
 def test_init_writes_a_document_that_validates(runner, tmp_path):
     """"Rapid publication-quality plots" cannot start with "hand-write this
     JSON". --init is the scaffold."""
-    from src.postprocessing.plot_config import load_plot_document
+    from frictionsim2d.postprocessing.plot_config import load_plot_document
 
     make_family_run(tmp_path / 'ds', 'afm', loads=(10.0, 30.0))
     runner.invoke(cli, ['postprocess', 'read', str(tmp_path / 'ds'), '--export'])
@@ -286,8 +286,8 @@ def test_read_reports_integrity_and_stubs(runner, tmp_path):
 
 
 def test_read_reports_overrides(runner, tmp_path):
-    from src.postprocessing.integrity_rulings import RULINGS_FILE, point_id
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.integrity_rulings import RULINGS_FILE, point_id
+    from frictionsim2d.postprocessing.read_data import DataReader
     _integrity_tree(tmp_path)
     failed = next(p for p in DataReader(str(tmp_path)).points
                   if p.status == 'failed_integrity')

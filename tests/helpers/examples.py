@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import List, Tuple
 
-from src.run.artifacts import generate_package
+from frictionsim2d.run.artifacts import generate_package
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'

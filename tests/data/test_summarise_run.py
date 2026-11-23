@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.core.observables import channel_by_role
-from src.data.models import RunSummary, compute_friction_stats, summarise_run
+from frictionsim2d.core.observables import channel_by_role
+from frictionsim2d.data.models import RunSummary, compute_friction_stats, summarise_run
 
 
 def _window(n=100):
@@ -150,7 +150,7 @@ def test_flake_results_file_round_trips_to_a_cof(tmp_path):
     """End to end over the synthetic writer: the flake window header now
     carries v_fz, the reader renames it to nf, and summarise_run computes a
     COF from it."""
-    from src.postprocessing.read_data import read_results_file
+    from frictionsim2d.postprocessing.read_data import read_results_file
     from tests.helpers.synthetic_results import make_run
 
     run = make_run(tmp_path, 'sheetonsheet/h-MoS2+flake-h-MoS2/100x_100y/K300',

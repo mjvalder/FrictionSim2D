@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.cli import cli
+from frictionsim2d.cli import cli
 
 DOCS = Path(__file__).resolve().parents[2] / 'documentation'
 GONE = ['aiida dump', 'db upload ./', '--use-remote', '--hpc-config',
@@ -38,7 +38,7 @@ def test_every_aiida_subcommand_is_documented():
 
 
 def test_settings_doc_lists_the_real_fields():
-    from src.core.config import AiidaSettings
+    from frictionsim2d.core.config import AiidaSettings
 
     text = (DOCS / 'settings.md').read_text(encoding='utf-8')
     for field in AiidaSettings.model_fields:

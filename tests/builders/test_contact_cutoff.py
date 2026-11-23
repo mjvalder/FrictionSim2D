@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.afm import AFMSimulation, K_CONTACT
-from src.potentials.utils import lj_params
+from frictionsim2d.builders.afm import AFMSimulation, K_CONTACT
+from frictionsim2d.potentials.utils import lj_params
 from tests.helpers.afm import _make_afm_config
 
 MATERIALS = Path(__file__).parents[2] / 'examples' / 'materials'

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.postprocessing.labels import (FAMILY_LABEL_OVERRIDES, display_name,
+from frictionsim2d.postprocessing.labels import (FAMILY_LABEL_OVERRIDES, display_name,
                                        label_for, unit_for)
 
 

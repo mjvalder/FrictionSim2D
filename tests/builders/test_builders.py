@@ -1,4 +1,4 @@
-"""Tests for src.builders.components + the plain AFMSimulation orchestration.
+"""Tests for frictionsim2d.builders.components + the plain AFMSimulation orchestration.
 
 Rewritten (Phase 2c review, docs/superpowers/reviews/builders-construction.md
 (c), test-weak repair): every test here used to mock the module's own
@@ -17,13 +17,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.builders import AFMSimulation as ExportedAFMSimulation
-from src.builders.afm import AFMSimulation
-from src.builders import SheetOnSheetSimulation as ExportedSheetOnSheetSimulation
-from src.builders import components
-from src.builders import components as exported_components
-from src.builders.construction.components import cifread, get_amorphous_path
-from src.core.config import AFMSimulationConfig, SheetConfig, load_settings
+from frictionsim2d.builders import AFMSimulation as ExportedAFMSimulation
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.builders import SheetOnSheetSimulation as ExportedSheetOnSheetSimulation
+from frictionsim2d.builders import components
+from frictionsim2d.builders import components as exported_components
+from frictionsim2d.builders.construction.components import cifread, get_amorphous_path
+from frictionsim2d.core.config import AFMSimulationConfig, SheetConfig, load_settings
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 SI_CIF, SI_POT = f"{MAT}/Si.cif", f"{POT}/Si.sw"
@@ -104,7 +104,7 @@ def test_component_build_tip(afm_config, temp_dir):
     settings = afm_config.settings
     captured: dict = {}
 
-    with patch("src.builders.components.run_lammps_commands",
+    with patch("frictionsim2d.builders.components.run_lammps_commands",
                side_effect=_fake_run_lammps_commands(captured)) as mock_lmp:
         path, radius = components.build_tip(afm_config.tip, temp_dir, settings)
 
@@ -143,7 +143,7 @@ def test_build_sheet_copies_base_when_multilayer_stacking_disabled(tmp_path: Pat
         x=12.0, y=12.0, layers=[1, 2],
     )
 
-    with patch("src.builders.components.stack_multilayer_sheet",
+    with patch("frictionsim2d.builders.components.stack_multilayer_sheet",
                wraps=components.stack_multilayer_sheet) as mock_stack:
         out_path, out_dims, out_lat_c = components.build_sheet(
             config,
@@ -193,9 +193,9 @@ def test_afm_builder_structure(afm_config, temp_dir):
         )
         return out_path
 
-    with patch("src.builders.components.run_lammps_commands",
+    with patch("frictionsim2d.builders.components.run_lammps_commands",
                side_effect=_fake_run_lammps_commands(captured)), \
-         patch("src.builders.construction.components.make_amorphous",
+         patch("frictionsim2d.builders.construction.components.make_amorphous",
                side_effect=_fake_make_amorphous):
         builder = AFMSimulation(afm_config, output_dir=str(temp_dir))
         builder.build()
@@ -244,11 +244,11 @@ def test_build_monolayer_avoids_atomsk_convert_orthogonalize_duplicate(tmp_path:
         x=50.0, y=50.0, layers=[1],
     )
 
-    with patch("src.builders.components._write_cif_as_lammps_atomic",
+    with patch("frictionsim2d.builders.components._write_cif_as_lammps_atomic",
                wraps=components._write_cif_as_lammps_atomic) as mock_convert, \
-         patch("src.builders.components._orthogonalize_lammps_data",
+         patch("frictionsim2d.builders.components._orthogonalize_lammps_data",
                wraps=components._orthogonalize_lammps_data) as mock_ortho, \
-         patch("src.builders.components._duplicate_lammps_data",
+         patch("frictionsim2d.builders.components._duplicate_lammps_data",
                wraps=components._duplicate_lammps_data) as mock_dup:
         out_path, out_dims, _pot_counts, total_types, _supercell_dims = \
             components.build_monolayer(config)
@@ -269,11 +269,11 @@ def test_create_orthogonal_slab_avoids_atomsk_cli(tmp_path: Path) -> None:
     out_path = tmp_path / "out.lmp"
     atomsk = MagicMock()
 
-    with patch("src.builders.components._write_cif_as_lammps_atomic",
+    with patch("frictionsim2d.builders.components._write_cif_as_lammps_atomic",
                wraps=components._write_cif_as_lammps_atomic) as mock_convert, \
-         patch("src.builders.components._duplicate_lammps_data",
+         patch("frictionsim2d.builders.components._duplicate_lammps_data",
                wraps=components._duplicate_lammps_data) as mock_dup, \
-         patch("src.builders.components._orthogonalize_lammps_data",
+         patch("frictionsim2d.builders.components._orthogonalize_lammps_data",
                wraps=components._orthogonalize_lammps_data) as mock_ortho:
         _, out_dims, duplication = components.create_orthogonal_slab(
             cif_path=Path(SI_CIF),
@@ -308,7 +308,7 @@ def test_build_monolayer_splits_edge_types_when_enabled(tmp_path: Path) -> None:
         x=12.0, y=12.0, layers=[1],
     )
 
-    with patch("src.builders.components.apply_sheet_edge_types",
+    with patch("frictionsim2d.builders.components.apply_sheet_edge_types",
                wraps=components.apply_sheet_edge_types) as mock_edge_split:
         out_path, out_dims, _pot_counts, total_types, _supercell_dims = \
             components.build_monolayer(config, edge_mode='fixed', edge_width=4.0)

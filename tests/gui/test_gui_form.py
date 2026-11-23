@@ -19,7 +19,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.controllers.document import ConfigDocument  # noqa: E402
+from frictionsim2d.gui.controllers.document import ConfigDocument  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,7 +31,7 @@ def _qt_app():
 
 @pytest.fixture(name='form')
 def _form(qt_app, monkeypatch):
-    from src.gui.widgets.form import ConfigForm
+    from frictionsim2d.gui.widgets.form import ConfigForm
 
     monkeypatch.chdir(REPO_ROOT)
     form = ConfigForm(ConfigDocument.blank('afm'))
@@ -44,7 +44,7 @@ class TestInfoBubbles:
     bubble at the end of the row carries the same text as a tooltip instead."""
 
     def test_bubble_tooltip_carries_help_and_default(self, qt_app):
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.blank('sheetonsheet')
         form = SectionForm(doc.section('general'), doc)
@@ -53,7 +53,7 @@ class TestInfoBubbles:
         assert not hasattr(form, '_captions')
 
     def test_hint_only_field_still_gets_a_bubble(self, qt_app):
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.blank('sheetonsheet')
         form = SectionForm(doc.section('general'), doc)
@@ -93,8 +93,8 @@ class TestLoopabilityHints:
         'sweep') a temporary hand-written help text and drive it through the
         real `_add_field` path. Substituting instead of appending would drop
         one of the two strings; this fails either way that happens."""
-        from src.gui.schema import overrides as overrides_mod
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.schema import overrides as overrides_mod
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         temp_fields = overrides_mod._COMMON['general'].fields
@@ -109,8 +109,8 @@ class TestLoopabilityHints:
 
     def test_settings_fields_get_no_hint(self, qt_app, monkeypatch):
         """SettingsDocument has no loopability concept at all."""
-        from src.gui.controllers.settings_document import SettingsDocument
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.controllers.settings_document import SettingsDocument
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(SettingsDocument.defaults())
@@ -192,7 +192,7 @@ class TestNestedFieldsAreNotHidden:
     def _section():
         from pydantic import BaseModel
 
-        from src.gui.schema.introspect import describe_section
+        from frictionsim2d.gui.schema.introspect import describe_section
 
         class _Sub(BaseModel):
             x: int = 0
@@ -229,7 +229,7 @@ class TestNestedFieldsAreNotHidden:
         return _FakeDocument()
 
     def test_a_nested_field_is_shown_as_read_only(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = SectionForm(self._section(), self._document())
@@ -241,7 +241,7 @@ class TestNestedFieldsAreNotHidden:
     def test_a_nested_value_survives_a_commit(self, qt_app, monkeypatch):
         import copy
 
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = self._document()
@@ -282,7 +282,7 @@ class TestErrorClearingPreservesTheTooltip:
 
 
 def _settings_with_drive(method):
-    from src.core.config import GlobalSettings
+    from frictionsim2d.core.config import GlobalSettings
 
     s = GlobalSettings()
     s.simulation.drive_method = method
@@ -294,8 +294,8 @@ class TestRequiredStars:
     spring only matters when the virtual-atom drive method is selected."""
 
     def test_driving_spring_star_follows_drive_method(self, qt_app):
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.blank('sheetonsheet')
         form = SectionForm(doc.section('general'), doc,
@@ -306,9 +306,9 @@ class TestRequiredStars:
         assert form2.effective_required('driving_spring') is False
 
     def test_temp_is_starred(self, qt_app):
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
-        from src.gui.style import REQUIRED_MARK
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.style import REQUIRED_MARK
 
         doc = ConfigDocument.blank('sheetonsheet')
         form = SectionForm(doc.section('general'), doc,
@@ -320,9 +320,9 @@ class TestRequiredStars:
         """set_settings re-derives the star in place, without rebuilding --
         the Settings tab's Apply/Save must move the star on the config form
         that is already on screen."""
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
-        from src.gui.style import REQUIRED_MARK
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.style import REQUIRED_MARK
 
         doc = ConfigDocument.blank('sheetonsheet')
         form = SectionForm(doc.section('general'), doc,
@@ -339,8 +339,8 @@ class TestRequiredStars:
         does for one that was required from the start -- otherwise it sits
         starred-and-blank, blocking Generate, even though it has a perfectly
         good default."""
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.blank('sheetonsheet')
         doc.values['general'].pop('driving_spring', None)
@@ -352,7 +352,7 @@ class TestRequiredStars:
         assert form.editors['driving_spring'].value() not in (None, '', [])
 
     def test_force_is_required_and_blocks(self):
-        from src.gui.schema.overrides import overrides_for
+        from frictionsim2d.gui.schema.overrides import overrides_for
 
         force = overrides_for('afm')['general'].fields['force']
         assert force.required is True
@@ -364,15 +364,15 @@ class TestRequiredStars:
         `general.pressure` straight through unguarded, so an absent pressure
         renders `variable pressure equal None` in slide.lmp -- the same
         unparseable-LAMMPS failure class as an empty force list."""
-        from src.gui.schema.overrides import overrides_for
+        from frictionsim2d.gui.schema.overrides import overrides_for
 
         pressure = overrides_for('sheetonsheet')['general'].fields['pressure']
         assert pressure.required is True
         assert pressure.required_blocks is True
 
     def test_missing_required_reports_force_as_blocking(self, qt_app, monkeypatch):
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank('afm'))
@@ -383,8 +383,8 @@ class TestRequiredStars:
 
     def test_missing_required_reports_pressure_as_blocking(self, qt_app,
                                                             monkeypatch):
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -402,8 +402,8 @@ class TestStarredFieldPrefill:
     value just because the user never touched the box."""
 
     def test_starred_field_prefills_and_commits_default(self, qt_app):
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.blank('sheetonsheet')
         doc.values['general'].pop('temp', None)
@@ -418,8 +418,8 @@ class TestTipPositionGate:
     then."""
 
     def test_gate_unticked_on_blank_ticked_on_explicit(self, qt_app):
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.blank('afm')
         form = SectionForm(doc.section('tip'), doc)
@@ -429,8 +429,8 @@ class TestTipPositionGate:
         assert form._gate_boxes['tip_position'].isChecked()
 
     def test_unticking_gate_drops_keys(self, qt_app):
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.blank('afm')
         doc.set('tip', 'tip_x', 12.0)
@@ -447,8 +447,8 @@ class TestTipPositionGate:
         0.0) and must not be reported as a real edit. Since `_validate()`
         calls `commit()` on every Render, failing this used to mark a config
         the user never touched dirty just from pressing the button."""
-        from src.gui.controllers.document import ConfigDocument
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.from_file(
             REPO_ROOT / 'examples' / 'afm_config.ini', 'afm')
@@ -484,7 +484,7 @@ class TestOuterLoopAngleLabel:
         assert editor.value() == 'scan_angle'
 
     def test_saved_config_writes_scan_angle_not_angle(self, form, tmp_path):
-        from src.core.config import parse_config
+        from frictionsim2d.core.config import parse_config
 
         editor = form.sections['general'].editors['outer_loop']
         editor.box.setCurrentIndex(editor.box.findData('scan_angle'))
@@ -502,7 +502,7 @@ class TestEmptySplitControlIsHidden:
     @pytest.mark.parametrize('model', ['pes_tip', 'pes_sheet'])
     def test_no_split_control_where_there_is_nothing_to_split(self, qt_app,
                                                               monkeypatch, model):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank(model))
@@ -514,7 +514,7 @@ class TestEmptySplitControlIsHidden:
     @pytest.mark.parametrize('model', ['afm', 'indent', 'sheetonsheet'])
     def test_the_control_stays_where_a_split_is_offered(self, qt_app,
                                                         monkeypatch, model):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank(model))
@@ -530,7 +530,7 @@ class TestCountsRead:
         (1, 'build', '1 build'),
     ])
     def test_plural(self, n, word, expected):
-        from src.gui.app import plural
+        from frictionsim2d.gui.app import plural
 
         assert plural(n, word) == expected
 
@@ -543,7 +543,7 @@ class TestSecondMaterialErrors:
     """
 
     def test_a_second_sheet_issue_decorates_its_editor(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -558,7 +558,7 @@ class TestSecondMaterialErrors:
     def test_the_first_sheet_editor_is_still_decorated(self, qt_app, monkeypatch):
         """The pair renames [2D] to [2D-1] on the way out; the form section is
         still '2D', so its issues must be mapped back."""
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -579,7 +579,7 @@ class TestPairConfigSurvivesTheForm:
     {mat2} templates and the pair list exactly where they were."""
 
     def test_an_untouched_commit_changes_nothing(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.from_file(
@@ -601,7 +601,7 @@ class TestAddASecondMaterial:
     """
 
     def test_add_material_builds_second_section(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -618,7 +618,7 @@ class TestAddASecondMaterial:
 
     def test_the_second_section_follows_the_first(self, qt_app, monkeypatch):
         """A config whose two materials are pages apart is unreadable."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -631,7 +631,7 @@ class TestAddASecondMaterial:
         form.deleteLater()
 
     def test_the_button_removes_it_again(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -649,7 +649,7 @@ class TestAddASecondMaterial:
     def test_add_material_enabled_while_sweeping(self, qt_app, tmp_path, monkeypatch):
         """A sweep over ordered pairs is exactly the case that needs a second
         sheet, so a configured material list must not lock the button."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -665,7 +665,7 @@ class TestAddASecondMaterial:
         defaults under a material list carries no placeholder, so expansion
         leaves it pinned and every member of the sweep builds the same second
         material -- wrong results inside correctly-named directories."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.from_file(
@@ -692,7 +692,7 @@ class TestAddASecondMaterial:
         -- a shared, hand-maintained file -- which is the case where the
         collapse's source and target are two different files.
         """
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -790,7 +790,7 @@ class TestAddASecondMaterial:
         dialogs in front of one refusal -- and the question's 'Yes' could not
         have been honoured anyway."""
         from PySide6.QtWidgets import QMessageBox
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         curated = tmp_path / 'pairs.txt'
@@ -819,7 +819,7 @@ class TestAddASecondMaterial:
         """Nothing is lost, so there is nothing to confirm -- a prompt on
         every Remove is how a real warning becomes one nobody reads."""
         from PySide6.QtWidgets import QMessageBox
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -837,7 +837,7 @@ class TestAddASecondMaterial:
     def test_stacking_is_not_offered_in_run_parameters(self, qt_app, monkeypatch):
         """It orders the layers of a two-material stack; on the Run parameters
         form of a single-material config it configures nothing."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank('sheetonsheet'))
@@ -848,7 +848,7 @@ class TestAddASecondMaterial:
         """It writes to `[general]`. Keeping it in `editors` would have
         `commit()` write a `hetero_stacking` key into `[2D-2]`, which the
         sheet model does not have."""
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -863,7 +863,7 @@ class TestAddASecondMaterial:
         form.deleteLater()
 
     def test_the_stacking_proxy_shows_what_the_config_holds(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import SectionForm
+        from frictionsim2d.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -878,7 +878,7 @@ class TestAddASecondMaterial:
         """`enable_section('2D-2')` is not a thing the document accepts -- the
         section is added and dropped by the `[2D]` button, so a group-box tick
         would only raise."""
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.blank('sheetonsheet')
@@ -898,7 +898,7 @@ class TestSweepDirectoriesFromPairTemplates:
     material reads as unusable."""
 
     def test_a_pair_template_resolves_to_its_directory(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.from_file(
@@ -952,7 +952,7 @@ class TestAssistantHighlights:
         assert form.sections['general'].editors['temp'].highlight() is None
 
     def test_highlight_unfolds_its_section(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank('afm'), start_collapsed=True)
@@ -967,7 +967,7 @@ class TestInterlayerControls:
 
     @staticmethod
     def _sheet_form(monkeypatch, **general):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.from_file(REPO_ROOT / 'examples' / 'sheet_config.ini',

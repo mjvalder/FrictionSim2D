@@ -10,10 +10,10 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida import store  # noqa: E402
-from src.aiida.blocks import block_hash  # noqa: E402
-from src.data.provenance import sha256_file  # noqa: E402
-from src.aiida.store import (  # noqa: E402
+from frictionsim2d.aiida import store  # noqa: E402
+from frictionsim2d.aiida.blocks import block_hash  # noqa: E402
+from frictionsim2d.data.provenance import sha256_file  # noqa: E402
+from frictionsim2d.aiida.store import (  # noqa: E402
     FRICTION2D_NAMESPACE, StoreIndex, get_or_create_block, get_or_create_file,
     get_or_create_provenance, get_or_create_schema, machine_computer, node_uuid,
     reindex, schema_hash, verify,
@@ -159,7 +159,7 @@ def test_machine_computer_defaults(aiida_profile_clean):
 
 
 def test_lammps_code_is_keyed_by_machine_and_version(aiida_profile_clean):
-    from src.aiida.store import lammps_code
+    from frictionsim2d.aiida.store import lammps_code
     comp = machine_computer('archer2', {})
     code = lammps_code(comp, '29 Aug 2024 - Update 1', '/opt/bin/lmp_mpi')
     assert code.label == 'lammps-29Aug2024_Update1@archer2'
@@ -187,7 +187,7 @@ def test_node_uuid_is_uuid5_of_slot_and_hash():
 
 def test_a_file_holding_a_blocks_json_is_not_that_block(aiida_profile_clean, tmp_path):
     import json
-    from src.aiida.blocks import _normalise
+    from frictionsim2d.aiida.blocks import _normalise
     payload = json.dumps(_normalise(THERMOSTAT), sort_keys=True, separators=(',', ':'))
     path = tmp_path / 'block.json'
     path.write_text(payload, encoding='utf-8')
@@ -207,7 +207,7 @@ def test_block_uuid_is_the_same_in_two_fresh_profiles(aiida_profile_clean):
 
 
 def test_schema_node_is_content_addressed(aiida_profile_clean):
-    from src.aiida.block_schema import schema_document
+    from frictionsim2d.aiida.block_schema import schema_document
     doc = schema_document('afm')
     node = get_or_create_schema(doc)
     assert node.get_dict() == doc
@@ -273,7 +273,7 @@ def test_set_uuid_without_the_private_api_warns_once(aiida_profile_clean, caplog
     class Bare:
         backend_entity = object()
     monkeypatch.setattr(store, '_warned_uuid', False)
-    with caplog.at_level('WARNING', logger='src.aiida.store'):
+    with caplog.at_level('WARNING', logger='frictionsim2d.aiida.store'):
         store._set_uuid(Bare(), node_uuid('block', 'a'))
         store._set_uuid(Bare(), node_uuid('block', 'b'))
     assert len([r for r in caplog.records if 'deterministic' in r.message]) == 1
@@ -299,7 +299,7 @@ def test_a_uuid_twin_with_other_content_is_not_labelled(aiida_profile_clean, tmp
     digest = block_hash(THERMOSTAT)
     impostor = _stored_under(orm.Dict({'kind': 'thermostat', 'fields': {}}),
                              node_uuid('block', digest))
-    with caplog.at_level('WARNING', logger='src.aiida.store'):
+    with caplog.at_level('WARNING', logger='frictionsim2d.aiida.store'):
         node = get_or_create_block(THERMOSTAT)
     assert node.pk != impostor.pk and node.get_dict() == THERMOSTAT
     assert node.uuid != node_uuid('block', digest)               # random fallback

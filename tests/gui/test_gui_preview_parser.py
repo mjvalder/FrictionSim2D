@@ -15,13 +15,13 @@ from pathlib import Path
 
 import pytest
 
-from src.run.artifacts import discover_preview_target, generate_package
-from src.gui.preview.init_script import (
+from frictionsim2d.run.artifacts import discover_preview_target, generate_package
+from frictionsim2d.gui.preview.init_script import (
     Placement,
     parse_assembly,
     read_data_file_box,
 )
-from src.gui.preview.settings_file import expand_type_range, parse_identity
+from frictionsim2d.gui.preview.settings_file import expand_type_range, parse_identity
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'

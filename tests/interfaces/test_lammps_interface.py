@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import src.interfaces.lammps as lmp_mod
+import frictionsim2d.interfaces.lammps as lmp_mod
 
 import logging
 import sys
@@ -10,7 +10,7 @@ import types
 
 import pytest
 
-from src.interfaces import lammps as lmp_iface
+from frictionsim2d.interfaces import lammps as lmp_iface
 
 
 def test_import_fallback_restores_strptime():

@@ -1,9 +1,9 @@
-"""src.interfaces.ase — the one adapter that must stay lazy (CLAUDE.md, import weight)."""
+"""frictionsim2d.interfaces.ase — the one adapter that must stay lazy (CLAUDE.md, import weight)."""
 import sys
 
 import pytest
 
-from src.interfaces import ase as ase_iface
+from frictionsim2d.interfaces import ase as ase_iface
 
 
 def test_read_structure_takes_the_first_image_of_a_trajectory(monkeypatch, materials_path):

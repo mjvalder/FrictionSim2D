@@ -19,7 +19,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.widgets.database.filters import (  # noqa: E402
+from frictionsim2d.gui.widgets.database.filters import (  # noqa: E402
     ANY, EMPTY_FILTERS, HIGH_SENTINEL, LOW_SENTINEL, FilterBar)
 
 

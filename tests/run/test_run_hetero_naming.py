@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.run.naming import material_token, output_dir_for, primary_sheet
+from frictionsim2d.run.naming import material_token, output_dir_for, primary_sheet
 
 
 def test_primary_sheet_falls_back_to_numbered_sections():
@@ -91,8 +91,8 @@ class TestShippedPairSweepExample:
 
     @pytest.fixture(name='expanded')
     def _expanded(self):
-        from src.run.expand import expand_config_sweeps
-        from src.core.config import parse_config
+        from frictionsim2d.run.expand import expand_config_sweeps
+        from frictionsim2d.core.config import parse_config
 
         root = self.REPO_ROOT
         return expand_config_sweeps(
@@ -133,9 +133,9 @@ class TestShippedPairSweepExample:
         two of the three runs still failed to build. Only running the matcher
         catches that, so it is worth the few seconds.
         """
-        from src.builders.construction.components import build_monolayer
-        from src.builders.construction.hetero_stack import build_matched_supercells
-        from src.core.config import SheetConfig
+        from frictionsim2d.builders.construction.components import build_monolayer
+        from frictionsim2d.builders.construction.hetero_stack import build_matched_supercells
+        from frictionsim2d.core.config import SheetConfig
 
         monkeypatch.chdir(self.REPO_ROOT)
         for config in expanded:

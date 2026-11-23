@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.aiida.block_schema import (OBSERVABLE_UNIT_ALIASES, SUMMARY_UNITS,
+from frictionsim2d.aiida.block_schema import (OBSERVABLE_UNIT_ALIASES, SUMMARY_UNITS,
                                     normalise_unit, summary_units)
-from src.core.observables import FAMILIES, channel_by_role
-from src.data.models import RunSummary, summarise_run
-from src.postprocessing.post_channels import AFM_LIKE_FAMILIES
+from frictionsim2d.core.observables import FAMILIES, channel_by_role
+from frictionsim2d.data.models import RunSummary, summarise_run
+from frictionsim2d.postprocessing.post_channels import AFM_LIKE_FAMILIES
 
 _ALLOWED = {'1', 'nN', 'angstrom', 'eV', 'eV/angstrom^2', 'nN/angstrom',
             'nN*angstrom', 'count', 'samples'}
@@ -121,7 +121,7 @@ def test_unknown_family_is_refused():
 # --- the two spellings, mapped explicitly (fix rounds 1-2, ruling P2-R14) -------
 
 def _registry_units():
-    from src.core.observables import REGISTRY
+    from frictionsim2d.core.observables import REGISTRY
     return {(fam, ob.name): ob.units for ob in REGISTRY.values()
             for fam in ob.sim_types if ob.units}
 
@@ -159,7 +159,7 @@ def test_an_unaliased_mismatch_fails(monkeypatch):
 def test_every_registry_unit_normalises_into_the_schema_vocabulary():
     """A registry unit is either spelled as block_schema spells it or is in
     the alias table; block_schema itself never uses the registry spelling."""
-    from src.aiida.block_schema import UNITS
+    from frictionsim2d.aiida.block_schema import UNITS
     schema = set(UNITS.values()) | {u for t in SUMMARY_UNITS.values() for u in t.values()}
     assert not schema & set(OBSERVABLE_UNIT_ALIASES)
     assert set(OBSERVABLE_UNIT_ALIASES.values()) <= schema | {'eV/angstrom'}

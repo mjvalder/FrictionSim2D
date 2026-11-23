@@ -1,0 +1,34 @@
+{#
+  Generated consumers of the observable registry (frictionsim2d/core/observables.py).
+  Spec §3.2/§4: three sampling tiers —
+    fc_win  ave/time 1 1000 Nfreq   cheap scalars, block means; Nfreq is settings.output.results_frequency (1000 by default, as the 2026 campaign)
+    fc_raw  ave/time 100 1 100     instantaneous 100 fs samples for slip statistics
+    fc_pa   ave/time 1000 1 1000   expensive per-atom computes + group/group
+
+  Emitted ONCE in the setup block: the clear+jump loop structure re-executes
+  the whole setup block on every loop iteration, so the computes are
+  re-created at runtime. Never insert emissions between a clear and its jump.
+  The builder pre-substitutes {contact_cutoff}, {n_layers} and
+  {il_bot}/{il_top} placeholders (build_obs_ctx) and dedupes shared computes.
+#}
+{% macro emit_observables(obs_ctx) %}
+# --- observable registry channels (spec §3) ---------------------------------
+{% for line in obs_ctx.compute_lines %}
+{{ line }}
+{% endfor %}
+{% for line in obs_ctx.variable_lines %}
+{{ line }}
+{% endfor %}
+{% endmacro %}
+
+{% macro emit_output_fixes(obs_ctx) %}
+{% if obs_ctx.emit_window %}
+fix             fc_win all ave/time {{ obs_ctx.window_args }} {{ obs_ctx.window_varlist }} file {{ obs_ctx.results_file_pattern }} title1 "{{ obs_ctx.title1 }}"
+{% endif %}
+{% if obs_ctx.emit_raw %}
+fix             fc_raw all ave/time 100 1 100 {{ obs_ctx.raw_varlist }} file {{ obs_ctx.results_file_raw }} title1 "{{ obs_ctx.title1 }}"
+{% endif %}
+{% if obs_ctx.emit_peratom %}
+fix             fc_pa all ave/time 1000 1 1000 {{ obs_ctx.peratom_varlist }} file {{ obs_ctx.results_file_peratom }} title1 "{{ obs_ctx.title1 }}"
+{% endif %}
+{% endmacro %}

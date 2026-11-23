@@ -19,7 +19,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.controllers.document import ConfigDocument  # noqa: E402
+from frictionsim2d.gui.controllers.document import ConfigDocument  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +33,7 @@ def _qt_app():
 
 
 def test_scan_elements_from_cif():
-    from src.gui.controllers.elements import scan_config_elements
+    from frictionsim2d.gui.controllers.elements import scan_config_elements
 
     doc = ConfigDocument.blank('sheetonsheet')
     doc.set('2D', 'cif_path', 'examples/materials/h-MoS2.cif')
@@ -46,7 +46,7 @@ def test_scan_elements_across_material_sweep(tmp_path):
     """A `{mat}` sheet with a configured material list scans every selected
     material's CIF, not just the one literal (unresolved) path -- the shared
     overrides file this feature is for is meant to cover a whole sweep."""
-    from src.gui.controllers.elements import scan_config_elements
+    from frictionsim2d.gui.controllers.elements import scan_config_elements
 
     (tmp_path / 'A.cif').write_text('data_a\n_chemical_formula_sum   "Fe1"\n')
     (tmp_path / 'B.cif').write_text('data_b\n_chemical_formula_sum   "Cu1"\n')
@@ -67,7 +67,7 @@ def test_scan_elements_across_a_pair_sweep(tmp_path):
     scanning `.../{mat1}.cif` -- a path that cannot exist, with no element
     token in '{mat1}' to fall back on -- so the LJ pair picker came back
     empty for the very configs that need it."""
-    from src.gui.controllers.elements import scan_config_elements
+    from frictionsim2d.gui.controllers.elements import scan_config_elements
 
     (tmp_path / 'A.cif').write_text('data_a\n_chemical_formula_sum   "Fe1"\n')
     (tmp_path / 'B.cif').write_text('data_b\n_chemical_formula_sum   "Cu1"\n')
@@ -90,7 +90,7 @@ def test_scan_elements_mat_fallback_reachable_without_cif_path():
     """A missing/blank cif_path must not skip the section outright -- the
     third-tier `mat`-token fallback has to run even when there is no CIF to
     even attempt reading."""
-    from src.gui.controllers.elements import scan_config_elements
+    from frictionsim2d.gui.controllers.elements import scan_config_elements
 
     doc = ConfigDocument.blank('sheetonsheet')
     doc.set('2D', 'mat', 'h_MoS2')
@@ -101,7 +101,7 @@ def test_scan_elements_mat_fallback_reachable_without_cif_path():
 
 
 def test_scan_elements_falls_back_to_mat_text_when_cif_is_unreadable():
-    from src.gui.controllers.elements import scan_config_elements
+    from frictionsim2d.gui.controllers.elements import scan_config_elements
 
     doc = ConfigDocument.blank('sheetonsheet')
     doc.set('2D', 'cif_path', 'no/such/file.cif')
@@ -117,7 +117,7 @@ def test_scan_elements_falls_back_to_mat_text_when_cif_is_unreadable():
 class TestPairOverrideEditorElements:
 
     def test_set_known_elements_populates_pair_combos(self, qt_app):
-        from src.gui.widgets.pairs import PairOverrideEditor
+        from frictionsim2d.gui.widgets.pairs import PairOverrideEditor
 
         editor = PairOverrideEditor()
         editor.set_known_elements(['Mo', 'S', 'Se'])
@@ -134,7 +134,7 @@ class TestPairOverrideEditorElements:
         assert editor.value() == {'Mo-S': [0.4124, 3.75114]}
 
     def test_typing_an_unlisted_element_still_works(self, qt_app):
-        from src.gui.widgets.pairs import PairOverrideEditor
+        from frictionsim2d.gui.widgets.pairs import PairOverrideEditor
 
         editor = PairOverrideEditor()
         editor.set_known_elements(['Mo', 'S'])
@@ -149,7 +149,7 @@ class TestPairOverrideEditorElements:
         assert editor.value() == {'Xx-Yy': [0.5, 3.0]}
 
     def test_duplicate_normalised_pair_gets_a_note(self, qt_app):
-        from src.gui.widgets.pairs import PairOverrideEditor
+        from frictionsim2d.gui.widgets.pairs import PairOverrideEditor
 
         editor = PairOverrideEditor()
         editor.set_known_elements(['Mo', 'S'])
@@ -160,7 +160,7 @@ class TestPairOverrideEditorElements:
         assert editor.table.item(0, 3).text() == ''
 
     def test_unscanned_element_gets_a_note(self, qt_app):
-        from src.gui.widgets.pairs import PairOverrideEditor
+        from frictionsim2d.gui.widgets.pairs import PairOverrideEditor
 
         editor = PairOverrideEditor()
         editor.set_known_elements(['Mo', 'S'])
@@ -169,7 +169,7 @@ class TestPairOverrideEditorElements:
         assert 'xx' in editor.table.item(0, 3).text().lower()
 
     def test_set_file_round_trips_through_value_and_set_value(self, qt_app):
-        from src.gui.widgets.pairs import PairOverrideEditor
+        from frictionsim2d.gui.widgets.pairs import PairOverrideEditor
 
         editor = PairOverrideEditor()
         editor.set_file('shared.txt')
@@ -180,7 +180,7 @@ class TestPairOverrideEditorElements:
         assert editor.value() == {'file': 'shared2.txt', 'Mo-S': [0.4, 3.7]}
 
     def test_import_pulls_shared_file_pairs_into_the_table(self, qt_app, tmp_path):
-        from src.gui.widgets.pairs import PairOverrideEditor
+        from frictionsim2d.gui.widgets.pairs import PairOverrideEditor
 
         lj_file = tmp_path / 'lj.txt'
         lj_file.write_text('Mo-S  0.4124  3.75114\n')
@@ -203,7 +203,7 @@ def test_known_elements_refresh_is_not_per_keystroke(qt_app, monkeypatch):
     the same way `scan_config_elements` does, so it has to obey the same
     rule: only `editingFinished` (or a section toggle, or a materials-list
     change) may trigger it, never a keystroke."""
-    import src.gui.widgets.form as form_module
+    import frictionsim2d.gui.widgets.form as form_module
 
     calls = []
 

@@ -1,7 +1,7 @@
 """The CLI driven into a real build, with nothing patched.
 
 Spec Phase 3, item 5. ``tests/cli/test_cli_run_group.py`` replaces
-``src.cli.run_simulations`` with a stub -- deliberately, since its subject is
+``frictionsim2d.cli.run_simulations`` with a stub -- deliberately, since its subject is
 option-to-argument translation -- so **no test drives the CLI into a real
 builder**. Everything between Click's argument parsing and a rendered script is
 untested end to end: an option that reaches ``run_simulations`` correctly and is
@@ -21,7 +21,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from src import cli as cli_module
+from frictionsim2d import cli as cli_module
 from tests.helpers.examples import EXAMPLES, REPO_ROOT
 
 pytestmark = pytest.mark.integration
@@ -111,7 +111,7 @@ def test_hpc_generate_runs_on_a_tree_the_run_command_just_wrote(
 def test_the_scheduler_option_reaches_the_generated_script(
         runner, tmp_path, hpc_settings_file):
     """`--scheduler slurm` is applied after `load_settings`, overriding the
-    settings default (`src/cli.py`, hpc_generate). Only the written script shows
+    settings default (`frictionsim2d/cli.py`, hpc_generate). Only the written script shows
     whether that assignment survived."""
     out = tmp_path / 'out'
     _invoke(runner, 'run', 'indent', str(EXAMPLES / CONFIG), '-o', str(out))

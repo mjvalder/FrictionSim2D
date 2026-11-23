@@ -14,14 +14,14 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida import query as query_mod  # noqa: E402
-from src.aiida.calcjob import import_run  # noqa: E402
-from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.query import (Friction2DDB, QueryResult, latest,  # noqa: E402
+from frictionsim2d.aiida import query as query_mod  # noqa: E402
+from frictionsim2d.aiida.calcjob import import_run  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.query import (Friction2DDB, QueryResult, latest,  # noqa: E402
                              point_table, related)
-from src.aiida.steps import latest_verdict, postprocess_group  # noqa: E402
-from src.aiida.store import TOKENS_EXTRA, machine_computer, reindex  # noqa: E402
-from src.run.tree import discover_runs  # noqa: E402
+from frictionsim2d.aiida.steps import latest_verdict, postprocess_group  # noqa: E402
+from frictionsim2d.aiida.store import TOKENS_EXTRA, machine_computer, reindex  # noqa: E402
+from frictionsim2d.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.aiida.test_calcjob_import import _afm_run, _set_record  # noqa: E402
 
@@ -39,7 +39,7 @@ def computer(aiida_profile_clean):
 
 @pytest.fixture
 def no_profile_switch(monkeypatch):
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
@@ -311,7 +311,7 @@ def test_query_module_has_no_per_point_loads(campaigns, monkeypatch):
 def test_aiida_query_cli_prints_point_rows(campaigns, no_profile_switch):
     from click.testing import CliRunner
 
-    from src.cli import cli
+    from frictionsim2d.cli import cli
     result = CliRunner().invoke(cli, ['aiida', 'query', '--set-label', 'A',
                                       '--format', 'csv'])
     assert result.exit_code == 0, result.output
@@ -393,7 +393,7 @@ def test_points_without_schema_warn_once_per_run(campaigns, monkeypatch, caplog)
     real = query_mod._contents
     monkeypatch.setattr(query_mod, '_contents',
                         lambda blocks, schemas: (real(blocks, schemas)[0], {}))
-    with caplog.at_level('WARNING', logger='src.aiida.query'):
+    with caplog.at_level('WARNING', logger='frictionsim2d.aiida.query'):
         assert point_table().empty
     lines = sorted(r.getMessage() for r in caplog.records if 'left out' in r.getMessage())
     assert len(lines) == 2                       # runs A and B, not 7 points

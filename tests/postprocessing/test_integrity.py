@@ -1,12 +1,12 @@
-"""Integrity measurements ported from ML_taxonomy s48/s51 (src/postprocessing/integrity.py)."""
+"""Integrity measurements ported from ML_taxonomy s48/s51 (frictionsim2d/postprocessing/integrity.py)."""
 import numpy as np
 import pandas as pd
 import pytest
 
 pytest.importorskip('scipy')
 
-from src.core.config import IntegritySettings  # noqa: E402
-from src.postprocessing.integrity import (  # noqa: E402
+from frictionsim2d.core.config import IntegritySettings  # noqa: E402
+from frictionsim2d.postprocessing.integrity import (  # noqa: E402
     AFM_LIKE, SHEET_LIKE, layer_measures, read_snapshot, series_measures,
     snapshot_measures)
 
@@ -319,13 +319,13 @@ def test_sheet_short_window_skips_gate_checks(rows):
 import json  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from src.core.observables import rename_map  # noqa: E402
-from src.data.provenance import read_provenance  # noqa: E402
-from src.postprocessing.integrity import (  # noqa: E402
+from frictionsim2d.core.observables import rename_map  # noqa: E402
+from frictionsim2d.data.provenance import read_provenance  # noqa: E402
+from frictionsim2d.postprocessing.integrity import (  # noqa: E402
     IntegrityVerdict, bond_reference, check_files, check_point,
     resolve_layers, verdict)
-from src.postprocessing.read_data import DataReader  # noqa: E402
-from src.run.tree import discover_runs  # noqa: E402
+from frictionsim2d.postprocessing.read_data import DataReader  # noqa: E402
+from frictionsim2d.run.tree import discover_runs  # noqa: E402
 from tests.helpers.results_tree import make_family_run  # noqa: E402
 
 CLEAN = {'non_finite': False, 'frozen': False, 'hole': 1.0, 'isolated': 0,

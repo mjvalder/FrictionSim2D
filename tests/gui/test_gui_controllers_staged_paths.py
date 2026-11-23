@@ -9,7 +9,7 @@ existed, a relative ``cif_path``/``pot_path``/``materials_list`` -- exactly
 what a material sweep configures via
 ``ConfigDocument.apply_material_directories`` -- silently failed to resolve
 once staged, because ``search_paths`` resolves relative names against the
-config file's own directory. See ``src/gui/controllers/staged_paths.py``.
+config file's own directory. See ``frictionsim2d/gui/controllers/staged_paths.py``.
 
 These tests read the config.ini each controller actually wrote and assert
 its path-like values are absolute -- they do not need the (LAMMPS) build
@@ -30,10 +30,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.core.config import parse_config  # noqa: E402
-from src.gui.controllers.generate import GenerateController, GenerateRequest  # noqa: E402
-from src.gui.controllers.preview import PreviewController, PreviewRequest  # noqa: E402
-from src.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.core.config import parse_config  # noqa: E402
+from frictionsim2d.gui.controllers.generate import GenerateController, GenerateRequest  # noqa: E402
+from frictionsim2d.gui.controllers.preview import PreviewController, PreviewRequest  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 
 def _run_until(signal, timeout_ms: int = 5000) -> list:
@@ -126,7 +126,7 @@ class TestPreviewControllerStagesAbsolutePaths:
         # nothing for it to build here), but the staged config.ini is
         # written synchronously before the process is even started, and
         # `errorOccurred` -> `failed` lets the test clean up deterministically.
-        import src.gui.controllers.preview as preview_module
+        import frictionsim2d.gui.controllers.preview as preview_module
         monkeypatch.setattr(
             preview_module.sys, 'executable', '/nonexistent/not-a-real-interpreter-xyz')
 
@@ -164,7 +164,7 @@ class TestPreviewControllerOneMaterialSweepStagesSubstitutedPaths:
     def test_staged_config_ini_has_mat_substituted_everywhere(
             self, qt_app, workspace, one_material_document_dir, monkeypatch):
         del qt_app
-        import src.gui.controllers.preview as preview_module
+        import frictionsim2d.gui.controllers.preview as preview_module
         monkeypatch.setattr(
             preview_module.sys, 'executable', '/nonexistent/not-a-real-interpreter-xyz')
 

@@ -12,12 +12,12 @@ import pytest
 pytest.importorskip('pymatgen.core')
 
 # pylint: disable=wrong-import-position
-from src.agent.materials_db import (API, CACHE_SECONDS, MP_API_MISSING, NO_KEY, MPClient,
+from frictionsim2d.agent.materials_db import (API, CACHE_SECONDS, MP_API_MISSING, NO_KEY, MPClient,
                                     describe_cif,
                                     MaterialsDBError, MaterialsDBUnavailable,
                                     PYMATGEN_MISSING, default_materials_db,
                                     mp_api_key)
-from src.agent.settings import AgentSettings
+from frictionsim2d.agent.settings import AgentSettings
 
 KEY = 'k' * 32
 

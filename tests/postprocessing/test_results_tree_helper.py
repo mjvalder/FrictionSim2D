@@ -11,9 +11,9 @@ import json
 
 import pytest
 
-from src.core.observables import FAMILIES
-from src.run.naming import parse_run_path
-from src.run.tree import discover_runs
+from frictionsim2d.core.observables import FAMILIES
+from frictionsim2d.run.naming import parse_run_path
+from frictionsim2d.run.tree import discover_runs
 from tests.helpers.results_tree import (
     FAMILY_LAYOUT, MODEL_FOR_FAMILY, make_family_run, write_final_data,
     write_indent_curve, write_pes_grid,
@@ -112,7 +112,7 @@ def test_the_tip_grid_uses_the_tip_template_columns(tmp_path):
     those force columns are present."""
     import pandas as pd
 
-    from src.postprocessing.pes_scan import grid_descriptors
+    from frictionsim2d.postprocessing.pes_scan import grid_descriptors
 
     run_dir = make_family_run(tmp_path / 't', 'pes_tip')
     grid = run_dir / 'results' / 'pes_scan.csv'

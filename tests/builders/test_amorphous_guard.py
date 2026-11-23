@@ -2,7 +2,7 @@
 
 Generating an amorphous structure shells out to ``mpiexec -np N lmp``, takes
 minutes, and writes ``amor_<mat>.lmp`` into the installed package data
-directory ``src/data/materials`` -- which, in an editable install, is the git
+directory ``frictionsim2d/data/materials`` -- which, in an editable install, is the git
 working tree. An interactive caller triggering that by accident is the worst
 failure mode in the GUI, so the refusal lives in the builder rather than in a
 GUI-side pre-check, and it has to happen before anything is written.
@@ -19,20 +19,20 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.construction.components import (
+from frictionsim2d.builders.construction.components import (
     AmorphousNotCachedError,
     get_amorphous_path,
     make_amorphous,
 )
-from src.core.config import GlobalSettings
-from src.builders.utils.lammps_data import get_model_dimensions
+from frictionsim2d.core.config import GlobalSettings
+from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
 
-MATERIALS_DIR = Path(__file__).resolve().parents[2] / 'src' / 'data' / 'materials'
+MATERIALS_DIR = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'materials'
 
 #: The one material with a structure shipped in the repo.
 CACHED_MATERIAL = 'Si'
 #: Canonical shipped-material dir; the only copy that survives install.
-PACKAGE_MATERIALS = Path(str(resources.files('src.data'))) / 'materials'
+PACKAGE_MATERIALS = Path(str(resources.files('frictionsim2d.data'))) / 'materials'
 SI_STRUCTURE = PACKAGE_MATERIALS / 'Si.lmp'
 
 
@@ -98,7 +98,7 @@ class TestMakeAmorphousRefusesToGenerate:
 def test_allow_generate_defaults_to_true_so_the_cli_is_unchanged():
     import inspect
 
-    from src.builders import components
+    from frictionsim2d.builders import components
 
     for func in (components.make_amorphous, components.build_tip,
                  components.build_substrate, components._create_base_slab):

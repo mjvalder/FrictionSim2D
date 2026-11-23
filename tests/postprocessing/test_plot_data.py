@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from src.postprocessing.plot_data import Plotter
+from frictionsim2d.postprocessing.plot_data import Plotter
 
 
 
@@ -203,7 +203,7 @@ def test_settings_lists_are_replaced_not_extended(tmp_path):
     """`--settings {"figure": {"size": [8, 6]}}` used to produce
     [10, 7, 8, 6], and matplotlib then read the first two -- so the option
     silently did nothing."""
-    from src.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_data import Plotter
 
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
                       settings={'figure': {'size': [8, 6]},
@@ -217,7 +217,7 @@ def test_settings_lists_are_replaced_not_extended(tmp_path):
 def test_one_plotters_settings_do_not_leak_into_the_next(tmp_path):
     """DEFAULT_SETTINGS was copied shallowly, so every sub-dict was shared
     with the module-level default."""
-    from src.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_data import Plotter
 
     Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
             settings={'figure': {'dpi': 999}})
@@ -230,7 +230,7 @@ def test_metadata_merging_still_unions_lists(tmp_path):
     """`_load_all_metadata` folds every dataset's metadata into one dict, and
     there a list is a set of values seen, not a value. It gets its own merge
     rather than riding on the settings one, which now replaces."""
-    from src.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_data import Plotter
 
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
     accumulated = {'materials': ['h_MoS2'], 'sizes': ['100x100y'],
@@ -247,7 +247,7 @@ def test_metadata_merging_still_unions_lists(tmp_path):
 
 
 def test_the_two_merges_disagree_on_purpose(tmp_path):
-    from src.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_data import Plotter
 
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
     settings_side = {'formats': ['png']}
@@ -261,7 +261,7 @@ def test_the_two_merges_disagree_on_purpose(tmp_path):
 
 
 def test_nested_dicts_still_merge(tmp_path):
-    from src.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_data import Plotter
 
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
                       settings={'fonts': {'title': 12}})
@@ -273,7 +273,7 @@ def test_nested_dicts_still_merge(tmp_path):
 def test_constrained_layout_reaches_the_figure(tmp_path):
     import matplotlib.pyplot as plt
 
-    from src.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_data import Plotter
 
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
                       settings={'layout': {'constrained_layout': True}})
@@ -289,7 +289,7 @@ def test_save_plot_does_not_fight_constrained_layout(tmp_path):
     warning and disables the engine; _save_plot must skip it."""
     import matplotlib.pyplot as plt
 
-    from src.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_data import Plotter
 
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
                       settings={'layout': {'constrained_layout': True}})

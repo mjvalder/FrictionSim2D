@@ -1,7 +1,7 @@
 """Tests for MLIP support: binary-model short-circuits and the MLIP registry."""
 import pytest
 
-from src.core.mlip import (
+from frictionsim2d.core.mlip import (
     MLIP_REGISTRY,
     MLIPSpec,
     d3_coeff_line,
@@ -9,7 +9,7 @@ from src.core.mlip import (
     get_mlip,
     is_mlip,
 )
-from src.core.utils.structures import count_atomtypes
+from frictionsim2d.core.utils.structures import count_atomtypes
 
 
 def test_count_atomtypes_skips_binary_mlip_models(tmp_path):
@@ -182,7 +182,7 @@ class TestFullCellMeansOneInstance:
 
     @staticmethod
     def _sheet(tmp_path, pot_type, name, mat='h-MoS2'):
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         cif = tmp_path / 'x.cif'
         cif.write_text('#', encoding='utf-8')
         model = tmp_path / name
@@ -205,7 +205,7 @@ class TestFullCellMeansOneInstance:
 
     @staticmethod
     def _sw_tip(tmp_path):
-        from src.core.config import TipConfig
+        from frictionsim2d.core.config import TipConfig
         cif = tmp_path / 'Si.cif'
         cif.write_text('#', encoding='utf-8')
         sw = tmp_path / 'Si.sw'
@@ -215,32 +215,32 @@ class TestFullCellMeansOneInstance:
 
     def test_two_mace_components_are_allowed(self, tmp_path):
         """v6 §4: one instance now spans every component, so this is buildable."""
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         s1 = self._sheet(tmp_path, 'mace', 'm.json')
         s2 = self._sheet(tmp_path, 'mace', 'm.json', mat='h-WS2')
         validate_mlip_cell(s1, components=[('sheet_2', s2)])  # must not raise
 
     def test_single_mace_component_is_allowed(self, tmp_path):
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         s1 = self._sheet(tmp_path, 'mace', 'm.json')
         validate_mlip_cell(s1, components=[])  # must not raise
 
     def test_single_deepmd_component_is_allowed(self, tmp_path):
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         s1 = self._sheet(tmp_path, 'deepmd', 'm.pth')
         validate_mlip_cell(s1, components=[])  # must not raise
 
     def test_two_deepmd_components_are_allowed(self, tmp_path):
         """v6 §4: the map spans both components, so no NULL is needed."""
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         s1 = self._sheet(tmp_path, 'deepmd', 'm.pth')
         s2 = self._sheet(tmp_path, 'deepmd', 'm.pth', mat='h-WS2')
         validate_mlip_cell(s1, components=[('sheet_2', s2)])  # must not raise
 
     def test_an_afm_shaped_all_deepmd_cell_is_allowed(self, tmp_path):
         """The whole point of v6: sheet + tip + substrate on one MLIP."""
-        from src.core.config import SubstrateConfig, TipConfig
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.config import SubstrateConfig, TipConfig
+        from frictionsim2d.core.mlip import validate_mlip_cell
         cif = tmp_path / 'Si.cif'
         cif.write_text('#', encoding='utf-8')
         model = tmp_path / 'm.pth'
@@ -254,8 +254,8 @@ class TestFullCellMeansOneInstance:
 
     def test_two_mlip_frameworks_in_one_cell_are_rejected(self, tmp_path):
         """rule 3a: each framework needs its own `* *`, so the second wins."""
-        from src.core.config import TipConfig
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.config import TipConfig
+        from frictionsim2d.core.mlip import validate_mlip_cell
         cif = tmp_path / 'Si.cif'
         cif.write_text('#', encoding='utf-8')
         mace_model = tmp_path / 'm.json'
@@ -270,21 +270,21 @@ class TestFullCellMeansOneInstance:
 
     def test_deepmd_sheet_beside_an_sw_tip_is_rejected(self, tmp_path):
         """v4 §3: partial-cell is unavailable for DeePMD too (E2, E3)."""
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         sheet = self._sheet(tmp_path, 'deepmd', 'm.pth')
         with pytest.raises(ValueError, match='(?i)partial-cell|classical'):
             validate_mlip_cell(sheet, components=[('tip', self._sw_tip(tmp_path))])
 
     def test_mace_sheet_beside_an_sw_tip_is_rejected(self, tmp_path):
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         sheet = self._sheet(tmp_path, 'mace', 'm.json')
         with pytest.raises(ValueError, match='(?i)partial-cell|classical'):
             validate_mlip_cell(sheet, components=[('tip', self._sw_tip(tmp_path))])
 
     def test_deepmd_tip_beside_a_classical_sheet_is_rejected(self, tmp_path):
         """The mirror image: MLIP on the tip, classical sheet."""
-        from src.core.config import TipConfig
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.config import TipConfig
+        from frictionsim2d.core.mlip import validate_mlip_cell
         sheet = self._sheet(tmp_path, 'sw', 'MoS2_wen.sw')
         cif = tmp_path / 'Si.cif'
         cif.write_text('#', encoding='utf-8')
@@ -297,7 +297,7 @@ class TestFullCellMeansOneInstance:
 
     def test_two_different_models_still_rejected_first(self, tmp_path):
         """The one-model-per-framework rule keeps its own diagnosis."""
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         s1 = self._sheet(tmp_path, 'deepmd', 'a.pth')
         s2 = self._sheet(tmp_path, 'deepmd', 'b.pth', mat='h-WS2')
         with pytest.raises(ValueError, match='Two different deepmd model files'):
@@ -305,13 +305,13 @@ class TestFullCellMeansOneInstance:
 
     @pytest.mark.parametrize('mode', ['atom_bonds', 'com_spring'])
     def test_constraint_modes_still_rejected(self, tmp_path, mode):
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         s1 = self._sheet(tmp_path, 'deepmd', 'm.pth')
         with pytest.raises(ValueError, match='constraint_mode'):
             validate_mlip_cell(s1, components=[], constraint_mode=mode)
 
     def test_classical_only_cell_is_untouched(self, tmp_path):
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         sheet = self._sheet(tmp_path, 'sw', 'MoS2_wen.sw')
         validate_mlip_cell(sheet, components=[('tip', self._sw_tip(tmp_path))],
                            constraint_mode='atom_bonds')  # must not raise
@@ -332,26 +332,26 @@ class TestModelElements:
         return str(p)
 
     def test_mace_elements_are_read_from_the_json(self, tmp_path):
-        from src.core.mlip import model_elements
+        from frictionsim2d.core.mlip import model_elements
         # 16 = S, 42 = Mo -- the real mace-mpa-0-medium-Mo-S.json's contents.
         assert model_elements('mace', self._mace_json(tmp_path, [16, 42])) == {'S', 'Mo'}
 
     def test_mace_elements_include_si_after_re_extraction(self, tmp_path):
-        from src.core.mlip import model_elements
+        from frictionsim2d.core.mlip import model_elements
         assert model_elements(
             'mace', self._mace_json(tmp_path, [14, 16, 42])) == {'Si', 'S', 'Mo'}
 
     def test_deepmd_element_set_is_unknown(self, tmp_path):
         """type_map lives inside a serialized .pth; reading it needs torch,
         which generation and CI must not require (v4 §3.3)."""
-        from src.core.mlip import model_elements
+        from frictionsim2d.core.mlip import model_elements
         p = tmp_path / 'm.pth'
         p.write_bytes(b'\x00')
         assert model_elements('deepmd', str(p)) is None
 
     def test_unreadable_model_is_unknown_not_an_error(self, tmp_path):
         """A stub/binary/absent file must not break generation."""
-        from src.core.mlip import model_elements
+        from frictionsim2d.core.mlip import model_elements
         stub = tmp_path / 'stub.json'
         stub.write_bytes(b'\x00')
         assert model_elements('mace', str(stub)) is None
@@ -363,7 +363,7 @@ class TestModelElements:
         p = tmp_path / 'big.json'
         head = json.dumps({'atomic_numbers': [14, 16, 42]})[:-1]
         p.write_text(head + ', "pad": "' + 'x' * 2_000_000 + '"}', encoding='utf-8')
-        from src.core.mlip import model_elements
+        from frictionsim2d.core.mlip import model_elements
         assert model_elements('mace', str(p)) == {'Si', 'S', 'Mo'}
 
 
@@ -380,7 +380,7 @@ class TestAmorphousMLIPComponentsRefused:
 
     @staticmethod
     def _mlip_tip(tmp_path, amorph):
-        from src.core.config import TipConfig
+        from frictionsim2d.core.config import TipConfig
         cif = tmp_path / 'Si.cif'
         cif.write_text('#', encoding='utf-8')
         model = tmp_path / 'm.pth'
@@ -389,7 +389,7 @@ class TestAmorphousMLIPComponentsRefused:
                          cif_path=str(cif), r=20.0, dspring=0.1, amorph=amorph)
 
     def test_amorphous_mlip_tip_is_refused(self, tmp_path):
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         sheet = TestFullCellMeansOneInstance._sheet(tmp_path, 'deepmd', 'm.pth')
         with pytest.raises(ValueError) as exc:
             validate_mlip_cell(
@@ -397,15 +397,15 @@ class TestAmorphousMLIPComponentsRefused:
         assert 'amorph' in str(exc.value)
 
     def test_crystalline_mlip_tip_is_allowed(self, tmp_path):
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.mlip import validate_mlip_cell
         sheet = TestFullCellMeansOneInstance._sheet(tmp_path, 'deepmd', 'm.pth')
         validate_mlip_cell(
             sheet, components=[('tip', self._mlip_tip(tmp_path, 'c'))])
 
     def test_amorphous_classical_tip_is_untouched(self, tmp_path):
         """Regression: this rule must only fire for MLIP cells."""
-        from src.core.config import SheetConfig, TipConfig
-        from src.core.mlip import validate_mlip_cell
+        from frictionsim2d.core.config import SheetConfig, TipConfig
+        from frictionsim2d.core.mlip import validate_mlip_cell
         cif = tmp_path / 'x.cif'
         cif.write_text('#', encoding='utf-8')
         sw = tmp_path / 'Si.sw'

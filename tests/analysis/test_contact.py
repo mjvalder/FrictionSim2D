@@ -10,10 +10,10 @@ import pytest
 
 pytest.importorskip('scipy')
 
-import src.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
-from src.analysis.base import get_analysis  # noqa: E402
-from src.analysis.contact import RMIN, anion  # noqa: E402
-from src.analysis.source import RunSource  # noqa: E402
+import frictionsim2d.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
+from frictionsim2d.analysis.base import get_analysis  # noqa: E402
+from frictionsim2d.analysis.contact import RMIN, anion  # noqa: E402
+from frictionsim2d.analysis.source import RunSource  # noqa: E402
 
 #: A bilayer: layer 1 = Mo (type 7), layer 2 = S (type 8); the tip is types 4-6.
 SETTINGS = """\
@@ -187,10 +187,10 @@ _FROZEN = Path('/home/matteo/mnt/PhD/Sync/Publication-data/publication_export/da
 
 _PUB_SCRIPT = """
 import sys
-from src.aiida import load_aiida_profile
+from frictionsim2d.aiida import load_aiida_profile
 load_aiida_profile('friction2d_pub')
-from src.analysis.base import get_analysis
-from src.analysis.source import RunSource
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.source import RunSource
 dataset, out = sys.argv[1:3]
 with RunSource.from_dataset(dataset) as source:
     cls = get_analysis('contact')

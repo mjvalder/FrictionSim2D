@@ -16,12 +16,12 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.steps import build_dataset, postprocess_group  # noqa: E402
-from src.analysis import base  # noqa: E402
-from src.analysis.base import Analysis, register  # noqa: E402
-from src.analysis.source import RunSource  # noqa: E402
-from src.analysis.store import (ANALYSIS_GROUP_PREFIX, find_result,  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.steps import build_dataset, postprocess_group  # noqa: E402
+from frictionsim2d.analysis import base  # noqa: E402
+from frictionsim2d.analysis.base import Analysis, register  # noqa: E402
+from frictionsim2d.analysis.source import RunSource  # noqa: E402
+from frictionsim2d.analysis.store import (ANALYSIS_GROUP_PREFIX, find_result,  # noqa: E402
                                 run_analysis, store_result)
 from tests.aiida.test_steps_integrity import _tree  # noqa: E402
 
@@ -31,7 +31,7 @@ AWKWARD = [0.1 + 0.2, 1.0 / 3.0, 1e-300, 123456789.12345678, -2.5e-17, math.pi]
 
 @pytest.fixture
 def no_profile_switch(monkeypatch):
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
@@ -234,7 +234,7 @@ def test_store_source_frames_carry_the_peratom_tier(store_with_peratom):
 
 
 def test_select_result_node_defaults_to_the_default_params(store, probe):
-    from src.analysis.store import result_node, select_result_node
+    from frictionsim2d.analysis.store import result_node, select_result_node
     default = result_node('probe', 'paper')
     scaled = result_node('probe', 'paper', {'scale': 2.0})      # newer, other params
 
@@ -246,7 +246,7 @@ def test_select_result_node_defaults_to_the_default_params(store, probe):
 
 
 def test_select_result_node_refuses_other_params_by_default(store, probe):
-    from src.analysis.store import result_node, select_result_node
+    from frictionsim2d.analysis.store import result_node, select_result_node
     result_node('probe', 'paper', {'scale': 2.0})
 
     with pytest.raises(LookupError, match=r"scale.*2\.0"):
@@ -256,7 +256,7 @@ def test_select_result_node_refuses_other_params_by_default(store, probe):
 
 
 def test_select_result_node_is_none_when_nothing_is_stored(store, probe):
-    from src.analysis.store import select_result_node
+    from frictionsim2d.analysis.store import select_result_node
     assert select_result_node('probe', 'paper') is None
 
 
@@ -271,7 +271,7 @@ def test_run_analysis_refuses_a_table_without_its_identity_columns(store, probe,
 
 
 def test_the_run_id_tables_declare_their_own_identity():
-    from src.analysis.base import get_analysis, identity_columns
+    from frictionsim2d.analysis.base import get_analysis, identity_columns
     assert identity_columns(get_analysis('integrity_traces')) == ('run_id',)
     assert identity_columns(get_analysis('run_status')) == ('run_id',)
     assert identity_columns(get_analysis('contact')) == (

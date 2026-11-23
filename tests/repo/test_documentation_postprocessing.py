@@ -30,8 +30,8 @@ def test_it_documents_the_export_schema_and_the_csv():
 
 
 def test_it_documents_every_plot_type_and_the_preset():
-    from src.postprocessing.plot_config import PLOT_TYPES
-    from src.postprocessing.presets import PRESETS
+    from frictionsim2d.postprocessing.plot_config import PLOT_TYPES
+    from frictionsim2d.postprocessing.presets import PRESETS
 
     text = DOC.read_text(encoding='utf-8')
 
@@ -60,8 +60,8 @@ def test_it_carries_the_migration_warning():
 def test_no_help_string_still_claims_window_is_the_only_tier():
     """The claim lived in three places at once; they are corrected together
     or not at all."""
-    from src.core.config import OutputSettings
-    from src.gui.schema.overrides import SETTINGS_MODEL, field_override
+    from frictionsim2d.core.config import OutputSettings
+    from frictionsim2d.gui.schema.overrides import SETTINGS_MODEL, field_override
 
     description = OutputSettings.model_fields['channels'].description or ''
     # The channels override lives in the SETTINGS table, not the per-config

@@ -15,7 +15,7 @@ from uuid import NAMESPACE_URL, uuid5
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from src.data.provenance import (MaterialProvenance, ProvenanceRecord,
+from frictionsim2d.data.provenance import (MaterialProvenance, ProvenanceRecord,
                                  write_provenance)
 from tests.helpers.synthetic_results import (PES_GRID_CSV, load_kind_for,
                                              record_config_hash, write_results)
@@ -183,9 +183,9 @@ def write_pes_grid(run_dir: Path, family: str, *, n: int = 4) -> Path:
     families' headers differ, and both must be exercised:
 
     * `pes_sheet` -> `dx,dy,energy_eV`
-      (`src/templates/sheetonsheet/pes_scan.lmp:57`)
+      (`frictionsim2d/templates/sheetonsheet/pes_scan.lmp:57`)
     * `pes_tip`   -> `x,y,energy_eV,fx,fy,fz`
-      (`src/templates/afm/pes_scan.lmp:82`)
+      (`frictionsim2d/templates/afm/pes_scan.lmp:82`)
 
     Getting this wrong hides real coverage rather than failing: `_grid_from_frame`
     accepts `dx|x` and `dy|y` interchangeably, so a tip grid written in the

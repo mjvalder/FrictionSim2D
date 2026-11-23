@@ -8,10 +8,10 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
-from src.postprocessing.plot_config import (ContactCofScatterPlot,  # noqa: E402
+from frictionsim2d.postprocessing.plot_config import (ContactCofScatterPlot,  # noqa: E402
                                             StickslipPeriodHistogramPlot, TableSource)
-from src.postprocessing.plot_data import Plotter, PlotDataError  # noqa: E402
-from src.postprocessing.plot_tables import load_table  # noqa: E402
+from frictionsim2d.postprocessing.plot_data import Plotter, PlotDataError  # noqa: E402
+from frictionsim2d.postprocessing.plot_tables import load_table  # noqa: E402
 
 
 def _ranking(tmp_path):
@@ -200,7 +200,7 @@ def test_a_plot_without_its_table_names_the_field(tmp_path):
 
 @pytest.fixture
 def no_profile(monkeypatch):
-    import src.aiida as aiida_pkg  # pylint: disable=import-outside-toplevel
+    import frictionsim2d.aiida as aiida_pkg  # pylint: disable=import-outside-toplevel
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
@@ -209,7 +209,7 @@ def stored(monkeypatch, no_profile):
     """`select_result_node` over a dict of ``(name, dataset) -> table``."""
     from types import SimpleNamespace  # pylint: disable=import-outside-toplevel
 
-    from src.analysis import store  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.analysis import store  # pylint: disable=import-outside-toplevel
     tables, calls = {}, []
 
     def select(name, dataset, params=None, version=None):
@@ -322,7 +322,7 @@ class _DirFetch:
 def dataset_source(tmp_path, monkeypatch, no_profile):
     """`RunSource.from_dataset('paper')` over the `_run_dir` tree: M at L2,
     10 nN passing and 20 nN failed; another material and layer as decoys."""
-    from src.analysis.source import RunSource  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.analysis.source import RunSource  # pylint: disable=import-outside-toplevel
     fetch = _DirFetch(_run_dir(tmp_path))
     rows = pd.DataFrame({
         'family': ['afm'] * 4, 'run_uuid': ['r', 'r', 'other', 'r1'],
@@ -406,7 +406,7 @@ def test_a_dataset_panel_can_title_the_integrity_verdict(tmp_path, dataset_sourc
 
 
 def test_a_pressure_load_has_its_own_status_key(dataset_source):
-    from src.postprocessing.plot_tables import _DatasetRunFiles  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.postprocessing.plot_tables import _DatasetRunFiles  # pylint: disable=import-outside-toplevel
     files = _DatasetRunFiles('paper', 'M', 2)
     files.rows = files.rows.assign(load=[0.5, 20.0])
     assert files.statuses('verdict') == {0.5: 'complete', 20.0: 'failed_integrity'}

@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.utils.structures import _normalize_element_symbol, cifread, count_atomtypes
+from frictionsim2d.core.utils.structures import _normalize_element_symbol, cifread, count_atomtypes
 
 
 def test_cifread_returns_lattice_and_elements(materials_path):

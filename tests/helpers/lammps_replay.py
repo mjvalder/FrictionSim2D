@@ -118,8 +118,8 @@ def make_run_lammps(real: Callable, record: bool, fixture_dir: Path = FIXTURE_DI
 
 def install(monkeypatch, record: bool = False, fixture_dir: Path = FIXTURE_DIR) -> None:
     """Patch the three call sites where they are looked up."""
-    from src.builders.construction import components, hetero_stack
-    from src.builders.sheetonsheet import flake_slide
+    from frictionsim2d.builders.construction import components, hetero_stack
+    from frictionsim2d.builders.sheetonsheet import flake_slide
 
     monkeypatch.setattr(
         components, "run_lammps_commands",

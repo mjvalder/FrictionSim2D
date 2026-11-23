@@ -9,13 +9,13 @@ from unittest.mock import patch
 
 import pytest
 
-from src.aiida.block_schema import (
+from frictionsim2d.aiida.block_schema import (
     AFM_FAMILIES, BLOCK_SCHEMA_VERSION, FIELD_MAP, LEGACY_DEFAULTS, SHEET_FAMILIES,
     UNITS, RunBlocks, UnitMismatch, check_units, defaults_for, missing_units,
     numeric_paths, schema_document,
 )
-from src.core.config import load_settings
-from src.data.models import NM_TO_EV_A2
+from frictionsim2d.core.config import load_settings
+from frictionsim2d.data.models import NM_TO_EV_A2
 
 REPO = Path(__file__).resolve().parents[2]
 SNAPSHOT = REPO / 'tests' / 'fixtures' / 'block_defaults.json'
@@ -189,7 +189,7 @@ def test_defaults_are_environment_free():
 
 def _quench_nsteps(tmp_path, rate):
     """The quench run length the builder writes for ``rate`` (no LAMMPS run)."""
-    from src.builders.construction import components  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.builders.construction import components  # pylint: disable=import-outside-toplevel
     settings = load_settings().model_copy(deep=True)
     settings.quench.run_local = False                    # write the deck, then stop
     settings.quench.quench_rate = rate
@@ -226,7 +226,7 @@ def _ingest_load_kinds():
     """Every string literal `ingest` can give a LoadPoint's `load_kind`: the
     `load_kind=` keywords and the first element of `_match_point`'s returns."""
     import ast
-    tree = ast.parse((REPO / 'src' / 'aiida' / 'ingest.py').read_text(encoding='utf-8'))
+    tree = ast.parse((REPO / 'frictionsim2d' / 'aiida' / 'ingest.py').read_text(encoding='utf-8'))
 
     def strings(node):
         return {n.value for n in ast.walk(node)
@@ -244,14 +244,14 @@ def _ingest_load_kinds():
 
 
 def test_point_units_cover_every_ingest_load_kind():
-    from src.aiida.block_schema import POINT_UNITS
+    from frictionsim2d.aiida.block_schema import POINT_UNITS
     kinds = _ingest_load_kinds()
     assert kinds >= {'force', 'pressure', 'none'}, kinds
     assert set(POINT_UNITS) >= kinds
 
 
 def test_point_units_match_the_point_paths():
-    from src.aiida.block_schema import POINT_UNITS
+    from frictionsim2d.aiida.block_schema import POINT_UNITS
     assert POINT_UNITS['force'] == {'load': 'nN', 'angle': 'deg', 'speed': 'm/s'}
     assert POINT_UNITS['pressure']['load'] == 'GPa'
     assert POINT_UNITS['none'] == {}
@@ -260,7 +260,7 @@ def test_point_units_match_the_point_paths():
 # --- legacy AFM spring factor (fix round 1) -------------------------------------
 
 def test_a_legacy_afm_record_may_carry_the_old_16_02_factor():
-    from src.aiida.block_schema import LEGACY_AFM_SPRING_FACTOR
+    from frictionsim2d.aiida.block_schema import LEGACY_AFM_SPRING_FACTOR
     assert LEGACY_AFM_SPRING_FACTOR == 16.02
     run = _run(driving_spring=50.0, drive_k=50.0 / 16.02)
     check_units(run, record={'schema_version': '2.1.0'})

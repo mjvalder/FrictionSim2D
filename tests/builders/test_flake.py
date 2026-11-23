@@ -11,9 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.builders import components
-from src.builders.afm import AFMSimulation
-from src.core.config import AFMSimulationConfig, FlakeConfig, load_settings
+from frictionsim2d.builders import components
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.core.config import AFMSimulationConfig, FlakeConfig, load_settings
 
 
 # ---------------------------------------------------------------------------

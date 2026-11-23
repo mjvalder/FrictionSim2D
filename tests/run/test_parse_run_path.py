@@ -3,7 +3,7 @@ import dataclasses
 
 import pytest
 
-from src.run.naming import RunTokens, output_dir_for, parse_run_path
+from frictionsim2d.run.naming import RunTokens, output_dir_for, parse_run_path
 
 
 def _cfg(**over):

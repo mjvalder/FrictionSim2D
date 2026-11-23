@@ -1,7 +1,7 @@
 """JobManifest is the read/write side of a file format: round-tripping matters.
 
 Covers hpc.md (c) finding 1 (save/load round-trip), plus the counts/query surface
-the CLI dispatch path (`src/run/hpc_dispatch.py`) relies on. The six `JobManifest`
+the CLI dispatch path (`frictionsim2d/run/hpc_dispatch.py`) relies on. The six `JobManifest`
 status methods marked dead in hpc.md (b) H-1..H-6 (get_jobs_by_status,
 get_jobs_by_material, update_job_status, mark_all_submitted,
 mark_completed_from_results, get_summary), `JobEntry.update_status`, and the
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from src.hpc.manifest import JobEntry, JobManifest, JobStatus
+from frictionsim2d.hpc.manifest import JobEntry, JobManifest, JobStatus
 
 
 def _entry(job_id="j1", material="h-MoS2", status=JobStatus.PREPARED,
@@ -161,7 +161,7 @@ def test_load_tolerates_legacy_uuid_fields_and_round_trips_without_them(tmp_path
 
 
 def test_status_half_is_gone():
-    from src.hpc.manifest import JobEntry as _JobEntry, JobManifest as _JobManifest
+    from frictionsim2d.hpc.manifest import JobEntry as _JobEntry, JobManifest as _JobManifest
 
     for name in ('get_jobs_by_status', 'get_jobs_by_material', 'update_job_status',
                  'mark_all_submitted', 'mark_completed_from_results', 'get_summary'):

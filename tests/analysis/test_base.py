@@ -5,9 +5,9 @@ import pandas as pd
 import pytest
 from pydantic import BaseModel
 
-from src.analysis import base
-from src.analysis.base import Analysis, get_analysis, register
-from src.analysis.source import RunSource
+from frictionsim2d.analysis import base
+from frictionsim2d.analysis.base import Analysis, get_analysis, register
+from frictionsim2d.analysis.source import RunSource
 
 
 @pytest.fixture

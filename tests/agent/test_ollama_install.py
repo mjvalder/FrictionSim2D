@@ -1,9 +1,9 @@
 """Installing a fine-tune into Ollama (ollama create from a bundle, or pull)."""
 import io
 
-from src.agent.bundles import FineTune, catalogue, write_bundle
-from src.agent.ollama_install import install_finetune
-from src.agent.settings import AgentSettings
+from frictionsim2d.agent.bundles import FineTune, catalogue, write_bundle
+from frictionsim2d.agent.ollama_install import install_finetune
+from frictionsim2d.agent.settings import AgentSettings
 
 MANIFEST = {'tag': 'qwen3.5-4b', 'base': 'unsloth/Qwen3.5-4B', 'schema_hash': 'b8b7',
             'knowledge_hash': 'ea92'}

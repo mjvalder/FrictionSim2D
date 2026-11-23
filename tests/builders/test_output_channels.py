@@ -7,13 +7,13 @@ unaffected; these tests pin the opt-out.
 """
 from jinja2 import Environment
 
-from src.core.config import OutputSettings
-from src.interfaces.jinja import PackageLoader
+from frictionsim2d.core.config import OutputSettings
+from frictionsim2d.interfaces.jinja import PackageLoader
 
 
 def _render_fixes(**flags) -> str:
     """Render emit_output_fixes with the given tier flags."""
-    env = Environment(loader=PackageLoader('src.templates'),
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     macros = env.get_template('common/observables.lmp').module
     ctx = {

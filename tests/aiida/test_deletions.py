@@ -7,7 +7,7 @@ import pytest
 
 def test_workchain_module_is_gone():
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module('src.aiida.workchain')
+        importlib.import_module('frictionsim2d.aiida.workchain')
 
 
 def test_workchain_entry_point_is_deregistered():
@@ -19,14 +19,14 @@ def test_workchain_entry_point_is_deregistered():
 
 
 def test_lazy_export_is_gone():
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     assert 'FrictionWorkChain' not in aiida_pkg._LAZY_EXPORTS
     with pytest.raises(AttributeError):
         _ = aiida_pkg.FrictionWorkChain
 
 
 def test_ssh_transport_helpers_are_gone():
-    import src.aiida.profile as profile_mod
+    import frictionsim2d.aiida.profile as profile_mod
 
     assert not hasattr(profile_mod, 'setup_computer_from_hpc_settings')
     assert not hasattr(profile_mod, '_TRANSPORT_MAP')
@@ -40,13 +40,13 @@ def test_ssh_transport_helpers_are_gone():
                                   'start_daemon'])
 def test_code_and_daemon_helpers_are_gone(name):
     """Computers and Codes are made at import; nothing needs the daemon."""
-    import src.aiida.profile as profile_mod
+    import frictionsim2d.aiida.profile as profile_mod
 
     assert not hasattr(profile_mod, name)
 
 
 def test_full_setup_sets_up_the_profile_only(monkeypatch):
-    import src.aiida.profile as profile_mod
+    import frictionsim2d.aiida.profile as profile_mod
 
     seen = []
     monkeypatch.setattr(profile_mod, 'setup_profile',
@@ -55,14 +55,14 @@ def test_full_setup_sets_up_the_profile_only(monkeypatch):
     assert seen == ['p1']
 
 
-@pytest.mark.parametrize('module', ['src.aiida.submit', 'src.aiida.data.simulation',
-                                    'src.aiida.data.simulation_set',
-                                    'src.aiida.data.results',
+@pytest.mark.parametrize('module', ['frictionsim2d.aiida.submit', 'frictionsim2d.aiida.data.simulation',
+                                    'frictionsim2d.aiida.data.simulation_set',
+                                    'frictionsim2d.aiida.data.results',
                                     # merged into profile, layout, rulings, query + steps
-                                    'src.aiida.setup', 'src.aiida.preflight',
-                                    'src.aiida.data_keys', 'src.aiida.decks',
-                                    'src.aiida.retention', 'src.aiida.policy',
-                                    'src.aiida.ledger', 'src.aiida.integration'])
+                                    'frictionsim2d.aiida.setup', 'frictionsim2d.aiida.preflight',
+                                    'frictionsim2d.aiida.data_keys', 'frictionsim2d.aiida.decks',
+                                    'frictionsim2d.aiida.retention', 'frictionsim2d.aiida.policy',
+                                    'frictionsim2d.aiida.ledger', 'frictionsim2d.aiida.integration'])
 def test_submission_and_custom_node_modules_are_gone(module):
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(module)
@@ -76,7 +76,7 @@ def test_no_friction2d_data_entry_points():
 def test_aiida_setup_has_no_remote_options():
     from click.testing import CliRunner
 
-    from src.cli import cli
+    from frictionsim2d.cli import cli
 
     out = CliRunner().invoke(cli, ['aiida', 'setup', '--help']).output
 
@@ -101,20 +101,20 @@ KEPT = ['list_simulation_sets', 'delete_simulation_set', 'clear_all_nodes']
 
 @pytest.mark.parametrize('name', GONE)
 def test_superseded_function_is_gone(name):
-    import src.aiida.query as query_mod
-    import src.aiida.steps as steps_mod
+    import frictionsim2d.aiida.query as query_mod
+    import frictionsim2d.aiida.steps as steps_mod
     assert not hasattr(query_mod, name), name
     assert not hasattr(steps_mod, name), name
 
 
 @pytest.mark.parametrize('name', KEPT)
 def test_surviving_function_is_kept(name):
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     assert callable(getattr(aiida_pkg, name))
 
 
 def test_lazy_exports_point_at_the_new_modules():
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
 
     exports = aiida_pkg._LAZY_EXPORTS
     assert exports['import_root'][0].endswith('.ingest')

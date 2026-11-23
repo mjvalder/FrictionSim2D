@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.utils.tokens import (_is_float, _is_int_token, format_dimension_token,
+from frictionsim2d.core.utils.tokens import (_is_float, _is_int_token, format_dimension_token,
                                    format_numeric_token)
 
 

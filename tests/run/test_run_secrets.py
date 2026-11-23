@@ -10,8 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from src.core.config import GlobalSettings, redact_secrets, redact_secrets_mapping
-from src.run.artifacts import generate_package
+from frictionsim2d.core.config import GlobalSettings, redact_secrets, redact_secrets_mapping
+from frictionsim2d.run.artifacts import generate_package
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -191,7 +191,7 @@ def test_redact_secrets_mapping_blanks_case_insensitively_and_by_suffix():
 
 
 def test_redact_secrets_mapping_leaves_non_secret_lookalikes_alone():
-    """Sanity check for the audit note in `src.core.config`: nothing in
+    """Sanity check for the audit note in `frictionsim2d.core.config`: nothing in
     `GlobalSettings` is legitimately named like a secret, so ordinary keys
     that merely CONTAIN (rather than end in) a secret substring must be
     left alone -- only an exact name or a `_`-joined suffix counts."""

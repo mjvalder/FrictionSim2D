@@ -4,10 +4,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.core.observables import FAMILIES
-from src.postprocessing.pes_scan import grid_descriptors
+from frictionsim2d.core.observables import FAMILIES
+from frictionsim2d.postprocessing.pes_scan import grid_descriptors
 
-TEMPLATES = Path(__file__).resolve().parents[2] / 'src' / 'templates'
+TEMPLATES = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'templates'
 CASES = [
     ('afm/pes_scan.lmp', 'pes_tip'),
     ('afm_freestanding/pes_scan.lmp', 'pes_tip'),

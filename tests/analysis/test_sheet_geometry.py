@@ -11,10 +11,10 @@ import pytest
 
 pytest.importorskip('scipy')
 
-import src.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
-from src.analysis.base import get_analysis  # noqa: E402
-from src.analysis.source import RunSource  # noqa: E402
-from src.analysis.sheet_geometry import read_lmp  # noqa: E402
+import frictionsim2d.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
+from frictionsim2d.analysis.base import get_analysis  # noqa: E402
+from frictionsim2d.analysis.source import RunSource  # noqa: E402
+from frictionsim2d.analysis.sheet_geometry import read_lmp  # noqa: E402
 
 #: The settings of a run whose sheet types are the structure's + 6 (s42:85).
 SETTINGS = """\
@@ -145,11 +145,11 @@ def test_material_without_any_structure_is_dropped():
 _PUB_SCRIPT = """
 import sys
 import pandas as pd
-from src.aiida import load_aiida_profile
+from frictionsim2d.aiida import load_aiida_profile
 load_aiida_profile('friction2d_pub')
-from src.aiida.query import dataset_rows
-from src.analysis.catalogue import sheet_geometry
-from src.analysis.source import RunSource
+from frictionsim2d.aiida.query import dataset_rows
+from frictionsim2d.analysis.catalogue import sheet_geometry
+from frictionsim2d.analysis.source import RunSource
 rows, _ = dataset_rows('260909-afm')
 with RunSource(pd.DataFrame(rows), 'afm') as source:
     cls = sheet_geometry.SheetGeometry

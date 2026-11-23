@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from src.agent.knowledge_index import KnowledgeIndex, knowledge_dir, load_knowledge
-from src.agent.tools.knowledge import search_knowledge
+from frictionsim2d.agent.knowledge_index import KnowledgeIndex, knowledge_dir, load_knowledge
+from frictionsim2d.agent.tools.knowledge import search_knowledge
 from tests.helpers.agent import make_deps
 
 PASSAGES = [

@@ -20,7 +20,7 @@ outputs:
       noarch: python
       script: $PYTHON -m pip install . -vv --no-deps --no-build-isolation
       entry_points:
-        - FrictionSim2D = src.cli:main
+        - FrictionSim2D = frictionsim2d.cli:main
     requirements:
       host:
         - python >=3.9
@@ -40,7 +40,7 @@ outputs:
         - pandas >=1.5
     test:
       imports:
-        - src
+        - frictionsim2d
       commands:
         - FrictionSim2D --help
         - lmp -h
@@ -58,7 +58,7 @@ outputs:
         - atomsk
     test:
       imports:
-        - src
+        - frictionsim2d
       commands:
         - FrictionSim2D --help
         - atomsk --version
@@ -81,7 +81,7 @@ outputs:
         - typing_extensions >=4.0
     test:
       imports:
-        - src
+        - frictionsim2d
         - aiida
       commands:
         - FrictionSim2D --help
@@ -103,7 +103,7 @@ outputs:
         - psycopg2 >=2.9
     test:
       imports:
-        - src
+        - frictionsim2d
         - psycopg2
 
   # -----------------------------------------------------------------------
@@ -121,7 +121,7 @@ outputs:
         - scipy >=1.8
     test:
       imports:
-        - src
+        - frictionsim2d
         - matplotlib
         - seaborn
         - scipy
@@ -141,7 +141,7 @@ outputs:
         - httpx >=0.24
     test:
       imports:
-        - src
+        - frictionsim2d
         - fastapi
         - uvicorn
         - httpx
@@ -162,7 +162,7 @@ outputs:
         - {{ pin_subpackage(name|lower + '-api', exact=True) }}
     test:
       imports:
-        - src
+        - frictionsim2d
 
 about:
   home: https://github.com/Mclat16/FrictionSim2D

@@ -18,7 +18,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QProcess  # noqa: E402
 from PySide6.QtWidgets import QApplication, QTabWidget  # noqa: E402
 
-from src.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 
 @pytest.fixture(name='qt_app', scope='module')
@@ -29,7 +29,7 @@ def _qt_app():
 @pytest.fixture(name='window')
 def _window(qt_app, tmp_path):
     del qt_app
-    from src.gui.app import MainWindow
+    from frictionsim2d.gui.app import MainWindow
     window = MainWindow(Workspace.open(tmp_path / 'ws'))
     yield window
     # closeEvent prompts on a dirty document; a real QMessageBox in teardown

@@ -3,7 +3,7 @@
 Named HPC profiles are gone (merge decision 2); a GPU campaign is one
 settings.yaml with ``hpc.gpu`` and ``hpc.frameworks``, merged per job group by
 ``HPCScriptGenerator._config_for_group`` through
-``src.core.config.apply_framework_overlay``. CPU-only byte-identity against
+``frictionsim2d.core.config.apply_framework_overlay``. CPU-only byte-identity against
 main's templates is pinned in ``test_hpc_templates.py``; these tests pin the
 GPU path and the CPU/GPU/framework job split.
 """
@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import GlobalSettings, GPUSettings, FrameworkOverlay
-from src.core.mlip import get_mlip
-from src.hpc.manifest import JobEntry, JobManifest
-from src.hpc.scripts import HPCConfig, HPCScriptGenerator
+from frictionsim2d.core.config import GlobalSettings, GPUSettings, FrameworkOverlay
+from frictionsim2d.core.mlip import get_mlip
+from frictionsim2d.hpc.manifest import JobEntry, JobManifest
+from frictionsim2d.hpc.scripts import HPCConfig, HPCScriptGenerator
 
 TEMPLATES = ["pbs_array.j2", "pbs_combined.j2", "slurm_array.j2", "slurm_combined.j2"]
 

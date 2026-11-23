@@ -1,9 +1,9 @@
 """`run` subcommands: the CLI's job is to turn options into run_simulations arguments.
 
-`run_simulations` is imported by name into `src.cli` at module level
+`run_simulations` is imported by name into `frictionsim2d.cli` at module level
 (``from .run.simulate import run_simulations``), so the patch target is the
-name `src.cli` bound, not `src.run.simulate.run_simulations` -- patching the
-latter would leave `src.cli`'s own reference untouched and these tests would
+name `frictionsim2d.cli` bound, not `frictionsim2d.run.simulate.run_simulations` -- patching the
+latter would leave `frictionsim2d.cli`'s own reference untouched and these tests would
 silently exercise the real builder.
 """
 from pathlib import Path
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src import cli as cli_module
+from frictionsim2d import cli as cli_module
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def captured(monkeypatch, tmp_path):
         root.mkdir(parents=True, exist_ok=True)
         return ([], root, [], None)
 
-    monkeypatch.setattr("src.cli.run_simulations", fake_run_simulations)
+    monkeypatch.setattr("frictionsim2d.cli.run_simulations", fake_run_simulations)
     return calls
 
 

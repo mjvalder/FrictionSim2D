@@ -1,5 +1,5 @@
 """Tests for the shared observable-context builder."""
-from src.builders.utils.obs_ctx import build_obs_ctx
+from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
 
 
 def _ctx(**kw):
@@ -53,13 +53,13 @@ def test_window_args_carry_results_freq():
 
 
 def test_window_args_default_matches_tier_args():
-    from src.core.observables import TIER_ARGS
+    from frictionsim2d.core.observables import TIER_ARGS
     every, repeat, freq = TIER_ARGS['window']
     assert _ctx(results_freq=freq)['window_args'] == f'{every} {repeat} {freq}'
 
 
 def test_title1_carries_schema_units_and_family():
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     t = _ctx(sim_type='afm')['title1']
     assert t == '# schema=2 lf_units=nN family=afm'
     # the reader must agree with what the writer stamps
@@ -103,7 +103,7 @@ def test_afm_build_never_emits_a_channel_outside_its_family():
     # before the generated list was filtered by sim_type, those spliced
     # into afm's peratom_varlist with no name to give rename_map('afm',
     # 'peratom') to resolve them by.
-    from src.core.observables import REGISTRY, layer_channels
+    from frictionsim2d.core.observables import REGISTRY, layer_channels
     afm_opt_in = [ob.name for ob in REGISTRY.values()
                   if 'afm' in ob.sim_types and ob.opt_in]
     ctx = _ctx(n_layers=4, optional_channels=afm_opt_in)
@@ -116,7 +116,7 @@ def test_afm_build_never_emits_a_channel_outside_its_family():
 
 
 def test_default_build_emits_no_opt_in_channel():
-    from src.core.observables import REGISTRY
+    from frictionsim2d.core.observables import REGISTRY
     ctx = _ctx()
     emitted = set(ctx['window_varlist'].split()) | set(
         ctx['peratom_varlist'].split())
@@ -128,7 +128,7 @@ def test_default_build_emits_no_opt_in_channel():
 def test_raw_varlist_comes_from_the_registry():
     # a hardcoded raw varlist can drift from its declarations on day two --
     # the exact failure the registry exists to prevent
-    from src.core.observables import channels_for
+    from frictionsim2d.core.observables import channels_for
     ctx = _ctx(sim_type='afm')
     expected = [ob.rename_to or f'v_{ob.name}'
                 for ob in channels_for('afm', 'raw')]

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from src.run.naming import (
+from frictionsim2d.run.naming import (
     mlip_flavor_from_pot_token,
     output_dir_for,
     parse_run_path,

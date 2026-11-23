@@ -14,7 +14,7 @@ pytest tests/aiida -m aiida              # the AiiDA tier: 291 tests, ~11 min, b
 pytest -m ""                             # everything
 pytest tests/builders                    # one package
 pytest tests/core/test_config.py::test_name              # one test
-pytest --cov=src --cov-report=term-missing tests/core    # coverage for one package
+pytest --cov=frictionsim2d --cov-report=term-missing tests/core    # coverage for one package
 ```
 
 `pyproject.toml` sets `addopts = "-v --tb=short -m 'not lammps'"`, so the fast tier is
@@ -44,11 +44,11 @@ test cannot claim to be LAMMPS-free while calling LAMMPS.
 
 ## Layout
 
-`tests/` mirrors `src/`, one directory per package, plus four that do not:
+`tests/` mirrors `frictionsim2d/`, one directory per package, plus four that do not:
 
 | directory | holds |
 |---|---|
-| `core/ run/ potentials/ lattice/ builders/ interfaces/ hpc/ cli/` | tests for the `src` package of the same name |
+| `core/ run/ potentials/ lattice/ builders/ interfaces/ hpc/ cli/` | tests for the `frictionsim2d` package of the same name |
 | `integration/` | cross-package, artifact-level tests — see below |
 | `repo/` | repo-wide invariants: import surface, import weight, marker derivation, settings isolation, mock-target rule |
 | `helpers/` | code shared by more than one test module (a test module never imports another test module) |

@@ -9,7 +9,7 @@ What only a real LAMMPS can tell:
 * LJ-G: whether ``compute group/group`` survives the KC/z overlay. It does
   not (KC/z has no ``single()``), which is why ``lj_g`` takes the
   reaction-force branch (``GROUP_GROUP_STYLES`` in
-  src/builders/utils/interlayer.py).
+  frictionsim2d/builders/utils/interlayer.py).
 * ILP: an SW + ilp/tmd MoS2 bilayer relaxes to the 2H interlayer spacing.
 * ILP: a built PES-sheet scan with ``z_relax`` (minimize under ``compute
   pair ilp/tmd`` in the thermo) runs end to end.
@@ -29,8 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import GlobalSettings, SheetConfig
-from src.potentials.manager import PotentialManager
+from frictionsim2d.core.config import GlobalSettings, SheetConfig
+from frictionsim2d.potentials.manager import PotentialManager
 from tests.helpers.examples import REPO_ROOT
 
 pytestmark = pytest.mark.integration
@@ -231,7 +231,7 @@ def test_ilp_mos2_bilayer_spacing(tmp_path):
     that SW offset -- not the 6.1-6.2 A first planned.
     """
     from types import SimpleNamespace
-    from src.builders.construction import components
+    from frictionsim2d.builders.construction import components
     start = 6.8
     _, settings, layers = _bilayer_settings(tmp_path, "ilp")
     general = SimpleNamespace(interlayer_style="ilp", interlayer_file=None,
@@ -272,8 +272,8 @@ def test_ilp_mos2_bilayer_spacing(tmp_path):
 def test_pes_sheet_ilp_z_relax_runs(tmp_path, monkeypatch):
     """A built ilp PES-sheet scan with z_relax runs under the serial ``lmp``
     and writes one finite interlayer energy per grid point."""
-    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
-    from src.core.config import SheetOnSheetSimulationConfig, read_config
+    from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+    from frictionsim2d.core.config import SheetOnSheetSimulationConfig, read_config
     monkeypatch.chdir(REPO_ROOT)
     raw = read_config(REPO_ROOT / "examples" / "pes_sheet_config.ini")
     raw["general"]["interlayer_style"] = "ilp"

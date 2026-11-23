@@ -20,10 +20,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.core.config import GlobalSettings  # noqa: E402
-from src.gui.controllers.database import (  # noqa: E402
+from frictionsim2d.core.config import GlobalSettings  # noqa: E402
+from frictionsim2d.gui.controllers.database import (  # noqa: E402
     CACHE_KEEP, DatabaseController, DatabaseRequest, request_key)
-from src.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 
 def _run_until(signal, timeout_ms: int = 5000) -> list:
@@ -110,7 +110,7 @@ def test_a_write_in_flight_names_itself(controller):
 
 
 def test_a_failed_to_start_process_ends_the_request(controller, monkeypatch):
-    import src.gui.controllers.database as database_module
+    import frictionsim2d.gui.controllers.database as database_module
     monkeypatch.setattr(database_module.sys, 'executable',
                         '/nonexistent/not-a-real-interpreter-xyz')
 
@@ -137,12 +137,12 @@ def test_cancel_reports_the_kind_it_cancelled(controller):
 
 
 class TestTheWorkerReallyRuns:
-    """One test that spawns the actual `python -m src.gui.db_worker`.
+    """One test that spawns the actual `python -m frictionsim2d.gui.db_worker`.
 
     Everything else in this suite calls `dispatch` in-process or stubs the
     controller, which leaves the parts that only exist between two processes
     untested: the `-m` entry point resolving, the working directory making
-    `src` importable, the newline-delimited JSON on stdout, the result file
+    `frictionsim2d` importable, the newline-delimited JSON on stdout, the result file
     landing where the request said, and the exit code. Those are exactly the
     failures that make a worker look hung rather than broken, so one end-to-end
     seam earns its runtime. A request of an unknown kind is the one request

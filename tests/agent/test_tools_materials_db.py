@@ -1,9 +1,9 @@
 """Materials Project and 2DMatPedia tools, over a fake client (no network)."""
 import pytest
 
-from src.agent.changes import FsChangeSet, apply_fs_changeset, describe_change
-from src.agent.materials_db import NO_KEY, MaterialsDBError
-from src.agent.tools.materials_db import (fetch_2dmatpedia_structure, query_2dmatpedia,
+from frictionsim2d.agent.changes import FsChangeSet, apply_fs_changeset, describe_change
+from frictionsim2d.agent.materials_db import NO_KEY, MaterialsDBError
+from frictionsim2d.agent.tools.materials_db import (fetch_2dmatpedia_structure, query_2dmatpedia,
                                           query_materials_project)
 from tests.helpers.agent import CIF_TEXT, make_deps, materials_factory
 from tests.helpers.agent import FakeMaterialsClient as FakeClient

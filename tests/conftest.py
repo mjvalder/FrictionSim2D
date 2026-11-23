@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from importlib import resources
 
-from src.core.config import (
+from frictionsim2d.core.config import (
     GlobalSettings,
     GeometrySettings,
     ThermostatSettings,
@@ -39,7 +39,7 @@ def isolated_xdg_config_home(tmp_path_factory):
     """Point ``$XDG_CONFIG_HOME`` at a session temp dir.
 
     ``load_settings()`` falls back to ``$XDG_CONFIG_HOME/FrictionSim2D/settings.yaml``
-    (``src/core/config.py::_global_settings_path``). Without this the suite would
+    (``frictionsim2d/core/config.py::_global_settings_path``). Without this the suite would
     read the developer's real settings file when one exists. Session scope: one temp
     dir for the whole run; per-test monkeypatch of the variable still works on top.
     """
@@ -57,13 +57,13 @@ def isolated_xdg_config_home(tmp_path_factory):
 def fixed_lammps_pair_styles(monkeypatch):
     """Keep pot_type validation independent of the host's ``lmp`` binary.
 
-    ``validate_pot_type`` asks ``src.interfaces.lammps.lammps_pair_styles`` (looked
+    ``validate_pot_type`` asks ``frictionsim2d.interfaces.lammps.lammps_pair_styles`` (looked
     up through the module, so this patch reaches it) for custom styles. Without a
     fixed answer the result depends on whether ``lmp`` is on PATH. Tests needing
     ``None`` or the real parse override it.
     """
-    from src.potentials.utils import KNOWN_TYPES
-    monkeypatch.setattr("src.interfaces.lammps.lammps_pair_styles",
+    from frictionsim2d.potentials.utils import KNOWN_TYPES
+    monkeypatch.setattr("frictionsim2d.interfaces.lammps.lammps_pair_styles",
                         lambda: frozenset(KNOWN_TYPES | {"mlip", "ilp/tmd"}))
 
 
@@ -118,7 +118,7 @@ def mock_settings() -> GlobalSettings:
 @pytest.fixture
 def data_path() -> Path:
     """Returns the path to package data directory."""
-    return Path(str(resources.files('src.data')))
+    return Path(str(resources.files('frictionsim2d.data')))
 
 
 @pytest.fixture

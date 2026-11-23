@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.run.placeholders import has_template_marker, substitute_materials
-from src.run.expand import (
+from frictionsim2d.run.placeholders import has_template_marker, substitute_materials
+from frictionsim2d.run.expand import (
     expand_config_sweeps,
     preflight_materials,
     read_material_entries,

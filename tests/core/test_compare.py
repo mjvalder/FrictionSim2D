@@ -1,5 +1,5 @@
 """Field-level comparison of parameter blocks (aiida-free)."""
-from src.core.compare import VARIES, compare_blocks, merge_varying
+from frictionsim2d.core.compare import VARIES, compare_blocks, merge_varying
 
 UNITS = {'general.temp': 'K', 'derived.geometry.lat_c': 'angstrom',
          'sheets.x': 'angstrom'}
@@ -130,7 +130,7 @@ def test_merge_refills_each_member_from_its_own_defaults():
 
 
 def test_real_key_matches_compare_tolerance():
-    from src.core.compare import real_key, same_value
+    from frictionsim2d.core.compare import real_key, same_value
     assert real_key(0.1 + 0.2) == real_key(0.3)
     assert real_key(1.0) != real_key(1.001)
     assert same_value([0.1 + 0.2, 'x'], [0.3, 'x']) and not same_value(1.0, 1.001)
@@ -141,7 +141,7 @@ def test_real_key_matches_compare_tolerance():
 
 
 def test_integers_compare_exactly_floats_to_tolerance():
-    from src.core.compare import canonical, canonical_text, same_value
+    from frictionsim2d.core.compare import canonical, canonical_text, same_value
     assert not same_value(12345678, 12345679)
     assert same_value(12345678.0, 12345679.0)          # floats, even integral
     assert same_value(10000000, 1e7)                   # the float keys as that int

@@ -1,10 +1,10 @@
 """Building real agent deps over a temporary workspace for tests."""
 from pathlib import Path
 
-from src.agent.context import snapshot_deps
-from src.agent.sandbox import SearchRoots
-from src.gui.controllers.document import ConfigDocument
-from src.gui.controllers.settings_document import SettingsDocument
+from frictionsim2d.agent.context import snapshot_deps
+from frictionsim2d.agent.sandbox import SearchRoots
+from frictionsim2d.gui.controllers.document import ConfigDocument
+from frictionsim2d.gui.controllers.settings_document import SettingsDocument
 
 EXAMPLES = Path(__file__).resolve().parents[2] / 'examples'
 

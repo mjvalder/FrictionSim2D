@@ -1,7 +1,7 @@
 """Tests for the central observable registry."""
 import pytest
 
-from src.core.observables import (
+from frictionsim2d.core.observables import (
     REGISTRY, TIERS, STREAMS,
     channels_for, expected_columns, rename_map, layer_channels,
     validate_registry, expected_tier_rows, expected_window_rows,
@@ -140,7 +140,7 @@ def test_afm_and_sheet_both_have_lfx_under_their_own_key():
 
 
 def test_registry_key_defaults_to_name():
-    from src.core.observables import Observable
+    from frictionsim2d.core.observables import Observable
     ob = Observable(name='foo', sim_types=('afm',), group='2D_all',
                     tier='window', stream='results', units='A')
     assert ob.registry_key == 'foo'
@@ -157,7 +157,7 @@ def test_existing_lookups_unchanged():
 
 def test_shared_name_requires_disjoint_sim_types():
     import pytest
-    from src.core.observables import Observable, _add
+    from frictionsim2d.core.observables import Observable, _add
     with pytest.raises(ValueError, match='disjoint'):
         # 'lfx' already exists for ('afm', 'indent'); overlapping sim_types
         # would emit two identical column headers in one file. role_key is
@@ -169,7 +169,7 @@ def test_shared_name_requires_disjoint_sim_types():
 
 
 def test_every_results_channel_has_a_role_key():
-    from src.core.observables import ROLE_EXEMPT
+    from frictionsim2d.core.observables import ROLE_EXEMPT
     for key, ob in REGISTRY.items():
         if ob.stream != 'results':
             continue
@@ -180,7 +180,7 @@ def test_every_results_channel_has_a_role_key():
 
 
 def test_role_exempt_entries_carry_a_reason():
-    from src.core.observables import ROLE_EXEMPT
+    from frictionsim2d.core.observables import ROLE_EXEMPT
     for name, reason in ROLE_EXEMPT.items():
         assert reason.strip(), name
         assert len(reason.split()) >= 4, f"{name}: reason is not prose"
@@ -202,20 +202,20 @@ def test_role_key_unique_within_a_sim_type():
 
 def test_add_rejects_a_results_channel_with_no_role():
     import pytest
-    from src.core.observables import Observable, _add
+    from frictionsim2d.core.observables import Observable, _add
     with pytest.raises(ValueError, match='role_key'):
         _add(Observable(name='rolelesss', sim_types=('afm',), group='2D_all',
                         tier='window', stream='results', units='A'))
 
 
 def test_channel_by_role_finds_the_family_specific_channel():
-    from src.core.observables import channel_by_role
+    from frictionsim2d.core.observables import channel_by_role
     assert channel_by_role('afm', 'normal_load').name == 'nf'
     assert channel_by_role('afm', 'no_such_role') is None
 
 
 def test_role_parity_between_families():
-    from src.core.observables import (
+    from frictionsim2d.core.observables import (
         PARITY_PAIRS, PARITY_EXEMPT, channel_by_role)
     for source, target in PARITY_PAIRS:
         for ob in REGISTRY.values():
@@ -233,7 +233,7 @@ def test_role_parity_between_families():
 
 
 def test_every_parity_exemption_carries_a_reason():
-    from src.core.observables import PARITY_EXEMPT
+    from frictionsim2d.core.observables import PARITY_EXEMPT
     for (sim_type, role), reason in PARITY_EXEMPT.items():
         assert reason.strip(), (sim_type, role)
         assert len(reason.split()) >= 4, f"{sim_type}/{role}: not prose"
@@ -242,7 +242,7 @@ def test_every_parity_exemption_carries_a_reason():
 def test_every_parity_exemption_names_a_live_role():
     """An exemption must die with the role it excused. A stale entry whose
     role no longer exists anywhere is noise that outlives its subject."""
-    from src.core.observables import PARITY_EXEMPT
+    from frictionsim2d.core.observables import PARITY_EXEMPT
     live = {ob.role_key for ob in REGISTRY.values() if ob.role_key}
     for (sim_type, role) in PARITY_EXEMPT:
         assert role in live, (
@@ -260,7 +260,7 @@ def test_opt_in_channels_are_peratom_or_post():
 
 import pytest
 
-from src.core import observables as obs
+from frictionsim2d.core import observables as obs
 
 
 def _ob(**kw):

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.run.artifacts import (
+from frictionsim2d.run.artifacts import (
     discover_preview_target,
     find_assembly_script,
     generate_package,
@@ -151,7 +151,7 @@ class TestFailureReporting:
     def test_failures_are_reported_with_the_config_and_error(self, tmp_path, monkeypatch):
         """A build that fails must be nameable, not just absent from a count."""
         monkeypatch.chdir(REPO_ROOT)
-        import src.builders.afm as afm_module
+        import frictionsim2d.builders.afm as afm_module
 
         def explode(self):
             raise RuntimeError("synthetic build failure")

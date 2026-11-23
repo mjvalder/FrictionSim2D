@@ -16,17 +16,17 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida.block_schema import BLOCK_KINDS  # noqa: E402
-from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.steps import build_dataset, postprocess_group  # noqa: E402
-from src.gui import db_worker  # noqa: E402
-from src.postprocessing.plot_data import PlotDataError, Plotter  # noqa: E402
+from frictionsim2d.aiida.block_schema import BLOCK_KINDS  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.steps import build_dataset, postprocess_group  # noqa: E402
+from frictionsim2d.gui import db_worker  # noqa: E402
+from frictionsim2d.postprocessing.plot_data import PlotDataError, Plotter  # noqa: E402
 from tests.aiida.test_steps_integrity import _tree  # noqa: E402
 
 
 @pytest.fixture
 def no_profile_switch(monkeypatch):
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
@@ -196,8 +196,8 @@ def test_dataset_timeseries_equals_export(store, tmp_path):
     of the set exported by hand -- minus the point the dataset leaves out."""
     import pandas as pd  # pylint: disable=import-outside-toplevel
 
-    from src.aiida.export import export_results  # pylint: disable=import-outside-toplevel
-    from src.postprocessing.read_data import DataReader  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.aiida.export import export_results  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.postprocessing.read_data import DataReader  # pylint: disable=import-outside-toplevel
 
     export_results('camp', tmp_path / 'by_hand')
     DataReader(results_dir=str(tmp_path / 'by_hand')).export_full_data_to_json()
@@ -218,7 +218,7 @@ def test_dataset_timeseries_equals_export(store, tmp_path):
 
 def test_dataset_timeseries_reads_only_the_points_the_plot_selects(store, tmp_path,
                                                                    monkeypatch):
-    from src.aiida import query  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.aiida import query  # pylint: disable=import-outside-toplevel
 
     read = []
     real = query.point_frames

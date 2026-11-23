@@ -5,7 +5,7 @@ import json
 import pydantic
 import pytest
 
-from src.data.provenance import (
+from frictionsim2d.data.provenance import (
     BuiltGeometry, MATERIAL_ROLES, MaterialProvenance, PROVENANCE_SCHEMA_VERSION,
     ProvenanceRecord, config_hash, parse_log_extras, read_provenance, sha256_file,
     write_provenance,
@@ -135,7 +135,7 @@ def test_reader_leaves_a_two_x_file_alone(tmp_path):
 
 
 def test_builder_writes_provenance(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     from tests.helpers.afm import (_make_afm_config,
                                     _prepare_builder_for_slide_write)
     config = _make_afm_config(tmp_path, layers=[1])
@@ -225,7 +225,7 @@ def test_old_lines_with_mismatched_load_count_are_not_paired(tmp_path):
 
 
 def test_parse_hold_files(tmp_path):
-    from src.data.provenance import parse_hold_files
+    from frictionsim2d.data.provenance import parse_hold_files
     hdr = ("# Time-averaged data for fix hold_ave\n"
            "# TimeStep v_hold_fz v_hold_tipz v_hold_shz\n")
     (tmp_path / 'hold_10N.txt').write_text(hdr + "1000 1.0 5 6\n2000 3.0 5 6\n")
@@ -237,7 +237,7 @@ def test_parse_hold_files(tmp_path):
 def test_parse_hold_files_skips_a_partial_last_line(tmp_path):
     """A job killed mid-write leaves "2000" alone on the last line: that row
     is skipped, the complete rows still give the mean, nothing raises."""
-    from src.data.provenance import parse_hold_files
+    from frictionsim2d.data.provenance import parse_hold_files
     hdr = "# TimeStep v_hold_fz v_hold_tipz v_hold_shz\n"
     (tmp_path / 'hold_10N.txt').write_text(hdr + "1000 1.0 5 6\n2000")
     (tmp_path / 'hold_20N.txt').write_text(hdr + "2000\n")
@@ -252,7 +252,7 @@ def test_schema_version_is_2_2_0():
 
 def test_new_run_uuid_is_a_fresh_uuid4():
     from uuid import UUID
-    from src.data.provenance import new_run_uuid
+    from frictionsim2d.data.provenance import new_run_uuid
     first, second = new_run_uuid(), new_run_uuid()
     assert UUID(first).version == 4 and str(UUID(first)) == first
     assert first != second
@@ -305,7 +305,7 @@ def _afm_tree(root):
 def test_stamp_gives_each_legacy_record_its_own_uuid(tmp_path):
     import datetime
     from uuid import UUID
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     files = _afm_tree(tmp_path)
     before = [json.loads(p.read_text(encoding='utf-8')) for p in files]
 
@@ -325,7 +325,7 @@ def test_stamp_gives_each_legacy_record_its_own_uuid(tmp_path):
 
 
 def test_stamp_is_idempotent(tmp_path):
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     files = _afm_tree(tmp_path)
     stamp_run_uuids(tmp_path)
     texts = [p.read_bytes() for p in files]
@@ -337,7 +337,7 @@ def test_stamp_is_idempotent(tmp_path):
 
 
 def test_stamp_never_overwrites_an_existing_uuid(tmp_path):
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     path = write_provenance(tmp_path / 'run',
                             _record(run_uuid='3f0c2a7e-1b7d-4c4e-9a51-6d2f0e8b9c11'))
     text = path.read_bytes()
@@ -349,7 +349,7 @@ def test_stamp_never_overwrites_an_existing_uuid(tmp_path):
 
 
 def test_stamp_dry_run_writes_nothing(tmp_path):
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     files = _afm_tree(tmp_path)
     texts = [p.read_bytes() for p in files]
 
@@ -361,7 +361,7 @@ def test_stamp_dry_run_writes_nothing(tmp_path):
 
 
 def test_stamp_reports_an_unreadable_file(tmp_path):
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     good = _legacy_file(tmp_path / 'a' / 'provenance.json')
     bad = tmp_path / 'b' / 'provenance.json'
     bad.parent.mkdir()
@@ -378,7 +378,7 @@ def test_stamp_reports_an_unreadable_file(tmp_path):
 
 
 def test_stamp_keeps_the_file_mode(tmp_path):
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     path = _legacy_file(tmp_path / 'provenance.json')
     path.chmod(0o644)
     stamp_run_uuids(tmp_path)
@@ -386,7 +386,7 @@ def test_stamp_keeps_the_file_mode(tmp_path):
 
 
 def test_stamp_lists_a_non_uuid_run_uuid_as_invalid(tmp_path):
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     path = write_provenance(tmp_path / 'run', _record(run_uuid='keep-me'))
     text = path.read_bytes()
 
@@ -400,7 +400,7 @@ def test_stamp_lists_a_non_uuid_run_uuid_as_invalid(tmp_path):
 
 def test_stamp_treats_a_null_run_uuid_as_missing(tmp_path):
     from uuid import UUID
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     path = _legacy_file(tmp_path / 'provenance.json', run_uuid=None)
 
     report = stamp_run_uuids(tmp_path)
@@ -411,7 +411,7 @@ def test_stamp_treats_a_null_run_uuid_as_missing(tmp_path):
 
 def test_a_failed_rename_leaves_the_original_and_no_temp_file(tmp_path, monkeypatch):
     import os
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     path = _legacy_file(tmp_path / 'provenance.json')
     text = path.read_bytes()
 
@@ -428,7 +428,7 @@ def test_a_failed_rename_leaves_the_original_and_no_temp_file(tmp_path, monkeypa
 
 def test_render_says_would_stamp_on_a_dry_run():
     from pathlib import Path
-    from src.data.provenance import StampReport
+    from frictionsim2d.data.provenance import StampReport
     report = StampReport(stamped=[Path('a')])
     assert report.render(dry_run=True).startswith('would stamp 1,')
     assert report.render().startswith('stamped 1,')

@@ -2,7 +2,7 @@
 
 ``AFMSimulation._write_provenance`` (build time) has always documented that
 ``RAMP_STATUS``/``UNLOADED_REF``/``lammps_version`` are "enriched post-run via
-provenance.parse_log_extras", but nothing in ``src/`` ever called it -- a run
+provenance.parse_log_extras", but nothing in ``frictionsim2d/`` ever called it -- a run
 whose settle loop never converges (see ``afm/system_init.lmp``'s capped
 ``ramp_iter`` loop) produced no signal anywhere a user would see, only a
 buried ``# RAMP_STATUS converged=0 ...`` log line nothing read back.
@@ -22,9 +22,9 @@ import json
 import logging
 from pathlib import Path
 
-from src.builders.afm import AFMSimulation
-from src.builders.afm.base import enrich_provenance_post_run
-from src.data.provenance import PROVENANCE_SCHEMA_VERSION
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.builders.afm.base import enrich_provenance_post_run
+from frictionsim2d.data.provenance import PROVENANCE_SCHEMA_VERSION
 from tests.helpers.afm import _make_afm_config, _seed_builder_state
 
 
@@ -73,7 +73,7 @@ def test_enrich_a_legacy_one_x_provenance_json_works(tmp_path):
     tree, must still be enrichable -- ``family``/``model`` are now required
     fields, so a naive ``ProvenanceRecord.model_validate_json`` would reject
     every one of these and silently leave the whole run unenriched. See
-    :func:`src.data.provenance.read_provenance`, which this function now reads
+    :func:`frictionsim2d.data.provenance.read_provenance`, which this function now reads
     through instead."""
     layer_dir = tmp_path / "out" / "L1"
     (layer_dir / "lammps").mkdir(parents=True)
@@ -363,7 +363,7 @@ def test_enrichment_keeps_the_run_uuid(tmp_path):
 
 
 def test_enrichment_keeps_a_legacy_stamp(tmp_path):
-    from src.data.provenance import stamp_run_uuids
+    from frictionsim2d.data.provenance import stamp_run_uuids
     layer_dir = _built_layer_dir(_builder(tmp_path), tmp_path)
     prov = layer_dir / "provenance.json"
     data = json.loads(prov.read_text(encoding="utf-8"))

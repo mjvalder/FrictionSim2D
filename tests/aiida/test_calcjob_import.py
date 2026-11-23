@@ -16,13 +16,13 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida.calcjob import (  # noqa: E402
+from frictionsim2d.aiida.calcjob import (  # noqa: E402
     LammpsFrictionCalcJob, LammpsFrictionParser, MissingRunUUID, deck_inputs,
     import_deck, import_run, point_label,
 )
-from src.aiida.layout import discover_decks, retrieve_patterns  # noqa: E402
-from src.aiida.store import machine_computer  # noqa: E402
-from src.run.tree import discover_runs  # noqa: E402
+from frictionsim2d.aiida.layout import discover_decks, retrieve_patterns  # noqa: E402
+from frictionsim2d.aiida.store import machine_computer  # noqa: E402
+from frictionsim2d.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.helpers.results_tree import (  # noqa: E402
     make_family_run, slide_config, write_final_data,
@@ -265,7 +265,7 @@ def test_configured_indent_load_without_results_gets_a_node(computer, tmp_path):
 
 
 def test_every_output_file_goes_through_redaction(computer, tmp_path, monkeypatch):
-    import src.aiida.store as store_mod
+    import frictionsim2d.aiida.store as store_mod
     staged = []
     real = store_mod.stage_file
 
@@ -433,7 +433,7 @@ def test_potentials_sharing_a_stem_both_survive(computer, tmp_path):
 
 
 def test_a_label_collision_raises():
-    from src.aiida.calcjob import _unique
+    from frictionsim2d.aiida.calcjob import _unique
     with pytest.raises(ValueError, match='a_b'):
         _unique([('a_b', 1), ('a_b', 2)], 'potentials')
 
@@ -580,7 +580,7 @@ def _three_deck_afm_run(root):
 
 
 def test_a_run_is_split_once_and_indexed_once(computer, tmp_path, monkeypatch):
-    from src.aiida import blocks, calcjob
+    from frictionsim2d.aiida import blocks, calcjob
     loc = _three_deck_afm_run(tmp_path / 'sim')
     assert len(discover_decks(loc)) == 3
 
@@ -608,7 +608,7 @@ def test_a_run_is_split_once_and_indexed_once(computer, tmp_path, monkeypatch):
 
 
 def test_every_calcjob_carries_the_schema_and_derived(computer, tmp_path):
-    from src.aiida.store import node_uuid, schema_hash
+    from frictionsim2d.aiida.store import node_uuid, schema_hash
     nodes = import_run(_afm_run(tmp_path / 'sim'), computer=computer)
     for node in nodes:
         schema = node.inputs.schema
@@ -618,8 +618,8 @@ def test_every_calcjob_carries_the_schema_and_derived(computer, tmp_path):
 
 
 def test_block_names_record_the_unambiguous_name(computer, tmp_path):
-    from src.aiida.blocks import block_hash
-    from src.aiida.store import node_uuid
+    from frictionsim2d.aiida.blocks import block_hash
+    from frictionsim2d.aiida.store import node_uuid
     (system, _slide) = import_run(_afm_run(tmp_path / 'sim'), computer=computer)
     names = system.inputs.parameters['block_names']
     assert set(names) == set(system.inputs.blocks)
@@ -630,7 +630,7 @@ def test_block_names_record_the_unambiguous_name(computer, tmp_path):
 
 
 def _legacy_spring(loc, *, schema_version):
-    from src.aiida.block_schema import LEGACY_AFM_SPRING_FACTOR
+    from frictionsim2d.aiida.block_schema import LEGACY_AFM_SPRING_FACTOR
     config = json.loads((loc.provenance_dir / 'config.json').read_text(encoding='utf-8'))
     spring = (config.get('general') or {}).get('driving_spring') or 50.0
     _set_record(loc, schema_version=schema_version,
@@ -646,7 +646,7 @@ def test_a_legacy_afm_run_imports(computer, tmp_path):
 
 
 def test_a_current_run_with_the_legacy_factor_is_refused(computer, tmp_path):
-    from src.aiida.block_schema import UnitMismatch
+    from frictionsim2d.aiida.block_schema import UnitMismatch
     loc = _afm_run(tmp_path / 'sim')
     _legacy_spring(loc, schema_version='2.2.0')
     with pytest.raises(UnitMismatch, match='drive_k'):
@@ -654,7 +654,7 @@ def test_a_current_run_with_the_legacy_factor_is_refused(computer, tmp_path):
 
 
 def test_reindex_restores_the_run_extra(computer, tmp_path):
-    from src.aiida.store import reindex, verify
+    from frictionsim2d.aiida.store import reindex, verify
     nodes = import_run(_afm_run(tmp_path / 'sim'), computer=computer)
     run_uuid = nodes[0].inputs.parameters['run_uuid']
     for node in nodes:

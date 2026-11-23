@@ -19,7 +19,7 @@ a usable OpenGL context, and whether `lmp` and `atomsk` are on PATH. It exits
 non-zero when the environment cannot run the GUI, so it is worth running once on
 a new machine before wondering why the viewport is blank.
 
-The GUI is an optional extra. `src/gui` deliberately imports neither Qt nor
+The GUI is an optional extra. `frictionsim2d/gui` deliberately imports neither Qt nor
 ovito at module load, so a compute node without them is unaffected.
 
 ## Workspace
@@ -684,7 +684,7 @@ FrictionSim2D postprocess read <that directory> --export
 *Plots* lists the document's plots. **Add plot** appends one of the type in
 the combo beside it, and selecting a row opens it in the form below.
 
-The form is generated from `src/postprocessing/plot_config.py`, the same
+The form is generated from `frictionsim2d/postprocessing/plot_config.py`, the same
 Pydantic schema the CLI validates against, and is split in two groups:
 **Common** (what every plot type takes -- filters, axes, labels, limits, the
 sampling tier) and one named for the plot type (what only it takes). Changing
@@ -716,7 +716,7 @@ path only the first time.
 
 The preview is a PNG in a scrolled label, not an embedded matplotlib canvas,
 and that is deliberate. Rendering happens in a subprocess
-(`python -m src.gui.plot_worker`), so:
+(`python -m frictionsim2d.gui.plot_worker`), so:
 
 - matplotlib never installs a second Qt backend beside the one OVITO's
   viewport already owns -- the failure mode there is a hung window with

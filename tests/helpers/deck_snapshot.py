@@ -85,7 +85,7 @@ def _deterministic() -> Iterator[None]:
     counter = iter(range(1, 10**9))
     patched = []
     for mod in list(sys.modules.values()):
-        if getattr(mod, "__name__", "").startswith("src.") and getattr(mod, "datetime", None) is _dt.datetime:
+        if getattr(mod, "__name__", "").startswith("frictionsim2d.") and getattr(mod, "datetime", None) is _dt.datetime:
             patched.append(mod)
             mod.datetime = _FixedDatetime
     real_uuid4 = uuid.uuid4
@@ -101,7 +101,7 @@ def _deterministic() -> Iterator[None]:
 
 def render(case: RenderCase, out: Path) -> Dict[str, str]:
     """Build ``case`` into ``out``; map relative path to normalised text (text files only)."""
-    from src.run.artifacts import generate_package
+    from frictionsim2d.run.artifacts import generate_package
     from tests.helpers.examples import CAMPAIGN_NAMES, one_material_copy
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)

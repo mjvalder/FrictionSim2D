@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.postprocessing.plot_config import (PLOT_TYPES, CofHistogramPlot,
+from frictionsim2d.postprocessing.plot_config import (PLOT_TYPES, CofHistogramPlot,
                                             PlotDocument, StickSlipPlot,
                                             SummaryPlot, load_plot_document,
                                             schema_markdown)
@@ -117,8 +117,8 @@ def test_schema_markdown_names_every_type_and_field():
 
 
 def test_default_settings_come_from_the_model():
-    from src.postprocessing.plot_config import PlotSettings
-    from src.postprocessing.plot_style import DEFAULT_SETTINGS
+    from frictionsim2d.postprocessing.plot_config import PlotSettings
+    from frictionsim2d.postprocessing.plot_style import DEFAULT_SETTINGS
 
     assert DEFAULT_SETTINGS == PlotSettings().model_dump()
     assert DEFAULT_SETTINGS['figure']['size'] == [10, 7]
@@ -131,14 +131,14 @@ def test_default_settings_come_from_the_model():
 def test_layout_is_no_longer_an_empty_dict():
     """`layout` was declared and never read -- a settings key that did
     nothing at all."""
-    from src.postprocessing.plot_style import DEFAULT_SETTINGS
+    from frictionsim2d.postprocessing.plot_style import DEFAULT_SETTINGS
 
     assert DEFAULT_SETTINGS['layout'] == {'constrained_layout': False}
 
 
 def test_the_publication_preset_validates_and_is_vector_first():
-    from src.postprocessing.plot_config import PlotSettings
-    from src.postprocessing.presets import PRESETS, load_preset, preset_path
+    from frictionsim2d.postprocessing.plot_config import PlotSettings
+    from frictionsim2d.postprocessing.presets import PRESETS, load_preset, preset_path
 
     assert PRESETS == ('publication',)
     assert preset_path('publication').is_file()
@@ -156,8 +156,8 @@ def test_the_publication_preset_validates_and_is_vector_first():
 def test_the_publication_preset_actually_differs_from_the_defaults():
     """A preset that restated the model defaults would be a no-op dressed as
     a feature."""
-    from src.postprocessing.plot_config import PlotSettings
-    from src.postprocessing.presets import load_preset
+    from frictionsim2d.postprocessing.plot_config import PlotSettings
+    from frictionsim2d.postprocessing.presets import load_preset
 
     defaults = PlotSettings().model_dump()
     preset = load_preset('publication')
@@ -170,7 +170,7 @@ def test_the_publication_preset_actually_differs_from_the_defaults():
 
 
 def test_an_unknown_preset_is_a_key_error():
-    from src.postprocessing.presets import load_preset
+    from frictionsim2d.postprocessing.presets import load_preset
 
     with pytest.raises(KeyError, match='wallpaper'):
         load_preset('wallpaper')
@@ -179,7 +179,7 @@ def test_an_unknown_preset_is_a_key_error():
 def test_source_and_comment_accepted():
     """The publication document notes each plot's origin in `_source` and the
     document's in `_comment`; both are documentation, kept on a round trip."""
-    from src.postprocessing.plot_config import PlotDocument
+    from frictionsim2d.postprocessing.plot_config import PlotDocument
 
     doc = PlotDocument.model_validate({
         '_comment': 'y', 'data_dirs': ['d'], 'labels': ['d'],
@@ -195,7 +195,7 @@ def test_source_and_comment_accepted():
 def test_unknown_key_still_rejected():
     from pydantic import ValidationError
 
-    from src.postprocessing.plot_config import PlotDocument
+    from frictionsim2d.postprocessing.plot_config import PlotDocument
 
     with pytest.raises(ValidationError, match='_sorce'):
         PlotDocument.model_validate({

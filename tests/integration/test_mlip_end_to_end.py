@@ -23,9 +23,9 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import parse_config, write_config
-from src.potentials.manager import stage_model_file
-from src.run.simulate import run_simulations
+from frictionsim2d.core.config import parse_config, write_config
+from frictionsim2d.potentials.manager import stage_model_file
+from frictionsim2d.run.simulate import run_simulations
 
 pytestmark = pytest.mark.integration
 

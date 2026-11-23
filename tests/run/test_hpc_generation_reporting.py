@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import GlobalSettings
-from src.run.artifacts import generate_package
-from src.run.hpc_dispatch import generate_hpc_scripts_for_root, hpc_generation_blocker
+from frictionsim2d.core.config import GlobalSettings
+from frictionsim2d.run.artifacts import generate_package
+from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root, hpc_generation_blocker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -77,7 +77,7 @@ class TestWorkerPayload:
     """What the window shows after generating comes from here."""
 
     def _run(self, tmp_path, settings_file=None):
-        from src.gui.generate_worker import run
+        from frictionsim2d.gui.generate_worker import run
 
         return run({
             'config_file': str(EXAMPLES / 'indent_config.ini'),
@@ -111,7 +111,7 @@ class TestWorkerPayload:
         assert payload['hpc_blocked'] is None
 
     def test_hpc_keys_are_absent_when_not_requested(self, tmp_path, monkeypatch):
-        from src.gui.generate_worker import run
+        from frictionsim2d.gui.generate_worker import run
 
         monkeypatch.chdir(REPO_ROOT)
         payload = run({

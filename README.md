@@ -286,5 +286,5 @@ pytest -v
 Run lint (example):
 
 ```bash
-pylint src/aiida
+pylint frictionsim2d/aiida
 ```

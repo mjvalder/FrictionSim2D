@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.afm.freestanding import FreestandingPESTipSimulation
-from src.core.config import AFMSimulationConfig, load_settings
+from frictionsim2d.builders.afm.freestanding import FreestandingPESTipSimulation
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
 
 def _free_cfg(tmp_path, layers=(4,), eval_mode="minimize"):
@@ -26,7 +26,7 @@ def test_freestanding_pes_tip_refuses_a_flake_config(tmp_path):
     so a [flake] here would be built and typed but never enter the system.
     Inherited from PESTipSimulation.__init__; this pins that the freestanding
     subclass really is covered by that one definition."""
-    from src.core.config import FlakeConfig
+    from frictionsim2d.core.config import FlakeConfig
 
     cfg = _free_cfg(tmp_path)
     pot = tmp_path / "d.sw"

@@ -3,7 +3,7 @@ import pytest
 import yaml
 from pathlib import Path
 from pydantic import ValidationError
-from src.core.config import (
+from frictionsim2d.core.config import (
     AFMSimulationConfig,
     FlakeConfig,
     PESConfig,
@@ -476,7 +476,7 @@ def test_settings_origin_returns_explicit_path(tmp_path, monkeypatch):
 
 
 def test_lattice_match_section_is_parsed(tmp_path):
-    from src.core.config import LatticeMatchConfig
+    from frictionsim2d.core.config import LatticeMatchConfig
     lm = LatticeMatchConfig()
     assert lm.method == "zur_mcgill"
     assert lm.strain_tol == 0.02
@@ -492,7 +492,7 @@ def test_lattice_match_section_is_parsed(tmp_path):
 
 def test_lattice_match_area_tol_is_bounded():
     """area_tol must be in [0, 1]; out-of-range values are rejected."""
-    from src.core.config import LatticeMatchConfig
+    from frictionsim2d.core.config import LatticeMatchConfig
     with pytest.raises(ValidationError):
         LatticeMatchConfig(area_tol=2.0)
 
@@ -540,7 +540,7 @@ def test_single_2d_section_still_builds_one_element_sheets_list(tmp_path):
 # --- D2b: [sub] match flag + relaxed amorphous-required validator ---
 
 def test_crystalline_substrate_with_match_is_allowed():
-    from src.core.config import AFMSimulationConfig, load_settings
+    from frictionsim2d.core.config import AFMSimulationConfig, load_settings
     from tests.helpers.hetero import _afm_hetero_raw
     raw = _afm_hetero_raw()                       # non-finite-sheet hetero AFM
     raw["sub"]["amorph"] = "c"
@@ -550,7 +550,7 @@ def test_crystalline_substrate_with_match_is_allowed():
 
 
 def test_crystalline_substrate_without_match_still_rejected():
-    from src.core.config import AFMSimulationConfig, load_settings
+    from frictionsim2d.core.config import AFMSimulationConfig, load_settings
     from tests.helpers.hetero import _afm_hetero_raw
     raw = _afm_hetero_raw()
     raw["sub"]["amorph"] = "c"                    # crystalline, no match flag
@@ -561,7 +561,7 @@ def test_crystalline_substrate_without_match_still_rejected():
 # --- B2: [Flake-1]/[Flake-2] fold into flake_sheets ---
 
 def test_flake_sections_fold_into_flake_sheets():
-    from src.core.config import SheetOnSheetSimulationConfig, load_settings
+    from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
     raw = {
         "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
         "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
@@ -582,7 +582,7 @@ def test_flake_sections_fold_into_flake_sheets():
 
 
 def test_no_flake_sections_leaves_flake_sheets_empty():
-    from src.core.config import SheetOnSheetSimulationConfig, load_settings
+    from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
     raw = {"general": {"temp": 300, "scan_speed": 1},
            "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
                   "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
@@ -600,7 +600,7 @@ def test_afm_flake_missing_material_fields_is_rejected():
     fallback (that is a sheet-on-sheet flake-slide feature). Such a config used to
     validate and then die inside build_monolayer on a None cif_path.
     """
-    from src.core.config import AFMSimulationConfig, load_settings
+    from frictionsim2d.core.config import AFMSimulationConfig, load_settings
     from tests.helpers.hetero import _afm_flake_raw
     raw = _afm_flake_raw()
     del raw["flake"]["cif_path"]
@@ -611,7 +611,7 @@ def test_afm_flake_missing_material_fields_is_rejected():
 
 def test_afm_flake_with_material_fields_still_validates():
     """The fully-specified AFM flake (examples/afm_flake_config.ini) is untouched."""
-    from src.core.config import AFMSimulationConfig, load_settings
+    from frictionsim2d.core.config import AFMSimulationConfig, load_settings
     from tests.helpers.hetero import _afm_flake_raw
     cfg = AFMSimulationConfig(**_afm_flake_raw(), settings=load_settings())
     assert cfg.flake is not None and cfg.flake.mat == "h-MoS2"
@@ -623,7 +623,7 @@ def test_sheetonsheet_flake_may_still_omit_its_material():
     Its [Flake] legitimately reuses [2D] via
     FlakeSlideSimulation._filled_flake_config.
     """
-    from src.core.config import SheetOnSheetSimulationConfig, load_settings
+    from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
     raw = {"general": {"temp": 300, "scan_speed": 1},
            "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
                   "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
@@ -636,7 +636,7 @@ def test_sheetonsheet_flake_may_still_omit_its_material():
 # --- D3: general.twist_angle + twist tolerances ---
 
 def test_twist_angle_config_defaults_and_range():
-    from src.core.config import GeneralConfig
+    from frictionsim2d.core.config import GeneralConfig
     g = GeneralConfig(temp=300)
     assert g.twist_angle is None                    # inert by default
     # the twist tolerance knobs have documented defaults
@@ -662,7 +662,7 @@ def test_outer_loop_accepts_scan_angle_and_rejects_unknown_values():
 def test_the_model_does_not_judge_the_angle_split():
     """outer_loop='scan_angle' + scan_angle_force is a conflict only for the
     builders that really split by angle, which this model cannot see. The
-    check is routing-aware and lives in src.run.expand.outer_loop_conflict (pinned
+    check is routing-aware and lives in frictionsim2d.run.expand.outer_loop_conflict (pinned
     by tests/run/test_run.py::TestAngleSplitWithAForceGate); GeneralConfig must
     keep accepting the combination so the builders that honour the gate
     in-script (indent, hetero, flake) still build."""
@@ -672,32 +672,32 @@ def test_the_model_does_not_judge_the_angle_split():
 
 
 def test_damping_ratio_defaults_to_zero():
-    from src.core.config import TipConfig
+    from frictionsim2d.core.config import TipConfig
     assert TipConfig.model_fields['damping_ratio'].default == 0.0
 
 
 def test_optional_channels_defaults_empty():
-    from src.core.config import OutputSettings
+    from frictionsim2d.core.config import OutputSettings
     assert OutputSettings().optional_channels == []
 
 
 def test_optional_channels_accepts_comma_separated_string():
-    from src.core.config import OutputSettings
+    from frictionsim2d.core.config import OutputSettings
     assert OutputSettings(optional_channels='a, b').optional_channels == ['a', 'b']
 
 
 def test_optional_channels_none_becomes_empty_list():
-    from src.core.config import OutputSettings
+    from frictionsim2d.core.config import OutputSettings
     assert OutputSettings(optional_channels=None).optional_channels == []
 
 
 def test_optional_channels_empty_string_becomes_empty_list():
-    from src.core.config import OutputSettings
+    from frictionsim2d.core.config import OutputSettings
     assert OutputSettings(optional_channels='').optional_channels == []
 
 
 def test_optional_channels_list_passes_through():
-    from src.core.config import OutputSettings
+    from frictionsim2d.core.config import OutputSettings
     assert OutputSettings(optional_channels=['raw_pe', 'raw_fz']).optional_channels == \
         ['raw_pe', 'raw_fz']
 
@@ -738,7 +738,7 @@ def test_flake_pot_type_left_at_default_dumps_and_reloads():
     from the sheet's -- the common single-material `[Flake]` case.
     `model_dump_json()` serializes an unset `pot_type` as an explicit
     `"pot_type": null`, not an omitted key, and reloading that dump (what
-    `src.aiida.export.rebuild_set`/spec §4.2 does with a stored
+    `frictionsim2d.aiida.export.rebuild_set`/spec §4.2 does with a stored
     `config.json`) must pass an explicit `None` through the validator, not
     crash on it.
     """
@@ -768,14 +768,14 @@ def test_flake_corner_hold_defaults_off():
 def test_flake_pot_type_invalid_still_raises(monkeypatch):
     """The `None` guard only skips the check for `None` -- an actual bad
     pair style must still be refused."""
-    monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles',
+    monkeypatch.setattr('frictionsim2d.interfaces.lammps.lammps_pair_styles',
                         lambda: frozenset({'sw'}))
     with pytest.raises(ValidationError, match='not a known LAMMPS pair style'):
         FlakeConfig(edge_length=20.0, pot_type='not-a-real-potential')
 
 
 def test_aiida_settings_fields():
-    from src.core.config import AiidaSettings
+    from frictionsim2d.core.config import AiidaSettings
 
     assert set(AiidaSettings.model_fields) == {
         'profile', 'computer_label', 'max_stored_file_mb', 'skip_fraction',
@@ -796,7 +796,7 @@ def test_removed_aiida_and_database_keys_warn_once(tmp_path, caplog):
         'aiida:\n  enabled: true\n  lammps_code_label: lammps@x\n'
         'database:\n  active_profile: central\n  central:\n    host: h\n',
         encoding='utf-8')
-    with caplog.at_level('WARNING', logger='src.core.config'):
+    with caplog.at_level('WARNING', logger='frictionsim2d.core.config'):
         settings = load_settings(settings_file=settings_file)
     assert not hasattr(settings.aiida, 'enabled')
     warnings = [r for r in caplog.records if r.levelname == 'WARNING']
@@ -807,7 +807,7 @@ def test_removed_aiida_and_database_keys_warn_once(tmp_path, caplog):
 def test_database_settings_are_gone():
     """The central database is gone: no `DatabaseSettings`, no `database`
     field; the AiiDA store is the only database."""
-    import src.core.config as config_mod
+    import frictionsim2d.core.config as config_mod
     assert not hasattr(config_mod, 'DatabaseSettings')
     assert not hasattr(config_mod, 'DatabaseProfileSettings')
     assert 'database' not in GlobalSettings.model_fields
@@ -901,7 +901,7 @@ def test_d3_dispersion_settings_defaults():
 
 def test_d3_damping_rejects_non_canonical_token():
     """d3_damping is the canonical name, enum-validated: 'd3bj' is not one."""
-    from src.core.config import PotentialSettings
+    from frictionsim2d.core.config import PotentialSettings
     PotentialSettings(d3_damping='zerom')  # a valid member
     with pytest.raises(ValidationError):
         PotentialSettings(d3_damping='d3bj')
@@ -1108,12 +1108,12 @@ class TestMultilayerMLIPRequiresD3:
         return base
 
     def test_multilayer_mlip_without_d3_is_rejected(self, tmp_path):
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         with pytest.raises(ValidationError, match='(?i)unbound|dispersion'):
             SheetConfig(**self._kwargs(tmp_path, dispersion='none'))
 
     def test_multilayer_mlip_with_d3_is_accepted(self, tmp_path):
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         cfg = SheetConfig(**self._kwargs(tmp_path, dispersion='d3'))
         assert cfg.dispersion == 'd3'
 
@@ -1127,7 +1127,7 @@ class TestMultilayerMLIPRequiresD3:
         Blocking it would have generalised DPA-3's failure to a model that
         does not share it.
         """
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         model = tmp_path / 'mace.json'
         model.write_bytes(b'\x00')
         cfg = SheetConfig(**self._kwargs(
@@ -1141,25 +1141,25 @@ class TestMultilayerMLIPRequiresD3:
         that arm, so the guard must be opt-out-able -- while still firing by
         default so an accidental config cannot waste a campaign.
         """
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         cfg = SheetConfig(**self._kwargs(
             tmp_path, dispersion='none', allow_unbound=True))
         assert cfg.allow_unbound is True
 
     def test_allow_unbound_defaults_to_false(self, tmp_path):
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         cfg = SheetConfig(**self._kwargs(tmp_path, dispersion='d3'))
         assert cfg.allow_unbound is False
 
     def test_single_layer_mlip_without_d3_is_fine(self, tmp_path):
         """One layer has no interlayer gap to get wrong."""
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         cfg = SheetConfig(**self._kwargs(tmp_path, layers=[1], dispersion='none'))
         assert cfg.dispersion == 'none'
 
     def test_classical_multilayer_is_untouched(self, tmp_path):
         """SW sheets are not affected -- their LJ interlayer term is real."""
-        from src.core.config import SheetConfig
+        from frictionsim2d.core.config import SheetConfig
         sw = tmp_path / 'MoS2.sw'
         sw.write_text('# sw\n', encoding='utf-8')
         cfg = SheetConfig(**self._kwargs(tmp_path, pot_type='sw',

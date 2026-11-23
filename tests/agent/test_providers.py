@@ -4,9 +4,9 @@ import pytest
 
 pytest.importorskip('pydantic_ai')
 
-from src.agent.providers import (ProviderUnavailable, build_model,  # noqa: E402
+from frictionsim2d.agent.providers import (ProviderUnavailable, build_model,  # noqa: E402
                                  ollama_models, ollama_status, run_settings)
-from src.agent.settings import AgentSettings  # noqa: E402
+from frictionsim2d.agent.settings import AgentSettings  # noqa: E402
 
 
 def test_gemini_without_key_is_unavailable():
@@ -97,7 +97,7 @@ def test_ollama_status_ready_with_exact_model(monkeypatch):
 
 
 def test_untagged_model_matches_latest():
-    from src.agent.providers import model_installed
+    from frictionsim2d.agent.providers import model_installed
     assert model_installed('mymodel', ['mymodel:latest'])
     assert not model_installed('qwen3:4b', ['qwen3:8b'])
 
@@ -114,12 +114,12 @@ def test_ollama_status_not_ollama(monkeypatch):
 
 
 def test_ollama_binary_prefers_path(tmp_path):
-    from src.agent.providers import ollama_binary
+    from frictionsim2d.agent.providers import ollama_binary
     assert ollama_binary(which=lambda name: '/usr/bin/ollama', home=tmp_path) == '/usr/bin/ollama'
 
 
 def test_ollama_binary_falls_back_to_the_user_install(tmp_path):
-    from src.agent.providers import ollama_binary
+    from frictionsim2d.agent.providers import ollama_binary
     binary = tmp_path / '.local' / 'ollama' / 'bin' / 'ollama'
     binary.parent.mkdir(parents=True)
     binary.write_text('')
@@ -127,12 +127,12 @@ def test_ollama_binary_falls_back_to_the_user_install(tmp_path):
 
 
 def test_ollama_binary_plain_name_when_not_found(tmp_path):
-    from src.agent.providers import ollama_binary
+    from frictionsim2d.agent.providers import ollama_binary
     assert ollama_binary(which=lambda name: None, home=tmp_path) == 'ollama'
 
 
 def test_start_command_is_throttled_and_names_the_binary(tmp_path):
-    from src.agent.providers import ollama_start_command
+    from frictionsim2d.agent.providers import ollama_start_command
     settings = AgentSettings(provider='ollama')
     command = ollama_start_command(settings, which=lambda name: '/opt/x/ollama', home=tmp_path)
     for part in ('OLLAMA_IGPU_ENABLE=1', 'OLLAMA_VULKAN=1', 'OLLAMA_MAX_LOADED_MODELS=1',

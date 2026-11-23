@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src.postprocessing.snapshot_geometry import radial_profile, read_type_groups
+from frictionsim2d.postprocessing.snapshot_geometry import radial_profile, read_type_groups
 
 
 def _grid(n=40, step=1.0):

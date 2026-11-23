@@ -15,11 +15,11 @@ pytestmark = pytest.mark.aiida
 from aiida import orm  # noqa: E402
 from aiida.common.links import LinkType  # noqa: E402
 
-from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.steps import (apply_rulings, clear_all_nodes,  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.steps import (apply_rulings, clear_all_nodes,  # noqa: E402
                              delete_simulation_set, recheck_set)
-from src.postprocessing.integrity_rulings import RULINGS_FILE, point_id  # noqa: E402
-from src.postprocessing.read_data import DataReader  # noqa: E402
+from frictionsim2d.postprocessing.integrity_rulings import RULINGS_FILE, point_id  # noqa: E402
+from frictionsim2d.postprocessing.read_data import DataReader  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
 from tests.helpers.synthetic_results import write_results  # noqa: E402
 from tests.postprocessing.test_integrity import _stack, _write_data  # noqa: E402
@@ -35,7 +35,7 @@ Total wall time: 0:01:05
 @pytest.fixture
 def no_profile_switch(monkeypatch):
     """`aiida_profile_clean` is already loaded; do not load another."""
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
@@ -375,7 +375,7 @@ def test_a_ruling_without_a_source_counts_as_the_own_files(
         aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
     """Ruling Dicts made before `source`/`own_file` existed are withdrawn by
     the own-file pass, as they always were."""
-    from src.aiida import steps
+    from frictionsim2d.aiida import steps
     real = steps._step_input
 
     def legacy(content, kind):
@@ -521,7 +521,7 @@ def test_stage2_failure_keeps_verdicts_and_checks_new_points_provisionally(
     """A run whose window cannot be read must not lower its group's longest
     window: MoS2 keeps `truncated`; the new NbSe2 point is provisional until a
     healthy import re-checks it."""
-    import src.aiida.steps as steps
+    import frictionsim2d.aiida.steps as steps
 
     _legacy_run(tmp_path, 'h-MoS2', n=40)
     _legacy_run(tmp_path, 'h-WS2', n=50)
@@ -581,7 +581,7 @@ def test_explicit_own_rulings_path_counts_a_missing_file_as_empty(
 def test_stage2_failure_falls_back_to_parser_status(aiida_profile_clean,
                                                    no_profile_switch, tmp_path,
                                                    monkeypatch):
-    import src.aiida.steps as steps
+    import frictionsim2d.aiida.steps as steps
 
     def broken(*_args):
         raise OSError('disk gone')
@@ -615,7 +615,7 @@ def test_unreachable_root_withdraws_nothing(aiida_profile_clean, no_profile_swit
 
 def test_provisional_recheck_to_the_same_status_is_not_reported(
         aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
-    import src.aiida.steps as steps
+    import frictionsim2d.aiida.steps as steps
 
     _legacy_run(tmp_path, 'h-MoS2', n=50)
     _legacy_run(tmp_path, 'h-WS2', n=40)
@@ -1388,7 +1388,7 @@ def test_a_moved_root_with_its_rulings_file_settles_in_one_pass(
 
 def test_relative_ledger_sources_are_archived_and_never_read(
         aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
-    from src.aiida.export import _basenamed_ledger
+    from frictionsim2d.aiida.export import _basenamed_ledger
     root = tmp_path / 'sim'
     _tree(root, quarantine=(30.0,))
     import_root(root, label='camp')

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import AFMSimulationConfig, load_settings
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
@@ -46,8 +46,8 @@ def test_hetero_indent_mro_and_split_outer_loops():
     a wrong SPLIT_OUTER_LOOPS here would silently make the GUI promise a job
     count the build never produces (the exact bug class fixed elsewhere on
     this branch)."""
-    from src.builders.afm.hetero import HeteroAFMSimulation, HeteroIndentSimulation
-    from src.builders.afm.indent import IndentSimulation
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation, HeteroIndentSimulation
+    from frictionsim2d.builders.afm.indent import IndentSimulation
 
     mro = [c.__name__ for c in HeteroIndentSimulation.__mro__]
     print("HeteroIndentSimulation MRO:", mro)
@@ -63,15 +63,15 @@ def test_hetero_indent_mro_and_split_outer_loops():
 # --- routing ----------------------------------------------------------------
 
 def test_routing_selects_hetero_indent_for_two_materials():
-    from src.builders.afm.hetero import HeteroIndentSimulation
-    from src.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.builders.afm.hetero import HeteroIndentSimulation
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
     cfg = AFMSimulationConfig(**_indent_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("indent", cfg) is HeteroIndentSimulation
 
 
 def test_routing_keeps_homogeneous_indent_for_single_material():
-    from src.builders.afm.indent import IndentSimulation
-    from src.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.builders.afm.indent import IndentSimulation
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
     raw = _indent_hetero_raw()
     del raw["2D-2"]
     raw["2D"] = raw.pop("2D-1")
@@ -89,7 +89,7 @@ def test_routing_hetero_indent_rejects_finite_sheet():
     treatment -- see test_finite_hetero_indent_aborts_run_simulations below)
     rather than silently building a periodic patch under a name that promises
     edges."""
-    from src.run.simulate import NoHeteroBuilderError, _select_afm_builder_cls
+    from frictionsim2d.run.simulate import NoHeteroBuilderError, _select_afm_builder_cls
     raw = _indent_hetero_raw()
     raw["general"]["finite_sheet"] = True
     raw["sub"]["x"] = 80.0        # finite_sheet AFM requires substrate x/y set
@@ -106,8 +106,8 @@ def test_finite_hetero_indent_aborts_run_simulations_not_skips(tmp_path, monkeyp
     directory created), not swallow it via its per-config broad-except and
     report a misleading "created 0 simulation(s)". Mirrors how
     FreestandingConfigError is proven to hard-abort in test_run.py."""
-    from src.core.config import write_config
-    from src.run.simulate import NoHeteroBuilderError, run_simulations
+    from frictionsim2d.core.config import write_config
+    from frictionsim2d.run.simulate import NoHeteroBuilderError, run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
     raw = _indent_hetero_raw()
@@ -142,8 +142,8 @@ def test_hetero_indent_build_produces_scripts_data_and_pair_token(tmp_path):
     MRO composition actually builds, not just imports. The job name,
     derive_seed input and indent_meta.json must all carry the pair token
     'h-MoS2+h-WS2', not just sheet 1's material."""
-    from src.builders.afm.hetero import HeteroIndentSimulation
-    from src.builders.afm.indent import derive_seed
+    from frictionsim2d.builders.afm.hetero import HeteroIndentSimulation
+    from frictionsim2d.builders.afm.indent import derive_seed
 
     cfg = AFMSimulationConfig(**_indent_hetero_raw(), settings=load_settings())
     cfg.settings.hpc.modules = ["lammps"]   # HPC script gen needs a non-empty module list

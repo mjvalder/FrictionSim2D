@@ -1,6 +1,6 @@
 import pytest
 
-from src import core
+from frictionsim2d import core
 
 
 def test_unknown_attribute_raises_attribute_error_not_import_error():

@@ -3,13 +3,13 @@ import json
 
 import pytest
 
-from src.agent.changes import ToolInputError
-from src.agent.sandbox import SandboxError
-from src.agent.tools import RESULT_LIMIT
-from src.agent.tools.analysis import (find_result_sets, plot_schema, plot_types,
+from frictionsim2d.agent.changes import ToolInputError
+from frictionsim2d.agent.sandbox import SandboxError
+from frictionsim2d.agent.tools import RESULT_LIMIT
+from frictionsim2d.agent.tools.analysis import (find_result_sets, plot_schema, plot_types,
                                       summarise_results)
-from src.postprocessing.plot_config import PLOT_TYPES
-from src.postprocessing.read_data import DataReader
+from frictionsim2d.postprocessing.plot_config import PLOT_TYPES
+from frictionsim2d.postprocessing.read_data import DataReader
 from tests.helpers.agent import make_deps
 from tests.helpers.results_tree import make_family_run, slide_config
 
@@ -164,7 +164,7 @@ def test_plot_types_lists_every_type_with_a_line():
 def test_plot_schema_is_that_types_slice():
     text = plot_schema(None, 'timeseries')
     assert text.startswith('timeseries')
-    assert 'x_axis' in text and 'src.postprocessing' not in text
+    assert 'x_axis' in text and 'frictionsim2d.postprocessing' not in text
     assert 'Optional[' not in text and '|' not in text
     assert 'add_linear_fit' not in text          # a summary-only field
     assert len(plot_schema(None, 'summary')) <= RESULT_LIMIT

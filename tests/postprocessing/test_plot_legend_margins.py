@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from src.postprocessing.plot_config import SummaryPlot  # noqa: E402
-from src.postprocessing.plot_data import Plotter  # noqa: E402
+from frictionsim2d.postprocessing.plot_config import SummaryPlot  # noqa: E402
+from frictionsim2d.postprocessing.plot_data import Plotter  # noqa: E402
 
 
 def _plotter(tmp_path):

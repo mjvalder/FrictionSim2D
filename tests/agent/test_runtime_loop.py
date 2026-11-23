@@ -13,9 +13,9 @@ import pytest
 
 pytest.importorskip('pydantic_ai')
 
-from src.agent.loop import TurnRunner  # noqa: E402
-from src.agent.runtime import AgentSession  # noqa: E402
-from src.agent.settings import AgentSettings  # noqa: E402
+from frictionsim2d.agent.loop import TurnRunner  # noqa: E402
+from frictionsim2d.agent.runtime import AgentSession  # noqa: E402
+from frictionsim2d.agent.settings import AgentSettings  # noqa: E402
 from tests.helpers.agent import make_deps  # noqa: E402
 
 

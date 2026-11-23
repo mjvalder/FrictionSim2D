@@ -24,8 +24,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.controllers.preview import PreviewController, PreviewRequest  # noqa: E402
-from src.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.gui.controllers.preview import PreviewController, PreviewRequest  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 
 def _run_until(signal, timeout_ms: int = 5000) -> list:
@@ -78,7 +78,7 @@ class TestPreviewControllerNeverStaysStuck:
         ever run again -- ``running`` stayed True and the caller (the
         Render button) stayed disabled forever."""
         del qt_app  # only needed to ensure a QApplication exists
-        import src.gui.controllers.preview as preview_module
+        import frictionsim2d.gui.controllers.preview as preview_module
         monkeypatch.setattr(
             preview_module.sys, 'executable',
             '/nonexistent/not-a-real-interpreter-xyz')

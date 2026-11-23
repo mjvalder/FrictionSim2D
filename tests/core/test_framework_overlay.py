@@ -3,7 +3,7 @@
 Named HPC profiles were dropped in the merge (clusters are switched with
 ``--settings-file``); what remains is a per-framework overlay on
 ``HPCSettings`` (``hpc.frameworks``), applied per job group by
-``src.core.config.apply_framework_overlay``. The contract pinned here:
+``frictionsim2d.core.config.apply_framework_overlay``. The contract pinned here:
 
 * an overlay is **additive** for ``modules``/``env_lines`` (a framework still
   needs the cluster's own modules) and **replacing** for ``binary`` (->
@@ -14,7 +14,7 @@ Named HPC profiles were dropped in the merge (clusters are switched with
   same base).
 """
 
-from src.core.config import (
+from frictionsim2d.core.config import (
     FrameworkOverlay,
     GPUSettings,
     HPCSettings,

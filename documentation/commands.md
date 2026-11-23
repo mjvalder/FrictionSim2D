@@ -1,6 +1,6 @@
 # Commands
 
-Complete reference for every CLI command group, mirroring `src/cli.py`.
+Complete reference for every CLI command group, mirroring `frictionsim2d/cli.py`.
 
 For the most current option list, `FrictionSim2D <GROUP> <COMMAND> --help` is always authoritative.
 
@@ -484,7 +484,7 @@ and the verdict the policy selects (`status`, `reasons`, `verdict_kind`,
 `provisional`, `thresholds_version`), then the run tokens, the identity
 columns and the selected summary.
 
-Any other `RunTokens` filter is Python-API only (`src/aiida/query.py`), not
+Any other `RunTokens` filter is Python-API only (`frictionsim2d/aiida/query.py`), not
 exposed as a CLI option.
 
 ### aiida delete
@@ -528,7 +528,7 @@ FrictionSim2D aiida export SET_LABEL [-o OUTPUT] [--profile TEXT] [--force]
 - `--keep-hpc-paths` — do not anonymise hostnames, executables and paths
 
 The AiiDA User email is kept for attribution. Dataset Groups are not included; they
-export separately (`src.aiida.export.export_dataset`, Python only). The stored analysis
+export separately (`frictionsim2d.aiida.export.export_dataset`, Python only). The stored analysis
 results of every dataset built from the set are included (Groups
 `friction2d/analyses/<dataset>`, with the dataset table `Dict`s they read). See
 [aiida.md](aiida.md#9-archives).

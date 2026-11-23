@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from src.hpc.manifest import JobEntry, JobManifest
-from src.hpc.scripts import HPCConfig, HPCScriptGenerator
+from frictionsim2d.hpc.manifest import JobEntry, JobManifest
+from frictionsim2d.hpc.scripts import HPCConfig, HPCScriptGenerator
 
 
 def _config(**overrides) -> HPCConfig:

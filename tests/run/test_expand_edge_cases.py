@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps
-from src.run.naming import output_dir_for
+from frictionsim2d.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps
+from frictionsim2d.run.naming import output_dir_for
 
 ROOT = Path('examples/potentials')
 

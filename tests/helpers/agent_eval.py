@@ -56,7 +56,7 @@ def model_name(env: EvalEnv) -> str:
     """The model the run judges, as the results file names it."""
     if env.provider == FUNCTION_PROVIDER:
         return FUNCTION_PROVIDER
-    from src.agent.settings import AgentSettings  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.agent.settings import AgentSettings  # pylint: disable=import-outside-toplevel
     defaults = AgentSettings()
     if env.model:
         return env.model
@@ -72,10 +72,10 @@ WARM_UP_PROMPT = 'Reply with the single word OK.'
 
 
 def _run(coro):
-    """Run ``coro`` on the process's one event loop (see `src.agent.loop`)."""
+    """Run ``coro`` on the process's one event loop (see `frictionsim2d.agent.loop`)."""
     global _RUNNER  # pylint: disable=global-statement
     if _RUNNER is None:
-        from src.agent.loop import TurnRunner  # pylint: disable=import-outside-toplevel
+        from frictionsim2d.agent.loop import TurnRunner  # pylint: disable=import-outside-toplevel
         _RUNNER = TurnRunner()
     return _RUNNER.run(coro)
 
@@ -102,9 +102,9 @@ def build_session(env: EvalEnv, deps=None):
     unrecorded warm-up turn (`warm_up`), so the model load is not timed.
     """
     # pylint: disable=import-outside-toplevel
-    from src.agent.providers import ProviderUnavailable, build_model, ollama_status
-    from src.agent.runtime import AgentSession
-    from src.agent.settings import AgentSettings
+    from frictionsim2d.agent.providers import ProviderUnavailable, build_model, ollama_status
+    from frictionsim2d.agent.runtime import AgentSession
+    from frictionsim2d.agent.settings import AgentSettings
     if env.provider == FUNCTION_PROVIDER:
         from pydantic_ai.models.function import FunctionModel
         return AgentSession(AgentSettings(), model=FunctionModel(

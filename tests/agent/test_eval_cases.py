@@ -8,15 +8,15 @@ pytest.importorskip('pydantic_ai')
 
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from src.agent.changes import build_changeset  # noqa: E402
-from src.agent.events import TurnEvent  # noqa: E402
-from src.agent.runtime import AgentSession  # noqa: E402
-from src.agent.settings import AgentSettings  # noqa: E402
-from src.agent.tools.knowledge import search_knowledge  # noqa: E402
-from src.agent.tools.materials import lattice_mismatch  # noqa: E402
-from src.agent.tools.materials_db import fetch_2dmatpedia_structure  # noqa: E402
-from src.agent.tools.plots import PlotField, PlotProposalRequest, propose_plot  # noqa: E402
-from src.agent.tools.setup import (AFMSetupRequest, PESSheetSetupRequest,  # noqa: E402
+from frictionsim2d.agent.changes import build_changeset  # noqa: E402
+from frictionsim2d.agent.events import TurnEvent  # noqa: E402
+from frictionsim2d.agent.runtime import AgentSession  # noqa: E402
+from frictionsim2d.agent.settings import AgentSettings  # noqa: E402
+from frictionsim2d.agent.tools.knowledge import search_knowledge  # noqa: E402
+from frictionsim2d.agent.tools.materials import lattice_mismatch  # noqa: E402
+from frictionsim2d.agent.tools.materials_db import fetch_2dmatpedia_structure  # noqa: E402
+from frictionsim2d.agent.tools.plots import PlotField, PlotProposalRequest, propose_plot  # noqa: E402
+from frictionsim2d.agent.tools.setup import (AFMSetupRequest, PESSheetSetupRequest,  # noqa: E402
                                    SheetSetupRequest, make_sweep, setup_afm,
                                    setup_pes_sheet, setup_sheet)
 from tests.agent.evals.cases import (ANGLES, CASES, DATASET, DECLINES, DM_ROWS,  # noqa: E402

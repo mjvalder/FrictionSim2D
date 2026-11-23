@@ -21,9 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.core.config import SheetOnSheetSimulationConfig, load_settings
-from src.core.mlip import is_mlip
+from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
+from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
+from frictionsim2d.core.mlip import is_mlip
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MOS2_CIF = REPO_ROOT / 'examples' / 'materials' / 'h-MoS2.cif'

@@ -1,4 +1,4 @@
-"""Tests for src.builders.hetero.build_matched_supercells.
+"""Tests for frictionsim2d.builders.hetero.build_matched_supercells.
 
 Covers:
 
@@ -23,8 +23,8 @@ import pytest
 from ase import Atoms
 from ase.io import read, write
 
-from src.builders import components
-from src.builders.construction.hetero_stack import (
+from frictionsim2d.builders import components
+from frictionsim2d.builders.construction.hetero_stack import (
     _detect_atom_style,
     _run_lammps,
     assemble_hetero_stack,
@@ -32,8 +32,8 @@ from src.builders.construction.hetero_stack import (
     build_matched_supercells,
     register_hetero_potentials,
 )
-from src.core.config import SheetConfig, SheetOnSheetSimulationConfig, load_settings
-from src.lattice.matching import find_coincidence_lattice
+from frictionsim2d.core.config import SheetConfig, SheetOnSheetSimulationConfig, load_settings
+from frictionsim2d.lattice.matching import find_coincidence_lattice
 
 #: Several tests below reach real LAMMPS through build_hetero_structure's
 #: interface minimisation rather than by calling lmp_serial directly, so they
@@ -605,7 +605,7 @@ def test_lattice_match_config_is_threaded_into_build(tmp_path):
 # cheap CLEAN commensurate cell that exercises the identical code paths.
 
 def test_build_twisted_supercells_shares_one_orthorhombic_box(tmp_path):
-    from src.builders.construction.hetero_stack import build_twisted_supercells
+    from frictionsim2d.builders.construction.hetero_stack import build_twisted_supercells
     mono_a = _build_small_monolayer("h-MoS2", MOS2_CIF, MOS2_POT)
     mono_b = _build_small_monolayer("h-WS2", WS2_CIF, WS2_POT)
     ms = build_twisted_supercells(mono_a, mono_b, workdir=tmp_path, twist_angle=21.8,
@@ -1063,7 +1063,7 @@ def _mos2_wse2(wse2_g=None):
 
 
 def _register(tmp_path, sheets, style, **kwargs):
-    from src.core.config import GlobalSettings
+    from frictionsim2d.core.config import GlobalSettings
     return register_hetero_potentials(
         sheets, GlobalSettings(), workdir=tmp_path,
         interlayer_general=None if style is None else _general(style), **kwargs)

@@ -1,10 +1,10 @@
 """The indent template is on the registry, not its own column list (spec §3 F4)."""
 from pathlib import Path
 
-from src.core.observables import channels_for, rename_map
+from frictionsim2d.core.observables import channels_for, rename_map
 
 TEMPLATE = (Path(__file__).resolve().parents[2]
-            / 'src' / 'templates' / 'afm' / 'indent.lmp')
+            / 'frictionsim2d' / 'templates' / 'afm' / 'indent.lmp')
 
 
 def test_indent_no_longer_hand_rolls_its_fix():

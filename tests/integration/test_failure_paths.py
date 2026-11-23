@@ -18,9 +18,9 @@ from typing import Optional
 
 import pytest
 
-from src.core.config import GlobalSettings
-from src.run.artifacts import generate_package
-from src.run.hpc_dispatch import generate_hpc_scripts_for_root
+from frictionsim2d.core.config import GlobalSettings
+from frictionsim2d.run.artifacts import generate_package
+from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root
 from tests.helpers.examples import EXAMPLES, REPO_ROOT
 
 pytestmark = pytest.mark.integration

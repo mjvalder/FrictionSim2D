@@ -18,7 +18,7 @@
 #     force-distance curve (z_tip, fz_tip, pe per step -> CSV) yields the pull-off
 #     force, work of adhesion and contact stiffness. No sliding.
 #
-# See src/builders/indent.py, src/postprocessing/indent.py and POKE_SIM_RECIPE.md.
+# See frictionsim2d/builders/indent.py, frictionsim2d/postprocessing/indent.py and POKE_SIM_RECIPE.md.
 
 variable        a equal 0.0
 variable        speed equal 2.0

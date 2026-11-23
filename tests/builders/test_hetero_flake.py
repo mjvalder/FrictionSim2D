@@ -34,7 +34,7 @@ def _lammps_atom_types(path):
 
 
 def _flake_sheets(settings):
-    from src.core.config import SheetConfig
+    from frictionsim2d.core.config import SheetConfig
     return [
         SheetConfig(mat="h-MoS2", cif_path=f"{MAT}/h-MoS2.cif", pot_path=f"{POT}/MoS2_wen.sw",
                     pot_type="sw", x=12.0, y=12.0, layers=[1]),
@@ -45,8 +45,8 @@ def _flake_sheets(settings):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_flake_carries_both_materials_types(tmp_path):
-    from src.core.config import load_settings, FlakeConfig
-    from src.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.core.config import load_settings, FlakeConfig
+    from frictionsim2d.builders.construction.components import build_hetero_flake_component
     from ase.io import read
     settings = load_settings()
     flake_cfg = FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0)
@@ -63,8 +63,8 @@ def test_hetero_flake_carries_both_materials_types(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_corner_types_double_every_bilayer_type_and_find_vertices(tmp_path):
-    from src.core.config import load_settings, FlakeConfig
-    from src.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.core.config import load_settings, FlakeConfig
+    from frictionsim2d.builders.construction.components import build_hetero_flake_component
     settings = load_settings()
     path, _ = build_hetero_flake_component(_flake_sheets(settings), settings,
                                            FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0), tmp_path)
@@ -80,8 +80,8 @@ def test_corner_types_double_every_bilayer_type_and_find_vertices(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_register_hetero_flake_potentials_corner_groups(tmp_path):
-    from src.core.config import load_settings
-    from src.builders.construction.hetero_stack import register_hetero_flake_potentials
+    from frictionsim2d.core.config import load_settings
+    from frictionsim2d.builders.construction.hetero_stack import register_hetero_flake_potentials
     settings = load_settings()
     hp = register_hetero_flake_potentials(_flake_sheets(settings), settings, tmp_path)
     # disjoint contiguous blocks
@@ -101,9 +101,9 @@ def test_register_hetero_flake_potentials_corner_groups(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_flake_run0_smoke(tmp_path):
-    from src.core.config import load_settings, FlakeConfig
-    from src.builders.construction.components import build_hetero_flake_component
-    from src.builders.construction.hetero_stack import register_hetero_flake_potentials
+    from frictionsim2d.core.config import load_settings, FlakeConfig
+    from frictionsim2d.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.builders.construction.hetero_stack import register_hetero_flake_potentials
     settings = load_settings()
     path, _ = build_hetero_flake_component(_flake_sheets(settings), settings,
                                            FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0), tmp_path)
@@ -132,9 +132,9 @@ def test_hetero_flake_ilp_splits_chalcogens_like_its_components(tmp_path):
     """Under ilp/tmd the carved flake has each material's S top/bottom types,
     exactly the block flake_1/flake_2 register (both files label S once)."""
     from types import SimpleNamespace
-    from src.core.config import GlobalSettings, FlakeConfig
-    from src.builders.construction.components import build_hetero_flake_component
-    from src.potentials.manager import PotentialManager
+    from frictionsim2d.core.config import GlobalSettings, FlakeConfig
+    from frictionsim2d.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.potentials.manager import PotentialManager
     settings = GlobalSettings()
     general = SimpleNamespace(interlayer_style="ilp", interlayer_file=None)
     sheets = _flake_sheets(settings)

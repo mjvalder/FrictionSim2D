@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import parse_config
-from src.gui.controllers.document import ConfigDocument, DocumentError
+from frictionsim2d.core.config import parse_config
+from frictionsim2d.gui.controllers.document import ConfigDocument, DocumentError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -225,7 +225,7 @@ class TestSecondMaterial:
         added to the second sheet alone rendered on screen and was dropped on
         the way to the file."""
         from dataclasses import replace  # noqa: PLC0415
-        from src.gui.schema import overrides as overrides_module  # noqa: PLC0415
+        from frictionsim2d.gui.schema import overrides as overrides_module  # noqa: PLC0415
 
         second = overrides_module._COMMON['2D-2']
         monkeypatch.setitem(
@@ -249,7 +249,7 @@ class TestSecondMaterial:
         materials of every pair -- so a hand-written one in the second section
         must not be commented as though the form offered it there."""
         from dataclasses import replace  # noqa: PLC0415
-        from src.gui.schema import overrides as overrides_module  # noqa: PLC0415
+        from frictionsim2d.gui.schema import overrides as overrides_module  # noqa: PLC0415
 
         first = overrides_module._COMMON['2D']
         monkeypatch.setitem(
@@ -563,7 +563,7 @@ class TestPairBuiltInTheGui:
         assert document.get('2D-2', 'cif_path').endswith('{mat2}.cif')
 
     def test_the_second_material_actually_varies_across_the_sweep(self, tmp_path):
-        from src.run.expand import expand_config_sweeps
+        from frictionsim2d.run.expand import expand_config_sweeps
 
         document = self._pair_sweep(tmp_path)
         expanded = expand_config_sweeps(document.normalised_values(),
@@ -612,7 +612,7 @@ class TestPairBuiltInTheGui:
                      if k in ConfigDocument.TEMPLATED_KEYS})
 
     def test_the_reversed_order_sweeps_the_second_material_too(self, tmp_path):
-        from src.run.expand import expand_config_sweeps
+        from frictionsim2d.run.expand import expand_config_sweeps
 
         document = self._pair_sweep_reversed(tmp_path)
         expanded = expand_config_sweeps(document.normalised_values(),
@@ -1077,7 +1077,7 @@ class TestExpansion:
         assert document.expansion().configs == 2
 
     def test_outer_loop_scan_angle_multiplies_jobs_for_afm(self, monkeypatch):
-        """The GUI's displayed count follows src.run.expand.count_expansion, which
+        """The GUI's displayed count follows frictionsim2d.run.expand.count_expansion, which
         Task 1 already made generic over which parameter is named by
         outer_loop -- this pins that the GUI side of that plumbing (the
         document -> count_expansion call) actually reflects it, now that the
@@ -1134,7 +1134,7 @@ class TestExpansionOutputDirs:
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         monkeypatch.setattr(
-            'src.gui.controllers.document.expand_config_sweeps',
+            'frictionsim2d.gui.controllers.document.expand_config_sweeps',
             lambda *a, **k: (_ for _ in ()).throw(ValueError('no usable materials')))
         preview = document.expansion_output_dirs()
         assert preview.dirs == []
@@ -1178,7 +1178,7 @@ class TestExpansionOutputDirs:
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         monkeypatch.setattr(
-            'src.gui.controllers.document.expand_config_sweeps',
+            'frictionsim2d.gui.controllers.document.expand_config_sweeps',
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
         preview = document.expansion_output_dirs()
         assert preview.dirs == []
@@ -1237,7 +1237,7 @@ class TestMaterialListTarget:
     wherever the process happened to be launched from -- see the method's
     docstring for why that is worse than mere litter: a stray materials.txt
     in the repo root silently shadows any other config's relatively
-    referenced list (src.core.utils.search_paths tries the name as given,
+    referenced list (frictionsim2d.core.utils.search_paths tries the name as given,
     i.e. against the cwd, before base_dir -- deliberately, so this ordering
     must not change)."""
 

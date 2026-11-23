@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from src.data.provenance import ProvenanceRecord
-from src.run.naming import parse_run_path
-from src.run.tree import discover_runs
+from frictionsim2d.data.provenance import ProvenanceRecord
+from frictionsim2d.run.naming import parse_run_path
+from frictionsim2d.run.tree import discover_runs
 from tools.publication.legacy_provenance import find_legacy_runs, reconstruct
 
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures' / 'legacy_trees'

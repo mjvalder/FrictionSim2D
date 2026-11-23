@@ -1,8 +1,8 @@
 """Setup tools that read the Builder's documents or propose field changes."""
 import pytest
 
-from src.agent.changes import ToolInputError
-from src.agent.tools.setup import (FieldChange, explain_current, find_parameter,
+from frictionsim2d.agent.changes import ToolInputError
+from frictionsim2d.agent.tools.setup import (FieldChange, explain_current, find_parameter,
                                    list_modes, make_sweep, make_sweep_tool,
                                    set_fields, suggest_values)
 from tests.helpers.agent import make_deps
@@ -145,7 +145,7 @@ def test_set_fields_refuses_executed_settings(deps, section, key, value):
 
 
 def test_refused_settings_constant_covers_the_rule(deps):
-    from src.agent.tools.setup import REFUSED_SETTINGS
+    from frictionsim2d.agent.tools.setup import REFUSED_SETTINGS
     for spec in deps.settings_document.sections():
         for spec_field in spec.fields:
             key = spec_field.key
@@ -165,7 +165,7 @@ def test_set_fields_refuses_newlines(deps, scope, section, key, value):
 
 
 def test_compact_cuts_a_single_huge_line():
-    from src.agent.tools import compact
+    from frictionsim2d.agent.tools import compact
     text = compact('x' * 5000 + '\nmore', limit=100)
     assert len(text) <= 100 and text.startswith('x' * 50) and text.endswith('(truncated)')
 
@@ -183,7 +183,7 @@ def test_make_sweep_allows_200():
 
 def test_direct_mode_keeps_the_snapshot_in_step_with_the_gui(deps):
     import copy
-    from src.agent.changes import apply_changeset
+    from frictionsim2d.agent.changes import apply_changeset
     live = copy.deepcopy(deps.document), copy.deepcopy(deps.settings_document)
     deps.direct_apply = True
     set_fields(deps, [FieldChange(section='general', key='scan_speed', value=7)])

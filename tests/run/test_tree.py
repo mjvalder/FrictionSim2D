@@ -1,7 +1,7 @@
 """discover_runs walks a simulation root once and types every run (spec §3 F2)."""
 import json
 
-from src.run.tree import RunLocator, discover_runs, unparseable_runs
+from frictionsim2d.run.tree import RunLocator, discover_runs, unparseable_runs
 
 
 def _write_run(root, rel, family, prov_at_parent=False):

@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.builders.utils.z_vacuum import ZBox, data_atom_z_range
-from src.core.config import GlobalSettings, SheetOnSheetSimulationConfig, read_config
+from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
+from frictionsim2d.builders.utils.z_vacuum import ZBox, data_atom_z_range
+from frictionsim2d.core.config import GlobalSettings, SheetOnSheetSimulationConfig, read_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _BOX = re.compile(r'^region\s+box\s+block(?:\s+\S+){4}\s+(\S+)\s+(\S+)', re.M)
@@ -127,7 +127,7 @@ def test_thick_monolayer_inte_passes(tmp_path, monkeypatch):
 
 
 def test_internal_lj_potentials_report_their_own_range():
-    from src.potentials.utils import internal_pair_cutoff
+    from frictionsim2d.potentials.utils import internal_pair_cutoff
     pots = REPO_ROOT / "examples" / "potentials"
     assert internal_pair_cutoff("rebomos", pots / "rebo" / "MoS.rebomos", 11.0) == \
         pytest.approx(2.5 * 4.2)                          # 2.5 sigma_MM

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from src.gui.controllers.preview import PreviewRequest, cache_key
+from frictionsim2d.gui.controllers.preview import PreviewRequest, cache_key
 
 
 def _sweep_config(materials_txt: Path) -> dict:

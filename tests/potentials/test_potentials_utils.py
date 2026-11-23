@@ -1,4 +1,4 @@
-"""Unit tests for src.potentials.utils.
+"""Unit tests for frictionsim2d.potentials.utils.
 
 Moved verbatim from tests/core/test_utils.py (C-4): these classes exercise
 potential-type vocabulary and resolution, not core.
@@ -6,7 +6,7 @@ potential-type vocabulary and resolution, not core.
 import pytest
 from pathlib import Path
 
-from src.potentials.utils import (
+from frictionsim2d.potentials.utils import (
     KNOWN_TYPES,
     PotentialTypeError,
     get_potential_element_order,
@@ -167,7 +167,7 @@ def test_resolve_pot_type_directory_route_wins_over_extension(tmp_path):
 def test_resolve_pot_type_never_infers_a_variant_style(tmp_path):
     """A 'sw/mod'-shaped directory path never resolves to the variant string
     'sw/mod' — resolve_pot_type matches directory segments individually (it
-    walks the path from its topmost component down, per src/potentials/utils.py's
+    walks the path from its topmost component down, per frictionsim2d/potentials/utils.py's
     resolution-order comment and the already-passing
     tests/run/test_potential_sweep.py::test_directory_inference, which resolves
     'sw/sw_lammps/h-MoS2.sw' to 'sw' the same way), so the topmost 'sw' segment
@@ -195,8 +195,8 @@ class TestCustomPotType:
     """A style the installed LAMMPS lists is accepted even if not in KNOWN_TYPES."""
 
     def test_custom_type_accepted_with_warning(self, monkeypatch, caplog):
-        from src.potentials import utils
-        monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles',
+        from frictionsim2d.potentials import utils
+        monkeypatch.setattr('frictionsim2d.interfaces.lammps.lammps_pair_styles',
                             lambda: frozenset({'sw', 'sw/mod', 'mlip'}))
         with caplog.at_level('WARNING'):
             assert utils.validate_pot_type('mlip', source='x') == 'mlip'
@@ -205,15 +205,15 @@ class TestCustomPotType:
             utils.validate_pot_type('swx', source='x')
 
     def test_no_binary_accepts_with_warning(self, monkeypatch, caplog):
-        from src.potentials import utils
-        monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles', lambda: None)
+        from frictionsim2d.potentials import utils
+        monkeypatch.setattr('frictionsim2d.interfaces.lammps.lammps_pair_styles', lambda: None)
         with caplog.at_level('WARNING'):
             assert utils.validate_pot_type('swx', source='x') == 'swx'
         assert 'swx' in caplog.text
 
     def test_explicit_sweep_route(self, monkeypatch):
-        from src.potentials import utils
-        monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles',
+        from frictionsim2d.potentials import utils
+        monkeypatch.setattr('frictionsim2d.interfaces.lammps.lammps_pair_styles',
                             lambda: frozenset({'mlip'}))
         res = utils.resolve_pot_type({'path': 'a.bin', 'pot_type': 'mlip'}, Path('.'))
         assert res.pot_type == 'mlip'

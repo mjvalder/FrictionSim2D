@@ -2,7 +2,7 @@
 import pandas as pd
 import pytest
 
-from src.postprocessing.read_data import DataReader, read_results_file
+from frictionsim2d.postprocessing.read_data import DataReader, read_results_file
 
 
 def test_reads_by_header_and_renames_through_the_registry(tmp_path):
@@ -26,7 +26,7 @@ def test_legacy_sheet_file_is_corrected_and_marked(tmp_path):
     ``v_fz_tip``) -- using the AFM native name here would leave ``nf``
     unresolved and mask the very column the correction is checked against.
     """
-    from src.postprocessing.read_data import LF_SCHEMA1_CORRECTION
+    from frictionsim2d.postprocessing.read_data import LF_SCHEMA1_CORRECTION
 
     path = tmp_path / 'friction_p1.0_a0_s2.txt'
     # no `schema=` marker -> schema 1; lfx differs from v_sx -> LJ branch
@@ -97,7 +97,7 @@ def test_unknown_family_is_refused(tmp_path):
 
 def test_class_aliases_still_resolve():
     """Eight existing assertions and audit_lf_units.py reach these via the class."""
-    from src.postprocessing import read_data as rd
+    from frictionsim2d.postprocessing import read_data as rd
 
     assert DataReader._LF_SCHEMA1_CORRECTION is rd.LF_SCHEMA1_CORRECTION
     assert DataReader._LF_SCHEMA_CURRENT is rd.LF_SCHEMA_CURRENT
@@ -123,7 +123,7 @@ def test_the_reader_delegates_to_it(tmp_path, monkeypatch):
     method form of the parser, so the delegation is asserted over a real walk."""
     from tests.helpers.results_tree import make_family_run
 
-    import src.postprocessing.read_data as rd
+    import frictionsim2d.postprocessing.read_data as rd
 
     make_family_run(tmp_path, 'afm')
     seen = []
@@ -142,7 +142,7 @@ def test_the_reader_delegates_to_it(tmp_path, monkeypatch):
 def test_layer_columns_are_named_for_the_requested_layer_count(tmp_path):
     """The third parameter is positional-or-keyword, and the map it builds is
     `rename_map`'s own -- not a second copy kept in this module."""
-    from src.core.observables import rename_map
+    from frictionsim2d.core.observables import rename_map
 
     natives = ['v_fz', 'v_xfrict', 'v_yfrict', 'v_comz_L5']
     path = tmp_path / 'friction_p1_a0_s2.txt'

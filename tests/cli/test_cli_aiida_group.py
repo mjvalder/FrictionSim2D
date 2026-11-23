@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from src.cli import cli
+from frictionsim2d.cli import cli
 
 
 class _Report:
@@ -30,9 +30,9 @@ class _Report:
 
 def test_import_passes_label_and_dry_run(tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.ingest.import_root',
+        'frictionsim2d.aiida.ingest.import_root',
         lambda root, label=None, machine=None, profile=None, dry_run=False,
         settings_file=None:
             seen.update(root=Path(root), label=label, machine=machine, profile=profile,
@@ -49,8 +49,8 @@ def test_import_passes_label_and_dry_run(tmp_path, monkeypatch):
 
 
 def test_import_exits_non_zero_on_a_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
-    monkeypatch.setattr('src.aiida.ingest.import_root',
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.ingest.import_root',
                         lambda *a, **k: _Report(ok=False))
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path)])
@@ -59,9 +59,9 @@ def test_import_exits_non_zero_on_a_failure(tmp_path, monkeypatch):
 
 
 def test_import_exits_non_zero_on_unparseable_runs(tmp_path, monkeypatch):
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.ingest.import_root',
+        'frictionsim2d.aiida.ingest.import_root',
         lambda *a, **k: _Report(unparseable=['h_MoS2/broken']))
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path)])
@@ -72,9 +72,9 @@ def test_import_exits_non_zero_on_unparseable_runs(tmp_path, monkeypatch):
 def test_import_dry_run_ignores_unparseable(tmp_path, monkeypatch):
     """R8 fix round 1: --dry-run's unparseable paths must not fail it;
     only a real import treats them as failures."""
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.ingest.import_root',
+        'frictionsim2d.aiida.ingest.import_root',
         lambda *a, **k: _Report(unparseable=['h_MoS2/broken']))
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path), '--dry-run'])
@@ -83,14 +83,14 @@ def test_import_dry_run_ignores_unparseable(tmp_path, monkeypatch):
 
 
 def test_import_reports_a_set_root_mismatch_cleanly(tmp_path, monkeypatch):
-    from src.aiida.ingest import SetRootMismatch
+    from frictionsim2d.aiida.ingest import SetRootMismatch
 
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
 
     def _raise(*_a, **_k):
         raise SetRootMismatch("label 'x' already names a different tree")
 
-    monkeypatch.setattr('src.aiida.ingest.import_root', _raise)
+    monkeypatch.setattr('frictionsim2d.aiida.ingest.import_root', _raise)
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path)])
 
@@ -101,9 +101,9 @@ def test_import_reports_a_set_root_mismatch_cleanly(tmp_path, monkeypatch):
 
 def test_export_results_writes_a_tree(tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.export.export_results',
+        'frictionsim2d.aiida.export.export_results',
         lambda label, dest, profile=None:
             seen.update(label=label, dest=Path(dest), profile=profile)
             or [Path(dest) / 'a.txt'])
@@ -118,12 +118,12 @@ def test_export_results_writes_a_tree(tmp_path, monkeypatch):
 
 
 def test_export_results_reports_an_unknown_label_cleanly(tmp_path, monkeypatch):
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
 
     def _raise(*_a, **_k):
         raise LookupError("no simulation set for label or UUID 'nope'")
 
-    monkeypatch.setattr('src.aiida.export.export_results', _raise)
+    monkeypatch.setattr('frictionsim2d.aiida.export.export_results', _raise)
 
     result = CliRunner().invoke(cli, [
         'aiida', 'export-results', 'nope', str(tmp_path / 'out')])
@@ -135,9 +135,9 @@ def test_export_results_reports_an_unknown_label_cleanly(tmp_path, monkeypatch):
 
 def test_rebuild_calls_rebuild_set(tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.export.rebuild_set',
+        'frictionsim2d.aiida.export.rebuild_set',
         lambda label, dest, profile=None, generate_hpc=False:
             seen.update(label=label, dest=Path(dest), hpc=generate_hpc)
             or ([Path(dest) / 'run'], Path(dest)))
@@ -150,12 +150,12 @@ def test_rebuild_calls_rebuild_set(tmp_path, monkeypatch):
 
 
 def test_rebuild_reports_an_unknown_label_cleanly(tmp_path, monkeypatch):
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
 
     def _raise(*_a, **_k):
         raise LookupError("no simulation set for label or UUID 'nope'")
 
-    monkeypatch.setattr('src.aiida.export.rebuild_set', _raise)
+    monkeypatch.setattr('frictionsim2d.aiida.export.rebuild_set', _raise)
 
     result = CliRunner().invoke(cli, [
         'aiida', 'rebuild', 'nope', '-o', str(tmp_path)])
@@ -184,7 +184,7 @@ def _legacy(path):
 
 def test_stamp_uuid_stamps_and_dry_run_does_not(tmp_path, monkeypatch):
     import json
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', False)   # needs no aiida
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', False)   # needs no aiida
     prov = _legacy(tmp_path / 'afm' / 'L1' / 'provenance.json')
 
     dry = CliRunner().invoke(cli, ['aiida', 'stamp-uuid', str(tmp_path), '--dry-run'])
@@ -212,7 +212,7 @@ def test_stamp_uuid_imports_no_aiida(tmp_path):
     import sys
     _legacy(tmp_path / 'provenance.json')
     code = ('import sys\n'
-            'from src.cli import cli\n'
+            'from frictionsim2d.cli import cli\n'
             f'try:\n    cli(["aiida", "stamp-uuid", {str(tmp_path)!r}])\n'
             'except SystemExit as exc:\n    assert not exc.code, exc.code\n'
             'bad = sorted(m for m in sys.modules if m == "aiida" or m.startswith("aiida."))\n'
@@ -234,8 +234,8 @@ def test_stamp_uuid_exits_1_on_a_non_uuid_run_uuid(tmp_path):
 
 def test_import_takes_the_profile_from_an_explicit_settings_file(tmp_path, monkeypatch):
     seen = {}
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
-    monkeypatch.setattr('src.aiida.ingest.import_root',
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.ingest.import_root',
                         lambda root, **kwargs: seen.update(kwargs) or _Report())
     settings = tmp_path / 'settings.yaml'
     settings.write_text('aiida:\n  profile: from-file\n', encoding='utf-8')

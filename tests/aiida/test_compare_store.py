@@ -8,11 +8,11 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida.calcjob import import_run  # noqa: E402
-from src.aiida.compare import load_blocks  # noqa: E402
-from src.aiida.store import machine_computer  # noqa: E402
-from src.core.compare import VARIES, compare_blocks  # noqa: E402
-from src.run.tree import discover_runs  # noqa: E402
+from frictionsim2d.aiida.calcjob import import_run  # noqa: E402
+from frictionsim2d.aiida.compare import load_blocks  # noqa: E402
+from frictionsim2d.aiida.store import machine_computer  # noqa: E402
+from frictionsim2d.core.compare import VARIES, compare_blocks  # noqa: E402
+from frictionsim2d.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.aiida.test_calcjob_import import (  # noqa: E402
     RUN_UUID, _afm_run, _points, _set_record,

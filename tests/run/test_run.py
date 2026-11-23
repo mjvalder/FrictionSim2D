@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import AFMSimulationConfig, load_settings as real_load_settings
-from src.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps, resolve_lj_override_file
-from src.run.hpc_dispatch import _build_hpc_manifest_entries, collect_hpc_simulation_paths
-from src.run.naming import LAMMPS_LOOP_PARAMS, LOOPABILITY, output_dir_for
-from src.run.simulate import run_simulations
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings as real_load_settings
+from frictionsim2d.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps, resolve_lj_override_file
+from frictionsim2d.run.hpc_dispatch import _build_hpc_manifest_entries, collect_hpc_simulation_paths
+from frictionsim2d.run.naming import LAMMPS_LOOP_PARAMS, LOOPABILITY, output_dir_for
+from frictionsim2d.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -128,24 +128,24 @@ class TestRoutingViewMatchesTheModel:
         }
 
     def test_a_false_string_is_not_a_finite_sheet(self):
-        from src.builders.afm.hetero import HeteroAFMSimulation
-        from src.run.expand import _builder_cls_for_count
+        from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
+        from frictionsim2d.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw('false'), 'afm') is HeteroAFMSimulation
 
     def test_a_true_string_still_routes_to_the_finite_builder(self):
-        from src.builders.afm.hetero import FiniteHeteroAFMSimulation
-        from src.run.expand import _builder_cls_for_count
+        from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation
+        from frictionsim2d.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw('true'), 'afm') is FiniteHeteroAFMSimulation
 
     def test_a_real_bool_is_unaffected(self):
-        from src.builders.afm.hetero import (
+        from frictionsim2d.builders.afm.hetero import (
             FiniteHeteroAFMSimulation, HeteroAFMSimulation,
         )
-        from src.run.expand import _builder_cls_for_count
+        from frictionsim2d.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw(False), 'afm') is HeteroAFMSimulation
@@ -156,8 +156,8 @@ class TestRoutingViewMatchesTheModel:
         """An empty `.ini` key reads as None, but a blank string reaching the
         view (a half-typed GUI field, a JSON config) must not route a
         single-material sheet config to the hetero builder."""
-        from src.builders.sheetonsheet import SheetOnSheetSimulation
-        from src.run.expand import _builder_cls_for_count
+        from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
+        from frictionsim2d.run.expand import _builder_cls_for_count
 
         raw = {'general': {'temp': 300, 'twist_angle': ''}, '2D': {'mat': 'h-MoS2'}}
         assert _builder_cls_for_count(raw, 'sheetonsheet') is SheetOnSheetSimulation
@@ -177,7 +177,7 @@ class TestAngleSplitWithAForceGate:
 
     @staticmethod
     def _write(raw, tmp_path, name):
-        from src.core.config import write_config
+        from frictionsim2d.core.config import write_config
         raw['general']['scan_angle'] = [0, 30]
         raw['general']['scan_angle_force'] = 30
         raw['general']['outer_loop'] = 'scan_angle'
@@ -187,7 +187,7 @@ class TestAngleSplitWithAForceGate:
         """The AFM slide really does split, so this one is the conflict --
         and it must be refused before the geometry build, not from
         write_inputs with a half-written tree already on disk."""
-        from src.core.config import parse_config
+        from frictionsim2d.core.config import parse_config
 
         monkeypatch.chdir(REPO_ROOT)
         raw = parse_config(EXAMPLES / 'afm_flake_config.ini')
@@ -203,7 +203,7 @@ class TestAngleSplitWithAForceGate:
     def test_the_indent_still_builds(self, tmp_path, monkeypatch):
         """IndentSimulation never splits by angle (SPLIT_OUTER_LOOPS), so the
         combination is inert there -- it built before and must keep building."""
-        from src.core.config import parse_config
+        from frictionsim2d.core.config import parse_config
 
         monkeypatch.chdir(REPO_ROOT)
         raw = parse_config(EXAMPLES / 'indent_config.ini')
@@ -218,8 +218,8 @@ class TestAngleSplitWithAForceGate:
     def test_a_hetero_sheet_config_still_builds(self, tmp_path, monkeypatch):
         """The hetero slide ignores outer_loop and honours the gate in-script,
         so a stray outer_loop next to a real gate must not fail the build."""
-        from src.core.config import parse_config  # noqa: F401  (parity with above)
-        from src.core.config import write_config
+        from frictionsim2d.core.config import parse_config  # noqa: F401  (parity with above)
+        from frictionsim2d.core.config import write_config
 
         monkeypatch.chdir(REPO_ROOT)
         sheet_1 = {
@@ -307,7 +307,7 @@ class TestLoadedSlideRequiresAPressure:
         ("FlakeSlideSimulation", "_flake"),
     ])
     def test_missing_pressure_names_the_section_key(self, builder, make, pressure):
-        from src.run.expand import missing_pressure
+        from frictionsim2d.run.expand import missing_pressure
 
         raw = getattr(self, make)()
         if pressure is not None:
@@ -319,7 +319,7 @@ class TestLoadedSlideRequiresAPressure:
 
     @pytest.mark.parametrize("make", ["_hetero", "_flake"])
     def test_a_set_pressure_passes(self, make):
-        from src.run.expand import missing_pressure
+        from frictionsim2d.run.expand import missing_pressure
 
         assert missing_pressure(getattr(self, make)(pressure=0.5), 'sheetonsheet') is None
         assert missing_pressure(getattr(self, make)(pressure=[0.1, 1]), 'sheetonsheet') is None
@@ -328,7 +328,7 @@ class TestLoadedSlideRequiresAPressure:
         """A zero-load COF is as meaningless on the plain slide, which also
         rendered ``pressure equal None`` (a LAMMPS error) on its single-script
         path."""
-        from src.run.expand import missing_pressure
+        from frictionsim2d.run.expand import missing_pressure
 
         plain = {'2D': dict(self._SHEET), 'general': {'temp': 300}}
         msg = missing_pressure(plain, 'sheetonsheet')
@@ -339,21 +339,21 @@ class TestLoadedSlideRequiresAPressure:
 
     def test_pes_sheet_is_not_refused(self):
         """Both sheet PES scans subclass a slide builder but apply no load."""
-        from src.run.expand import missing_pressure
+        from frictionsim2d.run.expand import missing_pressure
 
         assert missing_pressure(self._hetero(), 'pes_sheet') is None
         plain = {'2D': dict(self._SHEET), 'general': {'temp': 300}}
         assert missing_pressure(plain, 'pes_sheet') is None
 
     def test_the_sheet_example_fixture_has_a_pressure(self):
-        from src.core.config import parse_config
-        from src.run.expand import missing_pressure
+        from frictionsim2d.core.config import parse_config
+        from frictionsim2d.run.expand import missing_pressure
 
         raw = parse_config(EXAMPLES / 'sheet_config.ini')
         assert missing_pressure(raw, 'sheetonsheet') is None
 
     def test_run_simulations_refuses_before_anything_is_built(self, tmp_path, monkeypatch):
-        from src.core.config import write_config
+        from frictionsim2d.core.config import write_config
 
         monkeypatch.chdir(REPO_ROOT)
         config_path = write_config(self._flake(), tmp_path / 'flake_noload.ini')
@@ -489,7 +489,7 @@ class TestUnclassifiedGeneralListRaises:
 
     def test_twist_angle_list_raises(self):
         """The reviewer's own example (run.md finding 17): twist_angle is a
-        real config field (src/core/config.py) with no LOOPABILITY entry, so
+        real config field (frictionsim2d/core/config.py) with no LOOPABILITY entry, so
         a list value must be refused rather than silently building
         twist_angle=[0,15,30] into a single overwritten directory."""
         base_config = _minimal_sheet_base_config(twist_angle=[0, 15, 30])
@@ -744,7 +744,7 @@ class TestOrderedPairSweeps:
     def test_the_shipped_pair_sweep_still_expands(self, monkeypatch) -> None:
         """examples/hetero_pair_sweep.ini is the correctly-templated reference:
         three distinct ordered pairs, unaffected by the guard."""
-        from src.core.config import parse_config
+        from frictionsim2d.core.config import parse_config
 
         monkeypatch.chdir(REPO_ROOT)
         out = expand_config_sweeps(parse_config(EXAMPLES / 'hetero_pair_sweep.ini'))
@@ -756,7 +756,7 @@ class TestOrderedPairSweeps:
             self, tmp_path: Path) -> None:
         """The GUI filters expansion notes on the literal '[2D] materials_list'
         prefix (app.py); a numbered-only primary section must not change it."""
-        from src.run.expand import count_expansion
+        from frictionsim2d.run.expand import count_expansion
 
         listing = tmp_path / 'mats.csv'
         listing.write_text('h-MoS2\n', encoding='utf-8')
@@ -937,8 +937,8 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     settings.hpc.lammps_scripts = ["slide.in"]
     settings.hpc.modules = ["lammps", "openmpi"]
 
-    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr("frictionsim2d.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("frictionsim2d.run.simulate.load_settings", lambda **_kwargs: settings)
 
     calls = {"build": 0, "base": 0}
     seen_output_dirs: list[Path] = []
@@ -964,7 +964,7 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
             (lammps_dir / "system.in").write_text("", encoding="utf-8")
             (lammps_dir / "slide.in").write_text("", encoding="utf-8")
 
-    monkeypatch.setattr("src.run.simulate.AFMSimulation", FakeAFMBuilder)
+    monkeypatch.setattr("frictionsim2d.run.simulate.AFMSimulation", FakeAFMBuilder)
 
     created, root, configs, returned_settings = run_simulations(
         config_file=str(config_file),
@@ -1020,8 +1020,8 @@ def test_run_simulations_afm_upgrades_slide_only_defaults(
     settings = real_load_settings()
     settings.hpc.lammps_scripts = ["slide.in"]
 
-    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr("frictionsim2d.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("frictionsim2d.run.simulate.load_settings", lambda **_kwargs: settings)
 
     class FakeAFMBuilder:
         def __init__(self, config, output_dir, config_path=None):
@@ -1036,7 +1036,7 @@ def test_run_simulations_afm_upgrades_slide_only_defaults(
         def build(self):
             pass
 
-    monkeypatch.setattr("src.run.simulate.AFMSimulation", FakeAFMBuilder)
+    monkeypatch.setattr("frictionsim2d.run.simulate.AFMSimulation", FakeAFMBuilder)
 
     _created, _root, _configs, returned_settings = run_simulations(
         config_file=str(config_file),
@@ -1073,8 +1073,8 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
     settings = real_load_settings()
     settings.hpc.lammps_scripts = ["system.in", "slide.in"]
 
-    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr("frictionsim2d.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("frictionsim2d.run.simulate.load_settings", lambda **_kwargs: settings)
 
     seen_configs: list = []
 
@@ -1092,7 +1092,7 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
         def build(self):
             pass
 
-    monkeypatch.setattr("src.run.simulate.SheetOnSheetSimulation", FakeSheetBuilder)
+    monkeypatch.setattr("frictionsim2d.run.simulate.SheetOnSheetSimulation", FakeSheetBuilder)
 
     _created, _root, configs, returned_settings = run_simulations(
         config_file=str(config_file),
@@ -1104,7 +1104,7 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
     assert len(configs) == 1   # real expand_config_sweeps: no list values here to sweep
     assert returned_settings.hpc.lammps_scripts == ["slide.in"]
 
-    from src.core.config import SheetOnSheetSimulationConfig
+    from frictionsim2d.core.config import SheetOnSheetSimulationConfig
     assert isinstance(seen_configs[0], SheetOnSheetSimulationConfig)
     assert seen_configs[0].sheet.mat == "MoS2"
 
@@ -1127,8 +1127,8 @@ def test_run_simulations_continues_after_build_failure(
     base_dict["general"]["temp"] = [300.0, 350.0]
 
     settings = real_load_settings()
-    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr("frictionsim2d.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("frictionsim2d.run.simulate.load_settings", lambda **_kwargs: settings)
 
     call_counter = {"builds": 0}
     seen_temps: list[float] = []
@@ -1149,7 +1149,7 @@ def test_run_simulations_continues_after_build_failure(
             if call_counter["builds"] == 1:
                 raise RuntimeError("boom")
 
-    monkeypatch.setattr("src.run.simulate.AFMSimulation", FlakyAFMBuilder)
+    monkeypatch.setattr("frictionsim2d.run.simulate.AFMSimulation", FlakyAFMBuilder)
 
     created, _root, configs, _returned_settings = run_simulations(
         config_file=str(config_file),
@@ -1175,9 +1175,9 @@ def test_run_simulations_raises_for_missing_config_file(tmp_path: Path) -> None:
 
 
 def test_pes_tip_no_substrate_selects_freestanding_builder():
-    from src.run.simulate import _select_afm_builder_cls
-    from src.builders.afm.freestanding import FreestandingPESTipSimulation
-    from src.builders.afm.pes_tip import PESTipSimulation
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.builders.afm.freestanding import FreestandingPESTipSimulation
+    from frictionsim2d.builders.afm.pes_tip import PESTipSimulation
 
     class _Cfg:  # minimal stand-in with the only attribute the selector reads
         sub = None
@@ -1189,7 +1189,7 @@ def test_pes_tip_no_substrate_selects_freestanding_builder():
 
 
 def test_afm_no_substrate_raises():
-    from src.run.simulate import _select_afm_builder_cls
+    from frictionsim2d.run.simulate import _select_afm_builder_cls
     import pytest
     class _Cfg:
         sub = None
@@ -1208,7 +1208,7 @@ class TestMaterialListIsNotLostSilently:
         }
 
     def test_a_non_txt_path_is_reported(self, tmp_path):
-        from src.run.expand import count_expansion
+        from frictionsim2d.run.expand import count_expansion
 
         listing = tmp_path / 'mats.csv'
         listing.write_text('h-MoS2\n', encoding='utf-8')
@@ -1218,7 +1218,7 @@ class TestMaterialListIsNotLostSilently:
         assert any('.txt' in note for note in summary.notes)
 
     def test_a_txt_path_produces_no_note(self, tmp_path):
-        from src.run.expand import count_expansion
+        from frictionsim2d.run.expand import count_expansion
 
         listing = tmp_path / 'mats.txt'
         listing.write_text('h-MoS2\n', encoding='utf-8')

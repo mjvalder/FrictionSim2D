@@ -19,7 +19,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.preview.assemble import AssembledSystem, ComponentSlice  # noqa: E402
+from frictionsim2d.gui.preview.assemble import AssembledSystem, ComponentSlice  # noqa: E402
 
 
 @pytest.fixture(scope='module', name='qt_app')
@@ -42,7 +42,7 @@ def two_component_system():
 
 @pytest.fixture
 def panel(qt_app, monkeypatch):
-    from src.gui.preview import viewport as vp
+    from frictionsim2d.gui.preview import viewport as vp
     monkeypatch.setattr(vp.ViewportPanel, '_update_pipeline', lambda self: None)
     monkeypatch.setattr(vp.ViewportPanel, '_ensure_widget', lambda self: None)
     return vp.ViewportPanel()
@@ -81,7 +81,7 @@ def live_panel(qt_app, monkeypatch):
     about -- rather than the pipeline-construction branch, which imports real
     ``ovito.pipeline`` classes.
     """
-    from src.gui.preview import viewport as vp
+    from frictionsim2d.gui.preview import viewport as vp
     monkeypatch.setattr(vp.ViewportPanel, '_ensure_widget', lambda self: None)
     monkeypatch.setattr(vp, 'build_data_collection',
                         lambda subset, colours=None, radii=None: object())
@@ -116,7 +116,7 @@ def test_unknown_last_cell_owes_a_reframe_even_if_marked_framed(panel, two_compo
     `_frame_and_refresh`; if they ever disagree (`_framed` True but no
     `_last_cell` on record -- the `_UNFRAMED` sentinel), that is an unknown
     state and must not be silently trusted as "already correctly framed"."""
-    from src.gui.preview.viewport import _UNFRAMED
+    from frictionsim2d.gui.preview.viewport import _UNFRAMED
 
     panel.show_system(two_component_system)
     panel._framed = True
@@ -211,7 +211,7 @@ def test_cell_less_system_does_not_reframe_on_recolour(live_panel, monkeypatch):
     assert panel._framed
 
     reframes = []
-    from src.gui.preview import viewport as vp
+    from frictionsim2d.gui.preview import viewport as vp
     monkeypatch.setattr(vp.ViewportPanel, '_frame_and_refresh',
                         lambda self: reframes.append(1))
     panel._apply_colours()

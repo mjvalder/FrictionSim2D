@@ -12,8 +12,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from src.agent.changes import Op, build_changeset  # noqa: E402
-from src.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.agent.changes import Op, build_changeset  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,7 +28,7 @@ def _make_window(qt_app, tmp_path, monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'cfg'))
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
-    from src.gui.app import MainWindow
+    from frictionsim2d.gui.app import MainWindow
     made = []
 
     def no_modal(text):
@@ -67,7 +67,7 @@ def test_dock_is_hidden_and_unbuilt_at_startup(window):
 
 
 def test_window_hands_the_pane_a_real_ollama_server(window):
-    from src.agent.ollama_server import OllamaServer
+    from frictionsim2d.agent.ollama_server import OllamaServer
     window.assistant_button.click()
     pane = window._assistant_pane  # pylint: disable=protected-access
     assert isinstance(pane._server, OllamaServer)  # pylint: disable=protected-access
@@ -221,7 +221,7 @@ def test_model_change_resyncs_selectors(window, monkeypatch):
 
 
 def test_fs_card_applies_and_leaves_the_strip(window):
-    from src.agent.changes import build_fs_changeset
+    from frictionsim2d.agent.changes import build_fs_changeset
     pane = _open_assistant(window)
     change = build_fs_changeset(window.assistant_deps(), 'mk', [('mkdir', 'materials')])
     pane.receive_proposal(change)  # file operations ask even in direct mode
@@ -439,7 +439,7 @@ def test_stale_direct_apply_is_rechecked_and_applied(window):
 
 
 def test_tool_input_error_is_a_red_line_and_changes_nothing(window):
-    from src.agent.changes import ChangeSet
+    from frictionsim2d.agent.changes import ChangeSet
     pane = _open_assistant(window)
     before = dict(window.document.values.get('2D') or {})
     change = ChangeSet(id='bad001', title='bad path', notes=[], base_fingerprint='stale',
@@ -451,7 +451,7 @@ def test_tool_input_error_is_a_red_line_and_changes_nothing(window):
 
 
 def test_ask_switch_is_persisted(window, tmp_path):
-    from src.agent.settings import load_agent_settings
+    from frictionsim2d.agent.settings import load_agent_settings
     pane = _open_assistant(window)
     pane.ask_box.setChecked(True)
     assert load_agent_settings().ask_before_apply is True
@@ -516,7 +516,7 @@ def test_switch_uses_the_new_workspaces_width(window, monkeypatch, tmp_path):
 
 
 def test_switch_to_a_fresh_workspace_resets_the_width(window, monkeypatch, tmp_path):
-    from src.gui.app import ASSISTANT_DEFAULT_WIDTH
+    from frictionsim2d.gui.app import ASSISTANT_DEFAULT_WIDTH
     window.show()
     _open_assistant(window)
     _drag_dock_to(window, 300)
@@ -549,7 +549,7 @@ def test_reshowing_the_window_keeps_a_recent_drag(window):
 def test_a_failing_build_shows_an_error_in_the_dock(qt_app, tmp_path, monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'cfg'))
-    from src.gui.app import MainWindow
+    from frictionsim2d.gui.app import MainWindow
     Workspace.open(tmp_path / 'ws').remember('assistant', {'open': True, 'width': 300})
 
     def broken():
@@ -644,7 +644,7 @@ def test_direct_change_while_the_user_is_editing_waits_as_a_card(window):
 
 
 def test_user_busy_counts_refusals_and_form_focus(window, monkeypatch):
-    from src.gui.app import MainWindow
+    from frictionsim2d.gui.app import MainWindow
     busy = MainWindow._default_user_busy.__get__(window)  # the real predicate  # pylint: disable=protected-access
     assert not busy()
     monkeypatch.setattr(window.form, 'refusals', lambda: ['[general] temp: refused'])
@@ -700,7 +700,7 @@ def _plot_window(window):
 
 
 def _plot(window, datasets=('campaign',), plot_type='summary', fields=None):
-    from src.agent.plot_changes import build_plot_change
+    from frictionsim2d.agent.plot_changes import build_plot_change
     return build_plot_change(window.assistant_deps(), 'plot', plot_type,
                              fields or {'y_axis': 'cof'}, list(datasets))
 
@@ -819,7 +819,7 @@ def test_second_plot_of_a_direct_turn_applies_after_the_first_was_held(window):
     pane = _open_assistant(window)
     deps = window.assistant_deps()
     deps.direct_apply = True
-    from src.agent.plot_changes import build_plot_change
+    from frictionsim2d.agent.plot_changes import build_plot_change
     first = build_plot_change(deps, 'one', 'summary', {}, ['campaign'])
     deps.propose(first)  # the snapshot now says campaign is loaded
     second = build_plot_change(deps, 'two', 'timeseries', {}, ['campaign'])
@@ -890,7 +890,7 @@ def test_saving_the_config_keeps_the_plot_undo(window, monkeypatch, tmp_path):
 
 
 def test_an_invalid_plot_being_edited_does_not_break_the_turn_or_the_apply(window):
-    from src.gui.controllers.plot_document import COMMON_SECTION
+    from frictionsim2d.gui.controllers.plot_document import COMMON_SECTION
     renders = _plot_window(window)
     pane = _open_assistant(window)
     window.plots_pane.add_plot('summary')

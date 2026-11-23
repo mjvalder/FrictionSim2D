@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.afm import AFMSimulation
-from src.core.config import AFMSimulationConfig, load_settings
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MATERIALS = REPO_ROOT / 'examples' / 'materials'
@@ -249,7 +249,7 @@ def test_amorphous_substrate_is_refused_under_an_mlip(tmp_path):
 @pytest.mark.parametrize('mode', ['atom_bonds', 'com_spring'])
 def test_constraint_modes_are_rejected_with_an_mlip_sheet(tmp_path, mode):
     """Still refused -- but a partitioned AFM cell now fails one rule earlier."""
-    from src.core.mlip import validate_mlip_cell
+    from frictionsim2d.core.mlip import validate_mlip_cell
 
     config = make_config(tmp_path, _deepmd_sheet(tmp_path))
     config.settings.simulation.constraint_mode = mode

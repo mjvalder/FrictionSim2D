@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.postprocessing.slip_analysis import detect_slips, window_stats
+from frictionsim2d.postprocessing.slip_analysis import detect_slips, window_stats
 
 
 def _sawtooth(n_teeth=20, pts_per_tooth=50):
@@ -56,7 +56,7 @@ def _sawtooth_trace(n=200, teeth=10):
 def test_the_field_is_named_for_what_it_computes():
     """`asymmetry` was documented as a rise/fall ratio and returned the mean
     number of SAMPLES between events. The name is now the computation."""
-    from src.postprocessing.slip_analysis import SlipResult
+    from frictionsim2d.postprocessing.slip_analysis import SlipResult
 
     assert 'asymmetry' not in SlipResult.__dataclass_fields__
     assert 'mean_interval_samples' in SlipResult.__dataclass_fields__

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.postprocessing.plot_derived import add_plot_derived_columns
+from frictionsim2d.postprocessing.plot_derived import add_plot_derived_columns
 
 
 def test_add_plot_derived_columns_produces_finite_core_fields() -> None:
@@ -74,7 +74,7 @@ def test_lf_sx_sy_and_lf_fx_fy_from_native_names_still_works() -> None:
 
 
 def test_linear_fit_recovers_a_known_slope():
-    from src.postprocessing.plot_derived import linear_fit
+    from frictionsim2d.postprocessing.plot_derived import linear_fit
 
     x = np.array([0.0, 10.0, 20.0, 30.0])
     y = 0.2 * x + 1.0
@@ -89,7 +89,7 @@ def test_linear_fit_recovers_a_known_slope():
 
 
 def test_linear_fit_refuses_a_single_point():
-    from src.postprocessing.plot_derived import linear_fit
+    from frictionsim2d.postprocessing.plot_derived import linear_fit
 
     assert linear_fit(np.array([1.0]), np.array([1.0])) is None
 
@@ -98,7 +98,7 @@ def test_cof_slope_is_named_for_what_it_is():
     """The regression slope of LF vs NF is NOT the COF -- the COF is
     mean(LF)/mean(NF) from summarise_run. Plotting the slope under the label
     'COF' put two different quantities on one axis."""
-    from src.postprocessing.plot_derived import cof_slope
+    from frictionsim2d.postprocessing.plot_derived import cof_slope
 
     nf = np.array([0.0, 10.0, 20.0, 30.0])
     lf = 0.15 * nf
@@ -111,7 +111,7 @@ def test_cof_slope_is_named_for_what_it_is():
 
 
 def test_cof_slope_of_an_unfittable_series_is_nan():
-    from src.postprocessing.plot_derived import cof_slope
+    from frictionsim2d.postprocessing.plot_derived import cof_slope
 
     out = cof_slope(np.array([1.0]), np.array([1.0]))
 
@@ -121,8 +121,8 @@ def test_cof_slope_of_an_unfittable_series_is_nan():
 
 
 def test_the_mixin_still_delegates_with_its_old_signature(tmp_path):
-    from src.postprocessing.plot_data import Plotter
-    from src.postprocessing.plot_derived import linear_fit
+    from frictionsim2d.postprocessing.plot_data import Plotter
+    from frictionsim2d.postprocessing.plot_derived import linear_fit
 
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
     x = np.array([0.0, 10.0, 20.0])

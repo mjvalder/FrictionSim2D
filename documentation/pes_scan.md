@@ -111,7 +111,7 @@ material, merge key `material` — and, with `--grid-dir`, the tidied grids unde
 | `pes_eta` | `2π²·U / (K·a²)`, the dimensionless PT friction parameter |
 | `pes_fmax` (tip only) | `max‖(fx, fy)‖`, peak lateral static-friction force |
 
-The descriptor maths lives in [`src/postprocessing/pes_scan.py`](../src/postprocessing/pes_scan.py).
+The descriptor maths lives in [`frictionsim2d/postprocessing/pes_scan.py`](../frictionsim2d/postprocessing/pes_scan.py).
 
 ## Related docs
 

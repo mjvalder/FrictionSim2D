@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from src.agent.changes import ToolInputError
-from src.agent.tools.materials import (build_index, elements_of, folder_material_ops, lattice_mismatch,
+from frictionsim2d.agent.changes import ToolInputError
+from frictionsim2d.agent.tools.materials import (build_index, elements_of, folder_material_ops, lattice_mismatch,
                                        material_ops, potential_type_of, resolve_material,
                                        search_potentials, search_structures)
-from src.agent.tools.setup import AFMSetupRequest, setup_afm
-from src.core.config import LatticeMatchConfig
-from src.core.utils.structures import cifread
+from frictionsim2d.agent.tools.setup import AFMSetupRequest, setup_afm
+from frictionsim2d.core.config import LatticeMatchConfig
+from frictionsim2d.core.utils.structures import cifread
 from tests.helpers.agent import EXAMPLES, make_deps
 
 
@@ -222,6 +222,6 @@ def test_a_potential_folder_is_named_as_such_and_says_to_ask(deps):
 
 
 def test_a_missing_structure_says_to_ask_and_explains_amorphous(deps):
-    from src.agent.tools.materials import resolve_material
+    from frictionsim2d.agent.tools.materials import resolve_material
     with pytest.raises(ToolInputError, match='built amorphous.*ask the user'):
         resolve_material(deps, 'amorphous Si', 'sw')

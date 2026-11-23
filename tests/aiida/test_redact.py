@@ -2,7 +2,7 @@
 2026-09-22 review round 2: broaden candidate detection, fail closed on an
 unparsable candidate).
 
-`src.aiida.data.redact` needs no AiiDA profile -- it is plain YAML/JSON/INI
+`frictionsim2d.aiida.data.redact` needs no AiiDA profile -- it is plain YAML/JSON/INI
 handling plus a `repository`-shaped stub -- but lives under `tests/aiida/`
 next to the store tests it protects, and skips itself the same way they do
 so it never runs in an environment without aiida-core installed.
@@ -18,7 +18,7 @@ import yaml
 pytest.importorskip('aiida')
 pytestmark = pytest.mark.aiida
 
-from src.aiida.data.redact import (  # noqa: E402
+from frictionsim2d.aiida.data.redact import (  # noqa: E402
     UnparsableDocumentError, is_settings_or_config_document,
     sanitize_document_bytes, stage_file,
 )

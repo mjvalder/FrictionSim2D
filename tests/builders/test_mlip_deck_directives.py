@@ -25,10 +25,10 @@ from pathlib import Path
 
 import pytest
 
-from src.core.mlip import get_mlip
+from frictionsim2d.core.mlip import get_mlip
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TEMPLATES = REPO_ROOT / 'src' / 'templates'
+TEMPLATES = REPO_ROOT / 'frictionsim2d' / 'templates'
 
 #: Generation-time templates: LAMMPS runs FrictionSim2D performs *while
 #: building* (stacking layers, assembling hetero/flake cells, amorphising).
@@ -127,7 +127,7 @@ MACE_MODEL_JSON = (
 
 def _afm_mlip_config(tmp_path):
     """A minimal all-MACE AFM cell: Si tip + lattice-matched Si sub + MoS2."""
-    from src.core.config import write_config
+    from frictionsim2d.core.config import write_config
 
     model = tmp_path / 'mace-test-Mo-S-Si.json'
     model.write_text(MACE_MODEL_JSON, encoding='utf-8')
@@ -158,7 +158,7 @@ def test_generated_afm_family_deck_carries_the_directives(model_name, tmp_path,
     key broke every one of them -- and the template's `| default([])` meant the
     build still reported success.
     """
-    from src.run.simulate import run_simulations
+    from frictionsim2d.run.simulate import run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
     created, _, _, _ = run_simulations(
@@ -185,8 +185,8 @@ def test_generated_classical_deck_is_unchanged(tmp_path, monkeypatch):
     (`{mat}` placeholders, a `materials_list` path relative to a working dir,
     and a 4-element scan_angle sweep spec) and is not directly runnable.
     """
-    from src.core.config import write_config
-    from src.run.simulate import run_simulations
+    from frictionsim2d.core.config import write_config
+    from frictionsim2d.run.simulate import run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
     mats = REPO_ROOT / 'examples' / 'materials'
@@ -289,7 +289,7 @@ def test_decomposition_commands_are_gated_on_mlip_sheet(rel):
 def test_generated_afm_family_deck_omits_tiled(model_name, tmp_path,
                                                monkeypatch):
     """The AFM family shares `system_init.lmp`, so one gap broke all three."""
-    from src.run.simulate import run_simulations
+    from frictionsim2d.run.simulate import run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
     created, _, _, _ = run_simulations(
@@ -307,8 +307,8 @@ def test_generated_afm_family_deck_omits_tiled(model_name, tmp_path,
 
 def test_generated_classical_deck_keeps_tiled(tmp_path, monkeypatch):
     """The suppression must be MLIP-only -- classical decks want the balance."""
-    from src.core.config import write_config
-    from src.run.simulate import run_simulations
+    from frictionsim2d.core.config import write_config
+    from frictionsim2d.run.simulate import run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
     mats = REPO_ROOT / 'examples' / 'materials'
@@ -345,8 +345,8 @@ def test_generated_classical_deck_keeps_tiled(tmp_path, monkeypatch):
 
 import shutil
 
-from src.core.config import SheetOnSheetSimulationConfig
-from src.core.config import load_settings
+from frictionsim2d.core.config import SheetOnSheetSimulationConfig
+from frictionsim2d.core.config import load_settings
 
 MAT = REPO_ROOT / 'examples' / 'materials'
 
@@ -395,7 +395,7 @@ def _assert_mlip_deck_context_applied(text, who):
 
 @needs_lmp
 def test_hetero_slide_deck_carries_the_mlip_context(tmp_path):
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
 
     model = _opaque_model(tmp_path)
     config = SheetOnSheetSimulationConfig(**{
@@ -410,7 +410,7 @@ def test_hetero_slide_deck_carries_the_mlip_context(tmp_path):
 
 @needs_lmp
 def test_flake_slide_deck_carries_the_mlip_context(tmp_path):
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     model = _opaque_model(tmp_path)
     config = SheetOnSheetSimulationConfig(**{
@@ -429,7 +429,7 @@ def test_flake_slide_deck_carries_the_mlip_context(tmp_path):
 @needs_lmp
 def test_hetero_mace_slide_deck_carries_the_directives(tmp_path):
     """MACE is where the missing directives are fatal, not merely wasteful."""
-    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
 
     model = tmp_path / 'mace-Mo-W-S.json'
     model.write_text(

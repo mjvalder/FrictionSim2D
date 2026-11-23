@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from src.data.provenance import (BuiltGeometry, read_provenance,
+from frictionsim2d.data.provenance import (BuiltGeometry, read_provenance,
                                  sha256_file, write_provenance)
-from src.postprocessing.read_data import DataReader
-from src.postprocessing.run_provenance import config_settings
+from frictionsim2d.postprocessing.read_data import DataReader
+from frictionsim2d.postprocessing.run_provenance import config_settings
 from tests.helpers.results_tree import make_family_run, slide_config
 
 
@@ -212,6 +212,6 @@ def test_afm_hold_steps_for_every_family_that_runs_the_afm_hold():
 def test_afm_hold_steps_lives_in_core_observables():
     """One definition, importable without the AFM builder stack; the builder
     re-exports the same object for the template render."""
-    from src.builders.afm.base import AFM_HOLD_STEPS as builder_value
-    from src.core.observables import AFM_HOLD_STEPS
+    from frictionsim2d.builders.afm.base import AFM_HOLD_STEPS as builder_value
+    from frictionsim2d.core.observables import AFM_HOLD_STEPS
     assert AFM_HOLD_STEPS == builder_value == 10000

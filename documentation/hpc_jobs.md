@@ -38,7 +38,7 @@ cores. See [mlip.md](mlip.md) §8.
 
 ### The manifest is a script list
 
-`manifest.json` (`src/hpc/manifest.py`) records, per generated LAMMPS script,
+`manifest.json` (`frictionsim2d/hpc/manifest.py`) records, per generated LAMMPS script,
 which simulation it belongs to and which script within it (`system`/`slide`,
 material, layers, force, angle, speed). It is a **script list**, not a live
 job tracker: there is no AiiDA-uuid field linking an entry back to a stored

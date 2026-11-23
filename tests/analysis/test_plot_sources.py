@@ -14,11 +14,11 @@ import matplotlib  # noqa: E402
 
 matplotlib.use('Agg')
 
-import src.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
-from src.analysis.store import run_analysis, store_result  # noqa: E402
-from src.postprocessing.plot_config import TableSource  # noqa: E402
-from src.postprocessing.plot_data import PlotDataError, Plotter  # noqa: E402
-from src.postprocessing.plot_tables import load_table  # noqa: E402
+import frictionsim2d.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
+from frictionsim2d.analysis.store import run_analysis, store_result  # noqa: E402
+from frictionsim2d.postprocessing.plot_config import TableSource  # noqa: E402
+from frictionsim2d.postprocessing.plot_data import PlotDataError, Plotter  # noqa: E402
+from frictionsim2d.postprocessing.plot_tables import load_table  # noqa: E402
 from tests.analysis.test_store import no_profile_switch, probe, store  # noqa: E402,F401
 
 

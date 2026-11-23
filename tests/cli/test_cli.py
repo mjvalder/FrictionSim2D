@@ -9,7 +9,7 @@ import json
 import pytest
 import yaml
 from click.testing import CliRunner
-from src.cli import cli
+from frictionsim2d.cli import cli
 
 
 @pytest.fixture
@@ -359,8 +359,8 @@ def test_aiida_query_forwards_filters_to_friction2ddb(runner, monkeypatch):
             calls.update(kwargs)
             return _FakeResult()
 
-    monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: None)
-    monkeypatch.setattr('src.aiida.query.Friction2DDB', _FakeDB)
+    monkeypatch.setattr('frictionsim2d.aiida.load_aiida_profile', lambda profile=None: None)
+    monkeypatch.setattr('frictionsim2d.aiida.query.Friction2DDB', _FakeDB)
 
     result = runner.invoke(cli, [
         'aiida', 'query', '--material', 'h-MoS2', '--family', 'hetero',
@@ -385,8 +385,8 @@ def test_aiida_query_unknown_set_label_raises(runner, monkeypatch):
         def query(self, **_kwargs):
             raise AssertionError("query() must not run for an unknown set label")
 
-    monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: None)
-    monkeypatch.setattr('src.aiida.query.Friction2DDB', _FakeDB)
+    monkeypatch.setattr('frictionsim2d.aiida.load_aiida_profile', lambda profile=None: None)
+    monkeypatch.setattr('frictionsim2d.aiida.query.Friction2DDB', _FakeDB)
 
     result = runner.invoke(cli, ['aiida', 'query', '--set-label', 'nope'])
 
@@ -400,7 +400,7 @@ def test_aiida_query_profile_failure_is_a_clean_error(runner, monkeypatch):
     def _bad(profile=None):
         raise RuntimeError(f'profile {profile!r} does not exist')
 
-    monkeypatch.setattr('src.aiida.load_aiida_profile', _bad)
+    monkeypatch.setattr('frictionsim2d.aiida.load_aiida_profile', _bad)
 
     result = runner.invoke(cli, ['aiida', 'query', '--profile', 'ghost'])
 
@@ -429,8 +429,8 @@ def test_aiida_query_json_prints_the_rows(runner, monkeypatch):
         def query(self, **_kwargs):
             return _FakeResult()
 
-    monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: None)
-    monkeypatch.setattr('src.aiida.query.Friction2DDB', _FakeDB)
+    monkeypatch.setattr('frictionsim2d.aiida.load_aiida_profile', lambda profile=None: None)
+    monkeypatch.setattr('frictionsim2d.aiida.query.Friction2DDB', _FakeDB)
 
     result = runner.invoke(cli, ['aiida', 'query', '--family', 'afm',
                                  '--format', 'json'])
@@ -465,7 +465,7 @@ def test_aiida_import_archive_loads_profile(runner, monkeypatch, tmp_path):
         calls.append(('import_archive', str(path)))
         return 0
 
-    monkeypatch.setattr('src.aiida.export.import_archive', fake_import_archive)
+    monkeypatch.setattr('frictionsim2d.aiida.export.import_archive', fake_import_archive)
 
     result = runner.invoke(cli, ['aiida', 'import-archive', str(archive)])
 

@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from src.aiida.query import Friction2DDB
-from src.gui import db_worker
+from frictionsim2d.aiida.query import Friction2DDB
+from frictionsim2d.gui import db_worker
 
 
 class FakeQueryResult:

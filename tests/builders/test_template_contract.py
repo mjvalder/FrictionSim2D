@@ -3,8 +3,8 @@ import re
 
 import pytest
 
-from src.builders.afm import AFMSimulation
-from src.core.observables import expected_columns
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.core.observables import expected_columns
 from tests.helpers.afm import (
     _make_afm_config,
     _prepare_builder_for_slide_write,
@@ -107,7 +107,7 @@ def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4,
     il_top %} use (Ruling 3) -- so n_contact_il's placeholders resolve
     correctly whenever a test opts it in.
     """
-    from src.builders.utils.obs_ctx import build_obs_ctx
+    from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
     interlayer = {'E_int_interlayer', 'n_contact_il'}
     return build_obs_ctx(
         sim_type='sheetonsheet',
@@ -133,8 +133,8 @@ def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
     missing context keys empty, which is fine here.
     """
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('src.templates'),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template('sheetonsheet/slide.lmp').render(
         n_layers=n_layers, has_internal_lj=has_internal_lj,
@@ -185,7 +185,7 @@ def test_sheet_slide_takes_its_varlist_from_the_macro():
 
 
 def test_sheet_window_varlist_matches_the_registry():
-    from src.core.observables import channels_for, layer_channels
+    from frictionsim2d.core.observables import channels_for, layer_channels
     ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
     emitted = ctx['window_varlist'].split()
     for ob in channels_for('sheetonsheet', 'window'):
@@ -215,7 +215,7 @@ def test_sheet_results_fix_carries_the_family_marker():
 
 
 def test_unloaded_reference_lines_in_system_init(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     _prepare_builder_for_slide_write(builder, tmp_path)
@@ -225,7 +225,7 @@ def test_unloaded_reference_lines_in_system_init(tmp_path):
 
 
 def test_settle_loop_is_capped(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     _prepare_builder_for_slide_write(builder, tmp_path)
@@ -243,7 +243,7 @@ def test_settle_loop_is_capped(tmp_path):
 
 
 def test_hold_channels_emitted_selfcontained(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     _prepare_builder_for_slide_write(builder, tmp_path)
@@ -379,7 +379,7 @@ def test_hold_fix_has_no_schema_marker():
 
 def _hetero_obs_ctx(n_layers: int) -> dict:
     """Call build_obs_ctx directly, mirroring
-    HeteroSheetOnSheetSimulation._build_obs_ctx (src/builders/sheetonsheet/hetero.py).
+    HeteroSheetOnSheetSimulation._build_obs_ctx (frictionsim2d/builders/sheetonsheet/hetero.py).
 
     Unlike `_sheet_obs_ctx`, this takes no `has_internal_lj` parameter: the
     hetero builder hardcodes `has_internal_lj: True` in its render context
@@ -390,7 +390,7 @@ def _hetero_obs_ctx(n_layers: int) -> dict:
     correctly suppresses fc_pa. That is intentional (task-15 Ruling C): hetero
     gains the raw tier here, not a populated peratom tier.
     """
-    from src.builders.utils.obs_ctx import build_obs_ctx
+    from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
     interlayer = {'E_int_interlayer', 'n_contact_il'}
     return build_obs_ctx(
         sim_type='hetero',
@@ -419,8 +419,8 @@ def _render_hetero_slide(n_layers: int, **extra) -> str:
     itself define `v_e_int_il` the way sheetonsheet's does.
     """
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('src.templates'),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template('hetero/slide.lmp').render(
         n_layers=n_layers, has_internal_lj=False,
@@ -547,8 +547,8 @@ SHEET_SLIDE_TEMPLATES = ('sheetonsheet/slide.lmp',
 
 def _template_source(name: str) -> str:
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('src.templates'),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     return env.loader.get_source(env, name)[0]
 
@@ -650,14 +650,14 @@ def test_hetero_frict_measures_the_same_interface_the_com_probes_do(
 
 def _flake_obs_ctx(n_layers: int) -> dict:
     """Call build_obs_ctx directly, mirroring
-    FlakeSlideSimulation._build_obs_ctx (src/builders/sheetonsheet/flake_slide.py).
+    FlakeSlideSimulation._build_obs_ctx (frictionsim2d/builders/sheetonsheet/flake_slide.py).
 
     Unlike `_hetero_obs_ctx`, no `extra_filter` is needed: the flake family
     declares no interlayer/contact channel at all (its friction proxy is the
     bottom-sheet reaction force `react_{x,y,z}`), so `channels_for('flake',
     'peratom')` is already empty -- there is nothing for a filter to drop.
     """
-    from src.builders.utils.obs_ctx import build_obs_ctx
+    from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
     return build_obs_ctx(
         sim_type='flake',
         n_layers=n_layers,
@@ -674,8 +674,8 @@ def _render_flake_slide(n_layers: int) -> str:
     """Render flake/slide.lmp, whose substrate layer groups come from z-bands
     (like hetero) and whose driven body is the flake, not a sheet layer_N."""
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('src.templates'),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template('flake/slide.lmp').render(
         n_layers=n_layers, has_internal_lj=True,
@@ -721,7 +721,7 @@ def test_flake_slide_takes_its_varlist_from_the_macro():
 
 
 def test_flake_drive_com_maps_to_the_flake_body():
-    from src.core.observables import rename_map
+    from frictionsim2d.core.observables import rename_map
     m = rename_map('flake', 'window')
     assert m['v_comx_flake'] == 'drivex'
     assert m['v_comz_flake'] == 'drivez'
@@ -758,8 +758,8 @@ def test_afm_window_fix_honours_results_frequency():
     settings.output.results_frequency was computed and discarded for every
     AFM slide build (afm/base.py passes it; the macro ignored it)."""
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('src.templates'),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     src = env.loader.get_source(env, 'common/observables.lmp')[0]
     assert 'ave/time 1 1000 1000' not in src
@@ -771,8 +771,8 @@ def test_macro_emits_the_schema_marker_on_every_results_fix():
     triggers the frozen legacy correction and multiplies correctly-scaled
     nN data by 1.602176565. The macro had no title1 at all."""
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('src.templates'),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     src = env.loader.get_source(env, 'common/observables.lmp')[0]
     fixes = [l for l in src.split('\n')
@@ -852,7 +852,7 @@ def test_naming_an_opt_in_channel_emits_it():
 def test_n_contact_il_names_the_real_sliding_interface():
     # 4f0ed92 moved the interface to the middle of the stack; layer_{n-1}
     # against layer_{n-2} coincides with it only at n_layers == 4
-    from src.core.observables import REGISTRY
+    from frictionsim2d.core.observables import REGISTRY
     compute = REGISTRY['n_contact_il'].lammps_compute
     assert '{il_top}' in compute and '{il_bot}' in compute
 
@@ -951,9 +951,9 @@ def test_every_sheet_family_obs_ctx_goes_through_the_one_interface_layers_rule()
     import inspect
     import re
 
-    from src.builders.sheetonsheet import base as base_mod
-    from src.builders.sheetonsheet import flake_slide as flake_mod
-    from src.builders.sheetonsheet import hetero as hetero_mod
+    from frictionsim2d.builders.sheetonsheet import base as base_mod
+    from frictionsim2d.builders.sheetonsheet import flake_slide as flake_mod
+    from frictionsim2d.builders.sheetonsheet import hetero as hetero_mod
 
     needle = 'interface_layers=(n_layers // 2, n_layers // 2 + 1)'
     assert inspect.getsource(base_mod.sheet_obs_ctx).count(needle) == 1
@@ -992,8 +992,8 @@ def test_hetero_and_flake_interface_layers_substitution_is_correct():
     must be the ones substituted in.
     """
     import dataclasses
-    from src.builders.utils.obs_ctx import build_obs_ctx
-    from src.core.observables import REGISTRY
+    from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
+    from frictionsim2d.core.observables import REGISTRY
 
     original = REGISTRY['n_contact_il']
     try:
@@ -1046,7 +1046,7 @@ def test_every_dynamic_template_calls_the_halt_macro(template):
     """Source-level, so a newly added dynamic template that forgets the guard
     fails here rather than silently running unguarded."""
     from importlib import resources
-    text = (resources.files('src.templates')
+    text = (resources.files('frictionsim2d.templates')
             .joinpath(template).read_text(encoding='utf-8'))
     assert 'emit_temperature_halt' in text, template
 
@@ -1064,7 +1064,7 @@ def test_every_halt_check_jumps_to_a_label_the_template_defines(template):
     emit_halt_check target must be a `label` in the same template."""
     import re
     from importlib import resources
-    text = (resources.files('src.templates')
+    text = (resources.files('frictionsim2d.templates')
             .joinpath(template).read_text(encoding='utf-8'))
     targets = set(re.findall(r"emit_halt_check\(.*'(\w+)'\) }}", text))
     assert targets, template
@@ -1089,7 +1089,7 @@ def test_a_slide_halt_is_recorded_and_skips_its_write_data(slide_text):
 
 
 def test_the_guard_is_off_means_no_halt_record(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     config.settings.simulation.halt_temperature_factor = 0.0
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
@@ -1101,7 +1101,7 @@ def test_the_guard_is_off_means_no_halt_record(tmp_path):
 def test_a_system_ramp_halt_ends_the_ramp_and_keeps_written_loads(tmp_path):
     """After a halt the later loads would ramp from the blown-up state: every
     run in system.in checks, and all jump to the end of the script."""
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     _prepare_builder_for_slide_write(builder, tmp_path)
@@ -1116,7 +1116,7 @@ def test_a_system_ramp_halt_ends_the_ramp_and_keeps_written_loads(tmp_path):
 
 
 def test_system_init_halts_on_a_runaway_temperature(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     _prepare_builder_for_slide_write(builder, tmp_path)
@@ -1125,7 +1125,7 @@ def test_system_init_halts_on_a_runaway_temperature(tmp_path):
 
 
 def test_the_guard_is_off_when_the_factor_is_zero(tmp_path):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     config.settings.simulation.halt_temperature_factor = 0.0
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
@@ -1142,8 +1142,8 @@ def test_a_cold_run_keeps_the_floored_threshold(tmp_path):
     """factor x 1 K would abort a healthy smoke run: releasing the minimiser's
     strain energy puts a 1 K-target system at tens of K (measured 13-119 K
     across the LAMMPS set, 2026-09-22). The threshold floors at 10x300 K."""
-    from src.builders.simulation_base import halt_temperature
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.simulation_base import halt_temperature
+    from frictionsim2d.builders.afm import AFMSimulation
     config = _make_afm_config(tmp_path, layers=[1])
     config.general.temp = 1.0
     assert halt_temperature(config.settings, 1.0) == 3000.0
@@ -1155,13 +1155,13 @@ def test_a_cold_run_keeps_the_floored_threshold(tmp_path):
 
 
 def test_a_hot_run_scales_above_the_floor(tmp_path):
-    from src.builders.simulation_base import halt_temperature
+    from frictionsim2d.builders.simulation_base import halt_temperature
     config = _make_afm_config(tmp_path, layers=[1])
     assert halt_temperature(config.settings, 900.0) == 9000.0
 
 
 def test_afm_hold_length_comes_from_the_constant(tmp_path):
-    from src.builders.afm.base import AFM_HOLD_STEPS
+    from frictionsim2d.builders.afm.base import AFM_HOLD_STEPS
     config = _make_afm_config(tmp_path, layers=[1])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     _prepare_builder_for_slide_write(builder, tmp_path)
@@ -1232,7 +1232,7 @@ def test_molecule_ids_snippet_is_absent_by_default():
 # --- end-of-point snapshots (integrity stage 3) -----------------------------
 
 def _writes_snapshot(text, tmp_path):
-    from src.postprocessing.integrity import writes_end_snapshot
+    from frictionsim2d.postprocessing.integrity import writes_end_snapshot
     lammps = tmp_path / 'lammps'
     lammps.mkdir()
     (lammps / 'slide.in').write_text(text, encoding='utf-8')
@@ -1252,8 +1252,8 @@ def test_hetero_and_flake_write_final_snapshot_after_halt_check(render, tmp_path
 
 def _render_raw(template, **ctx):
     from jinja2 import Environment
-    from src.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('src.templates'),
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template(template).render(**ctx)
 

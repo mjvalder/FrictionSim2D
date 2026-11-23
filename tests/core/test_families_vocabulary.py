@@ -1,8 +1,8 @@
 """One family vocabulary and one model vocabulary (AiiDA spec §3 F1)."""
-from src.core.observables import FAMILIES, REGISTRY
-from src.hpc.manifest import JobManifest
-from src.postprocessing.read_data import DataReader
-from src.run.naming import AFM_LIKE_MODELS, MODELS, SHEET_LIKE_MODELS
+from frictionsim2d.core.observables import FAMILIES, REGISTRY
+from frictionsim2d.hpc.manifest import JobManifest
+from frictionsim2d.postprocessing.read_data import DataReader
+from frictionsim2d.run.naming import AFM_LIKE_MODELS, MODELS, SHEET_LIKE_MODELS
 
 
 def test_families_is_the_registry_vocabulary():

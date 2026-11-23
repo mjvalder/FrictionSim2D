@@ -6,8 +6,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from src.agent.ollama_server import OllamaServer
-from src.agent.settings import AgentSettings
+from frictionsim2d.agent.ollama_server import OllamaServer
+from frictionsim2d.agent.settings import AgentSettings
 
 
 class FakeClock:
@@ -376,7 +376,7 @@ def test_remote_server_is_never_started(tmp_path):
 @pytest.mark.parametrize('url', ['http://localhost:11434', 'http://127.0.0.1:9000',
                                  'http://[::1]:11434'])
 def test_loopback_hosts_count_as_local(url):
-    from src.agent.ollama_server import is_local
+    from frictionsim2d.agent.ollama_server import is_local
     settings = AgentSettings()
     settings.ollama.base_url = url
     assert is_local(settings)

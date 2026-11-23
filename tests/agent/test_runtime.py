@@ -11,8 +11,8 @@ from pydantic_ai.exceptions import ModelHTTPError  # noqa: E402
 from pydantic_ai.messages import ToolReturnPart, RetryPromptPart  # noqa: E402
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel  # noqa: E402
 
-from src.agent.runtime import AgentSession  # noqa: E402
-from src.agent.settings import AgentSettings  # noqa: E402
+from frictionsim2d.agent.runtime import AgentSession  # noqa: E402
+from frictionsim2d.agent.settings import AgentSettings  # noqa: E402
 from tests.helpers.agent import make_deps  # noqa: E402
 
 
@@ -162,7 +162,7 @@ def test_unavailable_provider_is_an_event(deps, tmp_path, monkeypatch):
 
 
 def test_tool_crash_hides_paths(deps, monkeypatch):
-    from src.agent.tools import setup
+    from frictionsim2d.agent.tools import setup
 
     def boom(_deps):
         raise RuntimeError('/home/x/secret')
@@ -175,9 +175,9 @@ def test_tool_crash_hides_paths(deps, monkeypatch):
 
 def test_tool_results_carry_no_absolute_paths(deps, tmp_path):
     from types import SimpleNamespace
-    from src.agent.changes import apply_changeset
-    from src.agent.runtime import _call
-    from src.agent.tools import setup
+    from frictionsim2d.agent.changes import apply_changeset
+    from frictionsim2d.agent.runtime import _call
+    from frictionsim2d.agent.tools import setup
     deps.document.workspace_dir = None  # an unsaved config keeps absolute paths
     setup.setup_afm(deps, setup.AFMSetupRequest(materials=['h-MoS2'], potential_type='sw'))
     apply_changeset(deps.pending[-1], deps.document, deps.settings_document, force=True)
@@ -192,8 +192,8 @@ def test_tool_results_carry_no_absolute_paths(deps, tmp_path):
 def test_retry_messages_carry_no_absolute_paths(deps, tmp_path):
     from types import SimpleNamespace
     from pydantic_ai import ModelRetry
-    from src.agent.runtime import _call
-    from src.agent.sandbox import SandboxError
+    from frictionsim2d.agent.runtime import _call
+    from frictionsim2d.agent.sandbox import SandboxError
 
     def refuse(d):
         raise SandboxError(f'{d.roots.workspace}/x: outside')
@@ -401,6 +401,6 @@ def test_no_passages_without_a_corpus(tmp_path, mock_settings):
 
 def test_tool_schema_hash_is_16_hex():
     import re  # pylint: disable=import-outside-toplevel
-    from src.agent.runtime import tool_schema_hash  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.agent.runtime import tool_schema_hash  # pylint: disable=import-outside-toplevel
     assert re.fullmatch('[0-9a-f]{16}', tool_schema_hash())
 

@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from src.potentials.utils import (
+from frictionsim2d.potentials.utils import (
     PotentialTypeError, pot_dir_token, resolve_pot_type,
 )
-from src.run.expand import expand_config_sweeps
-from src.run.naming import output_dir_for
+from frictionsim2d.run.expand import expand_config_sweeps
+from frictionsim2d.run.naming import output_dir_for
 
 ROOT = Path('examples/potentials')
 
@@ -125,5 +125,5 @@ def test_an_mlip_model_with_an_explicit_type_resolves(pot_type, entry):
 
 
 def test_mlip_extensions_are_not_in_the_inference_map():
-    from src.potentials.utils import EXTENSION_MAP, MLIP_FILE_EXTENSIONS  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.potentials.utils import EXTENSION_MAP, MLIP_FILE_EXTENSIONS  # pylint: disable=import-outside-toplevel
     assert MLIP_FILE_EXTENSIONS and not MLIP_FILE_EXTENSIONS & set(EXTENSION_MAP)

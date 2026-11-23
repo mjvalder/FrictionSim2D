@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import (
+from frictionsim2d.core.config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
     parse_config,
 )
-from src.gui.config_validation import preflight_paths, validate_config
+from frictionsim2d.gui.config_validation import preflight_paths, validate_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -70,7 +70,7 @@ def test_buildable_examples_validate(name, monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     # A sweep example (interlayer_style = [lj, lj_g, ilp]) is validated member
     # by member, as the builder sees it; a plain config expands to itself.
-    from src.run.expand import expand_config_sweeps
+    from frictionsim2d.run.expand import expand_config_sweeps
     members = expand_config_sweeps(_raw(name))
     assert members
     for member in members:

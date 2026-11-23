@@ -9,12 +9,12 @@ import pytest
 
 pytest.importorskip('scipy')
 
-from src.core.config import IntegritySettings  # noqa: E402
-from src.postprocessing.integrity import (  # noqa: E402
+from frictionsim2d.core.config import IntegritySettings  # noqa: E402
+from frictionsim2d.postprocessing.integrity import (  # noqa: E402
     NO_SNAPSHOT_DETAIL, check_files, resolve_layers, writes_end_snapshot)
-from src.postprocessing.read_data import (  # noqa: E402
+from frictionsim2d.postprocessing.read_data import (  # noqa: E402
     SUMMARY_POST_COLUMNS, DataReader, resolve_n_layers)
-from src.run.tree import discover_runs  # noqa: E402
+from frictionsim2d.run.tree import discover_runs  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
 from tests.postprocessing.test_integrity import (  # noqa: E402
     _set_layer_map, _stack, _write_data)

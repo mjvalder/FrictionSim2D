@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from src.core.config import SheetOnSheetSimulationConfig, load_settings
+from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
 # Reuse the D1 slide runner + friction-record parser for the e2e smoke, and its
 # path extractors for the sim-root resolution check.
 from tests.helpers.hetero import (
@@ -115,9 +115,9 @@ def _render_flake_slide_for_test(context):
     """
     from jinja2 import Environment
 
-    from src.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
-    from src.builders.utils.obs_ctx import build_obs_ctx
-    from src.interfaces.jinja import PackageLoader
+    from frictionsim2d.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
+    from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
+    from frictionsim2d.interfaces.jinja import PackageLoader
 
     if "obs_ctx" not in context:
         n_layers = context["n_layers"]
@@ -133,7 +133,7 @@ def _render_flake_slide_for_test(context):
             optional_channels=(),
             interface_layers=(n_layers // 2, n_layers // 2 + 1),
         )}
-    env = Environment(loader=PackageLoader("src.templates"),
+    env = Environment(loader=PackageLoader("frictionsim2d.templates"),
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template("flake/slide.lmp").render(context)
 
@@ -221,7 +221,7 @@ def _flake_on_sheet_cfg(hetero_flake: bool = False):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_flake_slide_builder_places_flake_and_reserves_virtual(tmp_path):
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.settings.simulation.drive_method = "virtual_atom"
@@ -246,8 +246,8 @@ def test_flake_slide_assembly_keeps_sheet_types_and_periodic_box(tmp_path):
     sheet's S atoms too; (2) ``read_data add`` grew the box to the flake file's
     carving box, leaving vacuum seams that cut the periodic substrate.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
-    from src.interfaces.ase import read_lammps_data
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.interfaces.ase import read_lammps_data
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     sim = FlakeSlideSimulation(cfg, str(tmp_path))
@@ -275,7 +275,7 @@ def test_flake_slide_assembly_keeps_sheet_types_and_periodic_box(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_driven_group_is_flake_and_virtual_type_reserved(tmp_path):
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.settings.simulation.drive_method = "virtual_atom"
@@ -325,8 +325,8 @@ def _single_material_cfg():
 
 
 def test_routing_flake_section_selects_flake_slide():
-    from src.run.simulate import _select_sheet_builder_cls
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     assert cfg.flake is not None
@@ -334,8 +334,8 @@ def test_routing_flake_section_selects_flake_slide():
 
 
 def test_routing_no_flake_unchanged():
-    from src.run.simulate import _select_sheet_builder_cls
-    from src.builders.sheetonsheet import SheetOnSheetSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet import SheetOnSheetSimulation
 
     cfg = _single_material_cfg()
     assert cfg.flake is None
@@ -344,7 +344,7 @@ def test_routing_no_flake_unchanged():
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_flake_slide_builder_requires_multilayer_substrate(tmp_path):
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.sheet.layers = [1]          # single-layer substrate -> no fixed bottom + interior
@@ -378,7 +378,7 @@ def _flake_slide_raw(flake_mat=None):
 
 
 def test_output_dir_differs_when_only_flake_material_differs():
-    from src.run.naming import material_token, output_dir_for
+    from frictionsim2d.run.naming import material_token, output_dir_for
 
     run_a = _flake_slide_raw(flake_mat="h-MoS2")
     run_b = _flake_slide_raw(flake_mat="h-WS2")
@@ -388,7 +388,7 @@ def test_output_dir_differs_when_only_flake_material_differs():
 
 
 def test_hpc_job_name_differs_when_only_flake_material_differs(tmp_path):
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg_a = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-MoS2"), settings=_settings())
     cfg_b = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-WS2"), settings=_settings())
@@ -400,7 +400,7 @@ def test_hpc_job_name_differs_when_only_flake_material_differs(tmp_path):
 
 def test_output_dir_and_job_name_unaffected_by_absent_flake_section():
     """A config with no [Flake] section at all is unaffected by the fix."""
-    from src.run.naming import output_dir_for
+    from frictionsim2d.run.naming import output_dir_for
 
     no_flake = {
         "general": {"temp": 300},
@@ -413,14 +413,14 @@ def test_output_dir_byte_identical_when_flake_reuses_substrate_material(tmp_path
     """A single-[2D]-plus-[Flake] config that omits the flake's own material
     (the common case -- the flake reuses the substrate's) must build into the
     SAME directory / job name as before this fix (no [Flake] section at all)."""
-    from src.run.naming import output_dir_for
+    from frictionsim2d.run.naming import output_dir_for
 
     no_flake = {"general": {"temp": 300}, "2D": {"mat": "h-MoS2", "x": 100, "y": 100}}
     reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}
 
     assert output_dir_for(no_flake, "sheetonsheet") == output_dir_for(reused_flake, "sheetonsheet")
 
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)  # omits flake.mat -> reuses [2D]'s
     sim = FlakeSlideSimulation(cfg, str(tmp_path))
     assert sim._get_hpc_job_name() == f"flake_{cfg.sheet.mat}"
@@ -429,7 +429,7 @@ def test_output_dir_byte_identical_when_flake_reuses_substrate_material(tmp_path
 def test_output_dir_distinguishes_hetero_flake_pair():
     """A [Flake-1]/[Flake-2] hetero flake must also be reflected in the token
     (it always names two materials explicitly, unlike a single [Flake])."""
-    from src.run.naming import output_dir_for
+    from frictionsim2d.run.naming import output_dir_for
 
     raw = _flake_slide_raw()
     raw["Flake-1"] = {"mat": "h-MoS2", "x": 12.0, "y": 12.0}
@@ -455,7 +455,7 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
     to False (follow-up E) -- with it on the flake cannot translate at all,
     see `test_flake_slide_twisted_with_hold_on_keeps_corners_near_start`.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     assert cfg.flake.corner_hold is False
@@ -517,8 +517,8 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
 
 def test_flake_slide_routing_flake_plus_twist_selects_flake_slide():
     # [Flake] + twist must go to the FLAKE builder (D3b), not the D3 periodic hetero builder.
-    from src.run.simulate import _select_sheet_builder_cls
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.run.simulate import _select_sheet_builder_cls
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.general.twist_angle = 12.0
     assert _select_sheet_builder_cls("sheetonsheet", cfg) is FlakeSlideSimulation
@@ -527,7 +527,7 @@ def test_flake_slide_routing_flake_plus_twist_selects_flake_slide():
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_flake_slide_twist_rotates_the_flake(tmp_path):
     from ase.io import read
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     from tests.helpers.lattice import _flake_lattice_orientation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.general.twist_angle = 20.0
@@ -552,7 +552,7 @@ def test_flake_slide_twisted_with_hold_off_translates(tmp_path):
     described the corner-hold config, not this assertion (translation). The
     "holds" behaviour now has its own test below.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     assert cfg.flake.corner_hold is False
     cfg.general.twist_angle = 20.0
@@ -579,7 +579,7 @@ def test_flake_slide_twisted_with_hold_on_keeps_corners_near_start(tmp_path):
     so the tether (10 eV/Å² per atom) heavily outweighs the ~3 eV/Å² COM drive
     spring, and the measured COM displacement was ~0.04 Å over the run.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.flake.corner_hold = True
     cfg.general.twist_angle = 20.0
@@ -606,7 +606,7 @@ def test_flake_slide_twisted_with_hold_on_keeps_corners_near_start(tmp_path):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_hetero_flake_slide_twist_rotates(tmp_path):
     from ase.io import read
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     from tests.helpers.lattice import _flake_lattice_orientation
     cfg = _flake_on_sheet_cfg(hetero_flake=True)      # MoS2/WS2 hetero flake
     cfg.sheet.x = cfg.sheet.y = 30.0                  # room for the ~16 A hetero flake footprint
@@ -624,7 +624,7 @@ def test_hetero_flake_slide_twist_rotates(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_twist_angle_applied_recorded_in_manifest(tmp_path):
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False); cfg.general.twist_angle = 17.5
     sim = FlakeSlideSimulation(cfg, str(tmp_path)); sim.build()
     manifest = next(Path(tmp_path).rglob("*manifest*"))
@@ -647,8 +647,8 @@ def test_flake_slide_paths_resolve_from_the_simulation_root(tmp_path):
     has to be re-registered once assembly is done (build step 4b). Mirrors
     test_hetero_slide's equivalent.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
-    from src.run.hpc_dispatch import generate_hpc_scripts_for_root
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root
 
     root = tmp_path / "simulation_root"
     run_dir = root / "sheetonsheet" / "h-MoS2" / "16x_16y" / "K300"
@@ -702,7 +702,7 @@ def _write_slab(path, xs, cell_xy):
 
 
 def _assemble(tmp_path, flake_xs, sheet_cell=(10.0, 10.0)):
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     sim = FlakeSlideSimulation(_flake_on_sheet_cfg(), str(tmp_path))
     return sim._assemble_flake_on_sheet(
@@ -776,7 +776,7 @@ def _flake_n_raw(n: int):
 @pytest.mark.parametrize("n_sections", [1, 3])
 def test_flake_slide_refuses_a_flake_section_count_other_than_two(n_sections, tmp_path):
     """1 or 3+ [Flake-N] sections must raise rather than build the wrong flake."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = SheetOnSheetSimulationConfig(**_flake_n_raw(n_sections), settings=_settings())
     assert len(cfg.flake_sheets) == n_sections      # the config layer caps nothing
@@ -796,7 +796,7 @@ def test_the_refused_counts_are_the_ones_the_directory_name_disagreed_with(n_sec
     change made the builder honour them, this test says the directory name was
     already right and only the builder was wrong.
     """
-    from src.run.naming import material_token
+    from frictionsim2d.run.naming import material_token
 
     named = material_token(_flake_n_raw(n_sections), "sheetonsheet")
     plain = material_token(_flake_slide_raw(), "sheetonsheet")
@@ -812,7 +812,7 @@ def test_flake_slide_still_accepts_the_two_section_hetero_flake(tmp_path):
     reaching the substrate-layer check below it proves the flake-count check let
     a 2-section config through.
     """
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = SheetOnSheetSimulationConfig(**_flake_n_raw(2), settings=_settings())
     cfg.sheet.layers = [1]
@@ -826,7 +826,7 @@ def test_flake_slide_still_accepts_the_two_section_hetero_flake(tmp_path):
 def test_flake_slide_still_accepts_a_single_material_flake(tmp_path):
     """A plain [Flake] with no [Flake-N] at all -- the common case -- is
     unaffected: flake_sheets is empty, which the guard allows."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     assert cfg.flake_sheets == []
@@ -853,7 +853,7 @@ def _carved_area(shape: str, edge_length: float, rotation_deg: float,
     inside `components._in_*`, the exact test `build_flake` uses to keep atoms.
     """
     import numpy as np
-    from src.builders.construction import components as comp
+    from frictionsim2d.builders.construction import components as comp
 
     inside = {
         "triangle": lambda x, y: comp._in_equilateral_triangle(
@@ -873,7 +873,7 @@ def _carved_area(shape: str, edge_length: float, rotation_deg: float,
     ("hexagon", 10.0, 1.5 * 3 ** 0.5 * 100.0),         # circumradius R: 3 sqrt(3)/2 R^2
 ])
 def test_flake_projected_area_closed_form_per_shape(shape, edge, expected):
-    from src.builders.sheetonsheet.flake_slide import flake_projected_area
+    from frictionsim2d.builders.sheetonsheet.flake_slide import flake_projected_area
 
     assert flake_projected_area(shape, edge) == pytest.approx(expected, rel=1e-12)
 
@@ -884,7 +884,7 @@ def test_flake_projected_area_matches_the_carving_predicate(shape, rotation_deg)
     """The formula is the area of the outline `build_flake` actually cuts, for
     every supported shape and independent of in-plane rotation (rotation_deg
     and the D3b twist are rigid rotations: area-preserving)."""
-    from src.builders.sheetonsheet.flake_slide import flake_projected_area
+    from frictionsim2d.builders.sheetonsheet.flake_slide import flake_projected_area
 
     edge = 8.0
     assert _carved_area(shape, edge, rotation_deg) == pytest.approx(
@@ -892,7 +892,7 @@ def test_flake_projected_area_matches_the_carving_predicate(shape, rotation_deg)
 
 
 def test_flake_projected_area_refuses_an_unknown_shape():
-    from src.builders.sheetonsheet.flake_slide import flake_projected_area
+    from frictionsim2d.builders.sheetonsheet.flake_slide import flake_projected_area
 
     with pytest.raises(ValueError, match="circle"):
         flake_projected_area("circle", 5.0)
@@ -901,7 +901,7 @@ def test_flake_projected_area_refuses_an_unknown_shape():
 def test_flake_load_context_uses_the_flake_outline_not_the_box():
     """The render context carries the FLAKE's area (hexagon, R=5 A), not the
     substrate box's -- the load is a pressure on the flake contact."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     sim = FlakeSlideSimulation(cfg, "unused")
@@ -1057,7 +1057,7 @@ def test_flake_slide_under_load_reports_the_applied_normal_force(tmp_path):
     therefore long enough to contain a settled stretch, and only the records
     where the COM is not moving in z are averaged.
     """
-    from src.builders.sheetonsheet.flake_slide import (FlakeSlideSimulation,
+    from frictionsim2d.builders.sheetonsheet.flake_slide import (FlakeSlideSimulation,
                                                        flake_projected_area)
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
@@ -1103,7 +1103,7 @@ def test_flake_slide_under_load_reports_the_applied_normal_force(tmp_path):
 
 def _flake_pm(tmp_path, monkeypatch, **general):
     """`_register_potentials` for the single-material flake config."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     monkeypatch.chdir(Path(__file__).resolve().parents[2])
     cfg = _flake_on_sheet_cfg()
     for key, value in general.items():
@@ -1120,7 +1120,7 @@ def _flake_pm(tmp_path, monkeypatch, **general):
 
 def test_flake_lj_potentials_match_the_pre_interlayer_sequence(tmp_path, monkeypatch):
     """lj emits exactly the calls the inline `_register` made before."""
-    from src.potentials.manager import PotentialManager
+    from frictionsim2d.potentials.manager import PotentialManager
     builder, _, text = _flake_pm(tmp_path, monkeypatch)
     cfg = builder.config
     pm = PotentialManager(cfg.settings,
@@ -1175,7 +1175,7 @@ def test_flake_template_sets_molecule_ids_before_minimize():
 
 def test_molecule_groups_for_assembly_and_hetero_flake_carry_types(tmp_path, monkeypatch):
     """The assembly run has no layer/flake groups, so its entries carry type ids."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     _, pm, _ = _flake_pm(tmp_path, monkeypatch, interlayer_style="ilp")
     groups = FlakeSlideSimulation._molecule_groups(pm, 2, ["flake"], in_slide=False)
     assert [g["name"] for g in groups] == ["mol_layer_1", "mol_layer_2", "mol_flake"]
@@ -1192,7 +1192,7 @@ def test_flake_slide_ilp_builds_with_lj_assembly_settings(tmp_path, hetero_flake
     """ilp flake slides build end to end: the assembly run 0 includes a
     settings file with the ilp type layout but no ilp/tmd (lmp_serial need
     not have INTERLAYER); the slide's own settings carry the ILP term."""
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=hetero_flake)
     cfg.general.interlayer_style = "ilp"

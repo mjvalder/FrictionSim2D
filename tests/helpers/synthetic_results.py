@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from src.core.observables import rename_map
-from src.data.provenance import config_hash
+from frictionsim2d.core.observables import rename_map
+from frictionsim2d.data.provenance import config_hash
 
 _SETTINGS_STUB = "thermostat:\n  type: langevin\n"
 
@@ -36,8 +36,8 @@ def seal_config_hash(run_dir: Path, prov_dir: Path) -> None:
 #: fixture that used the sheet shape for both left `pes_fmax`, `pes_flat_rms`,
 #: `pes_load_mean` and `pes_load_std` -- every tip-only descriptor -- covered by
 #: no test at all. These are the real template headers,
-#: `src/templates/afm/pes_scan.lmp:82` and
-#: `src/templates/sheetonsheet/pes_scan.lmp:57`.
+#: `frictionsim2d/templates/afm/pes_scan.lmp:82` and
+#: `frictionsim2d/templates/sheetonsheet/pes_scan.lmp:57`.
 PES_GRID_CSV = {
     'pes_tip': (
         '# family=pes_tip\n'
@@ -85,9 +85,9 @@ def write_pes_grid(run_dir: Path, family: str) -> Path:
     """Write the one `results/pes_scan.csv` grid a PES-family run produces.
 
     A real PES scan is a single grid evaluation, not tiered friction files:
-    `src/templates/afm/pes_scan.lmp` and `src/templates/sheetonsheet/pes_scan.lmp`
+    `frictionsim2d/templates/afm/pes_scan.lmp` and `frictionsim2d/templates/sheetonsheet/pes_scan.lmp`
     both `print` the `# family=...` line then the header then one row per grid
-    point into exactly this file. `src.postprocessing.pes_scan.discover_grids`
+    point into exactly this file. `frictionsim2d.postprocessing.pes_scan.discover_grids`
     globs for `results/pes_scan.csv` by name.
     """
     if family not in _PES_FAMILIES:

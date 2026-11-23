@@ -22,7 +22,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication, QMainWindow  # noqa: E402
 
-from src.gui.preview.assemble import (  # noqa: E402
+from frictionsim2d.gui.preview.assemble import (  # noqa: E402
     AssembledSystem,
     ComponentSlice,
     build_data_collection,
@@ -55,7 +55,7 @@ def test_replacing_source_updates_what_the_pipeline_computes():
     assert pipe.compute().particles.count == 2
 
     # the production update path must make this 5
-    from src.gui.preview.viewport import _install_data
+    from frictionsim2d.gui.preview.viewport import _install_data
     _install_data(pipe, build_data_collection(_system(5)))
     assert pipe.compute().particles.count == 5
 
@@ -63,7 +63,7 @@ def test_replacing_source_updates_what_the_pipeline_computes():
 def test_colour_change_reaches_the_computed_types():
     from ovito.pipeline import Pipeline, StaticSource
 
-    from src.gui.preview.viewport import _install_data
+    from frictionsim2d.gui.preview.viewport import _install_data
 
     pipe = Pipeline(source=StaticSource(
         data=build_data_collection(_system(3), colours={1: (1.0, 0.0, 0.0)})))
@@ -78,7 +78,7 @@ def test_show_system_twice_updates_the_live_pipeline(qt_app):
     system, not the first -- this is what actually broke for the user
     (colour-mode changes, component toggles and the Box toggle silently not
     appearing on screen)."""
-    from src.gui.preview.viewport import ViewportPanel
+    from frictionsim2d.gui.preview.viewport import ViewportPanel
 
     panel = ViewportPanel()
     panel.show_system(_system(2))
@@ -99,14 +99,14 @@ def test_widget_is_created_eagerly_during_construction(qt_app):
     is ever shown -- so that it never has to be added to a window that is
     already visible. Creating it lazily (on first render, which always
     happens after ``window.show()``) is exactly the old bug."""
-    from src.gui.preview.viewport import ViewportPanel
+    from frictionsim2d.gui.preview.viewport import ViewportPanel
 
     panel = ViewportPanel()
     assert panel._widget is not None
 
 
 def test_native_window_is_not_recreated_by_the_first_render(qt_app):
-    from src.gui.preview.viewport import ViewportPanel
+    from frictionsim2d.gui.preview.viewport import ViewportPanel
 
     win = QMainWindow()
     panel = ViewportPanel(win)
@@ -137,7 +137,7 @@ def test_panel_constructs_when_ovito_is_unavailable(qt_app, monkeypatch):
 
     monkeypatch.setattr(builtins, '__import__', _fake_import)
 
-    from src.gui.preview.viewport import ViewportPanel
+    from frictionsim2d.gui.preview.viewport import ViewportPanel
 
     panel = ViewportPanel()  # must not raise
     panel.show()
@@ -147,7 +147,7 @@ def test_panel_constructs_when_ovito_is_unavailable(qt_app, monkeypatch):
 
 
 def test_placeholder_hides_only_once_a_system_is_shown(qt_app):
-    from src.gui.preview.viewport import ViewportPanel
+    from frictionsim2d.gui.preview.viewport import ViewportPanel
 
     panel = ViewportPanel()
     panel.show()

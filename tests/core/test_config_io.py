@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import parse_config
-from src.core.config import format_ini_value, load_settings, read_config, write_config
+from frictionsim2d.core.config import parse_config
+from frictionsim2d.core.config import format_ini_value, load_settings, read_config, write_config
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[2] / 'examples'
 EXAMPLE_CONFIGS = sorted(EXAMPLES_DIR.glob('*.ini'))

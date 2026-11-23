@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import GeneralConfig, parse_config
-from src.core.config import write_config
-from src.run.expand import count_expansion
-from src.run.simulate import run_simulations
-from src.hpc.manifest import JobEntry, JobManifest
+from frictionsim2d.core.config import GeneralConfig, parse_config
+from frictionsim2d.core.config import write_config
+from frictionsim2d.run.expand import count_expansion
+from frictionsim2d.run.simulate import run_simulations
+from frictionsim2d.hpc.manifest import JobEntry, JobManifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'

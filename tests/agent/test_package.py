@@ -1,8 +1,8 @@
 """The agent package's availability flag and result compaction."""
 from importlib.util import find_spec
 
-from src.agent import _AGENT_AVAILABLE
-from src.agent.tools import compact
+from frictionsim2d.agent import _AGENT_AVAILABLE
+from frictionsim2d.agent.tools import compact
 
 
 def test_flag_matches_install():

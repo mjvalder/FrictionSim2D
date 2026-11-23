@@ -12,9 +12,9 @@ indent job after material 1 alone.
 """
 import pytest
 
-from src.builders.afm import AFMSimulation
-from src.builders.afm.hetero import HeteroAFMSimulation, HeteroIndentSimulation
-from src.builders.afm.indent import IndentSimulation
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation, HeteroIndentSimulation
+from frictionsim2d.builders.afm.indent import IndentSimulation
 
 
 def _owner(cls, name):

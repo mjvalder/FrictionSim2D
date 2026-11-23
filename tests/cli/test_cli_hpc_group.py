@@ -14,9 +14,9 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from src.cli import cli
-from src.core.config import GlobalSettings
-from src.run.hpc_dispatch import collect_hpc_simulation_paths
+from frictionsim2d.cli import cli
+from frictionsim2d.core.config import GlobalSettings
+from frictionsim2d.run.hpc_dispatch import collect_hpc_simulation_paths
 
 
 @pytest.fixture
@@ -205,7 +205,7 @@ _SLIDE_LOG = ("LAMMPS (2 Aug 2023 - Update 3)\n"
 
 def _run_dir_with_provenance(tmp_path: Path) -> Path:
     """A minimal but real simulation dir: provenance.json + lammps/."""
-    from src.data.provenance import ProvenanceRecord, write_provenance
+    from frictionsim2d.data.provenance import ProvenanceRecord, write_provenance
 
     run_dir = tmp_path / "afm" / "h_MoS2" / "L1"
     (run_dir / "lammps").mkdir(parents=True)
@@ -398,7 +398,7 @@ def _run_dir(root: Path, rel: str, *, provenance: bool = True,
     `lammps_version`) so a run can start out ALREADY enriched, which is what a
     second sweep over a two-phase tree actually meets.
     """
-    from src.data.provenance import ProvenanceRecord, write_provenance
+    from frictionsim2d.data.provenance import ProvenanceRecord, write_provenance
 
     run = root / rel
     (run / "lammps").mkdir(parents=True)

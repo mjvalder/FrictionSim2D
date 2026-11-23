@@ -21,9 +21,9 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QProcess  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.core.config import parse_config  # noqa: E402
-from src.gui.controllers.preview import PreviewController, PreviewRequest  # noqa: E402
-from src.gui.workspace import Workspace  # noqa: E402
+from frictionsim2d.core.config import parse_config  # noqa: E402
+from frictionsim2d.gui.controllers.preview import PreviewController, PreviewRequest  # noqa: E402
+from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 EXAMPLES = Path(__file__).resolve().parents[2] / 'examples'
 

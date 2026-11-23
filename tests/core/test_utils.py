@@ -1,4 +1,4 @@
-"""Unit tests for src.core.utils module.
+"""Unit tests for frictionsim2d.core.utils module.
 
 Tests core utility functions including float parsing and configuration file
 parsing. The LAMMPS data-file and potentials-vocabulary classes that used to
@@ -9,8 +9,8 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from src.core.config import read_config
-from src.core.utils.tokens import _is_float  # noqa: PLC2701
+from frictionsim2d.core.config import read_config
+from frictionsim2d.core.utils.tokens import _is_float  # noqa: PLC2701
 
 
 class TestIsFloat:

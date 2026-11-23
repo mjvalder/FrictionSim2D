@@ -221,7 +221,7 @@ the only topology, so the key carries no information.
 
 Pydantic ignores unknown keys by default, which here would silently change a
 run's physics, so `SheetConfig.reject_removed_mlip_keys` rejects it **by name**
-(`REMOVED_SHEET_KEYS` in `src/core/config.py`) with a `ValidationError` naming
+(`REMOVED_SHEET_KEYS` in `frictionsim2d/core/config.py`) with a `ValidationError` naming
 spec §5. Delete the line from any old config; do not translate it.
 
 ### Hard validation rules
@@ -270,7 +270,7 @@ potential:
 ```
 
 All four are ordinary settings you can change per machine or per campaign; they
-flow into the emitted line through `src/core/mlip.py::d3_style_token` and
+flow into the emitted line through `frictionsim2d/core/mlip.py::d3_style_token` and
 nowhere else.
 
 **Where 16.0 and 8.0 come from — and what is *not* established.** They map onto
@@ -292,14 +292,14 @@ truncation inherited as a default, not a measured optimum. Two consequences:
   either shrink the cutoff or grow the footprint — but on a small screening
   cell, shrinking the cutoff is a physics decision, not a formality.
 
-`d3_damping` is a **canonical** name that `src/core/mlip.py::d3_style_token`
+`d3_damping` is a **canonical** name that `frictionsim2d/core/mlip.py::d3_style_token`
 turns into the token a given build accepts. See §5 for the verified argument
 order.
 
 ### Output directories
 
 An MLIP run is told apart by main's ordinary **potential segment**,
-`pot_<type-slug>_<stem>`, which `src/run/naming.py::output_dir_for` appends below
+`pot_<type-slug>_<stem>`, which `frictionsim2d/run/naming.py::output_dir_for` appends below
 `K<temp>` whenever the sheet names a `pot_path` (always true for an MLIP). The
 `K<temp>` leaf itself carries no suffix. The MLIP's dispersion choice rides in
 the slug, so with/without-D3 runs of one model never share a directory:
@@ -318,10 +318,10 @@ pes_sheet/h-MoS2/30x_30y/K0/pot_deepmd-d3_dpa3_alex2d
 afm/h-MoS2/30x_30y/sub_Si_tip_Si_r15/K300/pot_deepmd-d3_dpa32_omat24
 ```
 
-The slug is produced by `src/potentials/utils.py::pot_dir_token` and decoded by
-`src/run/naming.py::mlip_flavor_from_pot_token` (exposed on `parse_run_path`'s
+The slug is produced by `frictionsim2d/potentials/utils.py::pot_dir_token` and decoded by
+`frictionsim2d/run/naming.py::mlip_flavor_from_pot_token` (exposed on `parse_run_path`'s
 `RunTokens` as `mlip_framework` and `dispersion`, both `None` for a classical
-run) and by `src/hpc/manifest.py::parse_mlip_flavor`, which returns
+run) and by `frictionsim2d/hpc/manifest.py::parse_mlip_flavor`, which returns
 `(framework, dispersion)`. Classical paths are unchanged.
 
 ---
@@ -341,7 +341,7 @@ staging.
 
 `provenance/potentials/` also holds the model, per run — provenance has to carry
 a real, openable file or it does not establish anything. But those entries are
-**hard links**, not copies (`src/potentials/manager.py::stage_model_file`), so a
+**hard links**, not copies (`frictionsim2d/potentials/manager.py::stage_model_file`), so a
 20-run campaign pays for the model once rather than twenty times. Each run
 directory still contains a genuine file, hashed into `manifest.json` exactly as
 before; the hash is what pins identity, and a byte copy adds nothing to it.
@@ -470,7 +470,7 @@ Run one:
 ```bash
 FrictionSim2D run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
 # or, without installing the package (see CLAUDE.md):
-python -m src.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
+python -m frictionsim2d.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
 ```
 
 The two sheet examples name `../models/dpa3_alex2d.pth`, the frozen DPA-3.1-3M/`Alex2D`
@@ -578,7 +578,7 @@ dispersion/d3 <damping> <functional> <rthr> <cn_thr>
 
 `units metal` is required, both cutoffs are squared internally, and the accepted
 damping tokens are `original | zero | zerom | bj | bjm` (`original` and `zero`
-are synonyms). **This matches what `src/core/mlip.py::d3_style_token` emits** —
+are synonyms). **This matches what `frictionsim2d/core/mlip.py::d3_style_token` emits** —
 verified by reading `PairDispersionD3::settings` and by executing the exact
 emitted string (`pair_style dispersion/d3 bj pbe 16.0 8.0`, 24-atom bilayer,
 `E_pair = -8.7249526 eV`). No change is needed and no hedging is warranted for
@@ -614,8 +614,8 @@ component (§1).
 | Indentation | `run indent` | **Yes** (v6) | Same component structure as AFM. |
 | Freestanding / flake | `run afm` variants | **Yes** (v6) | The flake is simply one more component in the same instance's type map. |
 
-The rejections are raised by `validate_mlip_cell` (`src/core/mlip.py`), called
-from `src/builders/sheetonsheet/base.py`, `sheetonsheet/flake_slide.py`,
+The rejections are raised by `validate_mlip_cell` (`frictionsim2d/core/mlip.py`), called
+from `frictionsim2d/builders/sheetonsheet/base.py`, `sheetonsheet/flake_slide.py`,
 `afm/base.py`, `afm/hetero.py` and `construction/hetero_stack.py` — i.e. at
 generation time, not at 3 a.m. on the cluster. Separately, config validation
 refuses `[general] interlayer_style` other than `lj` and `interlayer_comparison`
@@ -711,7 +711,7 @@ The real layouts:
 | conda | `$CONDA_PREFIX/lib/deepmd_lmp` | `dpplugin.so` |
 | pip | `<site-packages>/deepmd/lib` | `libdeepmd_lmpplugin.so` |
 
-`LauncherSpec.env_lines` for DeePMD (`src/core/mlip.py`) emits a line that
+`LauncherSpec.env_lines` for DeePMD (`frictionsim2d/core/mlip.py`) emits a line that
 prefers the conda layout and falls back to the pip one, so a job script works
 under either.
 
@@ -781,7 +781,7 @@ FrictionSim2D hpc generate ./out --settings-file ~/clusters/cx3.yaml
 Point the `deepmd` overlay at the **backported** binary if any run in the
 campaign sets `dispersion = d3`; no other build has both styles.
 
-`src/core/config.py::apply_framework_overlay(hpc, framework)` builds each job
+`frictionsim2d/core/config.py::apply_framework_overlay(hpc, framework)` builds each job
 group's settings: the overlay's `binary` replaces `hpc.lmp_binary`, its
 `conda_env` replaces `hpc.conda_env`, and its `modules` / `env_lines` are
 **appended** to the base lists. A classical (CPU) group gets the base `hpc:`
@@ -790,7 +790,7 @@ pre-MLIP output.
 
 ### What gets rendered
 
-For an MLIP job group (`src/hpc/scripts.py::HPCConfig`):
+For an MLIP job group (`frictionsim2d/hpc/scripts.py::HPCConfig`):
 
 - **One MPI rank.** PBS:
   `select=<nodes>:ncpus=<n>:mem=<m>gb:mpiprocs=1:ngpus=<g>[:gpu_type=<t>]`;
@@ -924,7 +924,7 @@ atom count. `--dry-run` prints the decks without invoking LAMMPS.
 **4. First full-cell run.** Generate, then execute locally.
 
 ```bash
-python -m src.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
+python -m frictionsim2d.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
 ./scripts/run_local.sh out/<sim_root>/sheetonsheet/h-MoS2/30x_30y/K0/pot_deepmd-d3_dpa3_alex2d deepmd
 ```
 
@@ -934,7 +934,7 @@ python -m src.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
 `$LMP_MACE`, then `lmp` on `PATH`), applies the registry's launcher flags and
 env exports, `cd`s to the directory the generated relative paths are written
 against, and runs `system.in` then `slide.in`. `RUN_LOCAL_DRY_RUN=1` prints the
-commands without running them. `src/run/simulate.py` itself only *builds* inputs;
+commands without running them. `frictionsim2d/run/simulate.py` itself only *builds* inputs;
 promoting local execution into it is future work.
 
 ---
@@ -1082,6 +1082,6 @@ Documented, not implemented:
 - **Not** a goal: re-fitting LJ as a residual correction on top of an MLIP
   (§1 — D3 strictly dominates it).
 - Promoting SW/ReaxFF into the same registry pattern; promoting
-  `scripts/run_local.sh` into `src/run/`; GUI exposure of the MLIP config surface;
+  `scripts/run_local.sh` into `frictionsim2d/run/`; GUI exposure of the MLIP config surface;
   multi-GPU scaling; a foundation model fine-tuned on MoS2 sliding
   configurations.

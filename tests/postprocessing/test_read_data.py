@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from src.postprocessing.read_data import DataReader
+from frictionsim2d.postprocessing.read_data import DataReader
 from tests.helpers.results_tree import make_family_run
 
 _HEADER = (

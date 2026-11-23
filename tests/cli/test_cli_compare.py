@@ -3,7 +3,7 @@ import json
 
 from click.testing import CliRunner
 
-from src.cli import cli
+from frictionsim2d.cli import cli
 
 
 def _sidecar(root, temp, lat_c=3.19, unit='K', version='1.0.0'):
@@ -65,7 +65,7 @@ def test_sidecar_reads_each_deck_against_its_own_schema_version(tmp_path):
     (root / 'schema-1.1.0.json').write_text(json.dumps({'fields': {
         'general.temp': {'kind': 'thermostat', 'unit': 'mK', 'default': 300.0}}}),
         encoding='utf-8')
-    from src.aiida.compare import load_blocks_from_sidecar
+    from frictionsim2d.aiida.compare import load_blocks_from_sidecar
     import pytest
     with pytest.raises(ValueError, match='schema versions'):
         load_blocks_from_sidecar(root)
@@ -78,9 +78,9 @@ def test_sidecar_reads_each_deck_against_its_own_schema_version(tmp_path):
 
 def _patched_store(monkeypatch, sides):
     """`load_blocks` from the store, recording each reference it is given."""
-    import src.aiida as aiida_pkg
-    import src.aiida.compare as compare_mod
-    from src.aiida.compare import load_blocks_from_sidecar
+    import frictionsim2d.aiida as aiida_pkg
+    import frictionsim2d.aiida.compare as compare_mod
+    from frictionsim2d.aiida.compare import load_blocks_from_sidecar
 
     seen = []
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)

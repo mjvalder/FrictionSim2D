@@ -16,10 +16,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.agent.changes import Op, build_changeset  # noqa: E402
-from src.agent.events import TurnEvent  # noqa: E402
-from src.agent.settings import AgentSettings  # noqa: E402
-from src.gui.assistant.pane import AssistantPane  # noqa: E402
+from frictionsim2d.agent.changes import Op, build_changeset  # noqa: E402
+from frictionsim2d.agent.events import TurnEvent  # noqa: E402
+from frictionsim2d.agent.settings import AgentSettings  # noqa: E402
+from frictionsim2d.gui.assistant.pane import AssistantPane  # noqa: E402
 from tests.helpers.agent import make_deps  # noqa: E402
 
 
@@ -218,7 +218,7 @@ def test_send_tells_the_deps_the_apply_mode(qt_app, env, tmp_path, mock_settings
 
 
 def test_file_card_discard_removes_it_and_says_so(qt_app, env, tmp_path, mock_settings):
-    from src.agent.changes import build_fs_changeset
+    from frictionsim2d.agent.changes import build_fs_changeset
     change = build_fs_changeset(make_deps(tmp_path, mock_settings), 'mk', [('mkdir', 'materials')])
     pane = _pane([])
     assert pane.pending_box.isHidden()
@@ -231,7 +231,7 @@ def test_file_card_discard_removes_it_and_says_so(qt_app, env, tmp_path, mock_se
 
 def test_pending_strip_scrolls_only_past_three_cards(qt_app, env, tmp_path, mock_settings):
     from PySide6.QtCore import Qt
-    from src.agent.changes import build_fs_changeset
+    from frictionsim2d.agent.changes import build_fs_changeset
     deps = make_deps(tmp_path, mock_settings)
     pane = _pane([])
     changes = [build_fs_changeset(deps, f'mk{i}', [('mkdir', f'd{i}')]) for i in range(4)]
@@ -762,7 +762,7 @@ def test_tool_result_is_indented(qt_app, env):
 
 
 def test_shutdown_prunes_finished_orphan_threads(qt_app, env):
-    from src.gui.assistant import pane as pane_module
+    from frictionsim2d.gui.assistant import pane as pane_module
 
     class Finished:
         def isRunning(self):
@@ -776,7 +776,7 @@ def test_shutdown_prunes_finished_orphan_threads(qt_app, env):
 
 
 def _plot_change(tmp_path, mock_settings):
-    from src.agent.plot_changes import build_plot_change
+    from frictionsim2d.agent.plot_changes import build_plot_change
     deps = make_deps(tmp_path, mock_settings)
     outputs = deps.roots.workspace / 'campaign' / 'outputs'
     outputs.mkdir(parents=True)
@@ -855,7 +855,7 @@ def test_claude_offers_opus_sonnet_and_haiku(qt_app, env):
 # ---------------------------------------------------------------- fine-tunes
 
 def _tune(tmp_path, schema_hash='b8b78921bc6dd497'):
-    from src.agent.bundles import FineTune
+    from frictionsim2d.agent.bundles import FineTune
     bundle = tmp_path / 'models' / 'qwen3.5-4b'
     bundle.mkdir(parents=True)
     (bundle / 'model.gguf').write_bytes(b'w')
@@ -956,7 +956,7 @@ def test_remote_base_url_no_install(qt_app, env, tmp_path):
 
 
 def test_schema_mismatch_is_logged_once_not_told(qt_app, env, tmp_path, caplog):
-    with caplog.at_level('WARNING', logger='src.gui.assistant.pane'):
+    with caplog.at_level('WARNING', logger='frictionsim2d.gui.assistant.pane'):
         pane, _ = _tune_pane(tmp_path, tune=_tune(tmp_path, schema_hash='aaaa'),
                              models=['qwen3.5:4b', 'fs2d-assistant:qwen3.5-4b'],
                              schema_hash_fn=lambda: 'bbbb')
@@ -970,7 +970,7 @@ def test_schema_mismatch_is_logged_once_not_told(qt_app, env, tmp_path, caplog):
 
 
 def test_schema_match_no_log(qt_app, env, tmp_path, caplog):
-    with caplog.at_level('WARNING', logger='src.gui.assistant.pane'):
+    with caplog.at_level('WARNING', logger='frictionsim2d.gui.assistant.pane'):
         pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:qwen3.5-4b'])
     assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:qwen3.5-4b)'
     assert not any('tool schema' in r.message for r in caplog.records)

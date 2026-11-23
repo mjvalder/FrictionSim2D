@@ -1,9 +1,9 @@
-"""MLIP flavour inference in :class:`~src.hpc.manifest.JobManifest`.
+"""MLIP flavour inference in :class:`~frictionsim2d.hpc.manifest.JobManifest`.
 
 `hpc generate` builds its manifest by *discovering* a built simulation tree
 (`JobManifest.from_simulation_directory`), not by reading configs. So the only
 place the GPU/framework facts survive into the manifest is the run path: the
-``pot_<slug>_<stem>`` segment ``src.run.naming.output_dir_for`` emits for an
+``pot_<slug>_<stem>`` segment ``frictionsim2d.run.naming.output_dir_for`` emits for an
 MLIP sheet (``pot_mace_<stem>`` / ``pot_deepmd-d3_<stem>``, merge decision 1).
 
 Without this inference the ``(needs_gpu, framework)`` job grouping can never
@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from src.core.mlip import get_mlip
-from src.hpc.manifest import JobManifest, parse_mlip_flavor
-from src.run.naming import output_dir_for
+from frictionsim2d.core.mlip import get_mlip
+from frictionsim2d.hpc.manifest import JobManifest, parse_mlip_flavor
+from frictionsim2d.run.naming import output_dir_for
 
 SHEET = 'sheetonsheet/h-MoS2/50x_50y/K300'
 AFM = 'afm/h-MoS2/50x_50y/sub_amorph-Si_tip_Si_r25/K300'

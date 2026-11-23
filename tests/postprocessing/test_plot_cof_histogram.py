@@ -14,7 +14,7 @@ matplotlib.use('Agg')
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from src.postprocessing.plot_data import Plotter  # noqa: E402
+from frictionsim2d.postprocessing.plot_data import Plotter  # noqa: E402
 
 
 def test_mean_load_ratio_matches_handcalc():
@@ -87,8 +87,8 @@ def test_dataset_series_is_the_label_rows_mean_per_load(tmp_path):
 
 
 def test_dataset_series_feeds_the_histogram_and_names_a_bad_label(tmp_path, monkeypatch):
-    from src.postprocessing.plot_config import ExternalSeries
-    from src.postprocessing.plot_data import PlotDataError
+    from frictionsim2d.postprocessing.plot_config import ExternalSeries
+    from frictionsim2d.postprocessing.plot_data import PlotDataError
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
     plotter._db_summary_rows.extend(_mlip_rows('deepmd'))  # pylint: disable=protected-access
     drawn = {}

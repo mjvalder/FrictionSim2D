@@ -1,4 +1,4 @@
-"""Tests for indent delivery / postprocessing (src/postprocessing/indent.py)."""
+"""Tests for indent delivery / postprocessing (frictionsim2d/postprocessing/indent.py)."""
 
 import csv
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.postprocessing import indent
+from frictionsim2d.postprocessing import indent
 from tests.helpers.results_tree import make_family_run
 
 
@@ -32,7 +32,7 @@ def test_parse_wall_seconds():
 
 
 def test_split_by_load_groups_per_load_and_seed(tmp_path: Path):
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
 
     _make_run(tmp_path)
     runs = DataReader(results_dir=str(tmp_path)).runs
@@ -45,7 +45,7 @@ def test_split_by_load_groups_per_load_and_seed(tmp_path: Path):
 
 
 def test_iter_hold_conditions_yields_material_layer_load(tmp_path: Path):
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
 
     _make_run(tmp_path)
     runs = DataReader(results_dir=str(tmp_path)).runs

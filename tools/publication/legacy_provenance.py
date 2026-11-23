@@ -7,7 +7,7 @@ it cannot know as ``None`` (or a ``legacy`` marker where the model needs a value
 
 An MLIP run whose directory uses the old ``K300_<framework>-native-<d3|base>``
 token is moved to the path today's builder would give it
-(:func:`src.run.naming.output_dir_for`), and the old relative path is rewritten
+(:func:`frictionsim2d.run.naming.output_dir_for`), and the old relative path is rewritten
 in its ``lammps/`` text files, which embed it.
 
 Meant for COPIES of legacy trees (the publication sets are staged under
@@ -28,11 +28,11 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.aiida.block_schema import SPRING_METHODS
-from src.data.models import NM_TO_EV_A2
-from src.data.provenance import (MaterialProvenance, ProvenanceRecord, config_hash,
+from frictionsim2d.aiida.block_schema import SPRING_METHODS
+from frictionsim2d.data.models import NM_TO_EV_A2
+from frictionsim2d.data.provenance import (MaterialProvenance, ProvenanceRecord, config_hash,
                                  new_run_uuid)
-from src.run.naming import output_dir_for, parse_run_path
+from frictionsim2d.run.naming import output_dir_for, parse_run_path
 
 #: Values for required record fields that a legacy tree never recorded.
 LEGACY_GIT_COMMIT = 'unknown-legacy'

@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.construction import components
-from src.core.config import SheetConfig, load_settings
+from frictionsim2d.builders.construction import components
+from frictionsim2d.core.config import SheetConfig, load_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MOS2_CIF = REPO_ROOT / 'examples' / 'materials' / 'h-MoS2.cif'
@@ -132,7 +132,7 @@ def test_mlip_stacking_data_file_carries_no_pair_coeffs(tmp_path):
     is the fix.
     """
     template = (Path(__file__).resolve().parents[2]
-                / 'src' / 'templates' / 'common' / 'stack_layers.lmp')
+                / 'frictionsim2d' / 'templates' / 'common' / 'stack_layers.lmp')
     text = template.read_text(encoding='utf-8')
     write_lines = [ln for ln in text.splitlines() if ln.strip().startswith('write_data')]
     assert write_lines, 'stack_layers.lmp should write the stacked structure'

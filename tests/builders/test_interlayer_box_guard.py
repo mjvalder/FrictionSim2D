@@ -1,4 +1,4 @@
-"""ILP/KC box-size guard (src/builders/utils/interlayer.py).
+"""ILP/KC box-size guard (frictionsim2d/builders/utils/interlayer.py).
 
 The run scripts use ``comm_style tiled``, which reaches one periodic image
 only, so under ``ilp``/``kc`` every perpendicular in-plane width of the cell
@@ -9,10 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.builders.utils.interlayer import (check_interlayer_box,
+from frictionsim2d.builders.utils.interlayer import (check_interlayer_box,
                                            check_interlayer_box_from_data,
                                            periodic_widths, read_data_cell)
-from src.potentials.interlayer import ILP_CUTOFF, KC_FULL_CUTOFF
+from frictionsim2d.potentials.interlayer import ILP_CUTOFF, KC_FULL_CUTOFF
 
 SKIN = 0.3
 

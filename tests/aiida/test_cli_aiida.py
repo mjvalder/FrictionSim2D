@@ -13,16 +13,16 @@ pytestmark = pytest.mark.aiida
 from aiida import orm  # noqa: E402
 from click.testing import CliRunner  # noqa: E402
 
-from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.store import BLOCK_HASH_EXTRA  # noqa: E402
-from src.cli import cli  # noqa: E402
+from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.store import BLOCK_HASH_EXTRA  # noqa: E402
+from frictionsim2d.cli import cli  # noqa: E402
 from tests.aiida.test_steps_integrity import _pid, _tree, _write_ruling  # noqa: E402
 
 
 @pytest.fixture
 def store(aiida_profile_clean, monkeypatch, tmp_path):
     """A clean profile no command can leave, and no per-user settings."""
-    import src.aiida as aiida_pkg
+    import frictionsim2d.aiida as aiida_pkg
     monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
     return aiida_profile_clean

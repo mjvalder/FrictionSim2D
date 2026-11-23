@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase.io import write, read
-from src.lattice.apply import _detect_atom_style, strain_monolayer_to_cell
+from frictionsim2d.lattice.apply import _detect_atom_style, strain_monolayer_to_cell
 from tests.helpers.lattice import _flake_lattice_orientation
 
 
@@ -102,8 +102,8 @@ def test_strain_hex_cell_with_xy_tilt_preserves_z_and_returns_strain(tmp_path):
 # --- D3: rotate_layer_to_angle (ASE rotate-in-cell + canonicalise) ---
 
 def _build_mos2_monolayer():
-    from src.builders import components
-    from src.core.config import SheetConfig
+    from frictionsim2d.builders import components
+    from frictionsim2d.core.config import SheetConfig
     cfg = SheetConfig(mat="h-MoS2", pot_type="sw",
                       pot_path="examples/potentials/sw/MoS2_wen.sw",
                       cif_path="examples/materials/h-MoS2.cif",
@@ -113,7 +113,7 @@ def _build_mos2_monolayer():
 
 
 def test_rotate_layer_to_angle_produces_intended_rotation(tmp_path):
-    from src.lattice.apply import rotate_layer_to_angle
+    from frictionsim2d.lattice.apply import rotate_layer_to_angle
     src = _build_mos2_monolayer()
     out = tmp_path / "rot.data"
     achieved = rotate_layer_to_angle(src, 12.0, str(out))
@@ -136,9 +136,9 @@ def test_rotate_layer_to_angle_produces_intended_rotation(tmp_path):
 
 def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):
     from ase.io import read
-    from src.core.config import FlakeConfig
-    from src.builders.construction.components import build_flake_component
-    from src.lattice.apply import rotate_flake_in_plane
+    from frictionsim2d.core.config import FlakeConfig
+    from frictionsim2d.builders.construction.components import build_flake_component
+    from frictionsim2d.lattice.apply import rotate_flake_in_plane
 
     MAT, POT = "examples/materials", "examples/potentials/sw"
     flake_cfg = FlakeConfig(shape="hexagon", edge_length=14.0, corner_radius=3.0,

@@ -39,8 +39,8 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 
-from src.core.config import IntegritySettings
-from src.postprocessing.read_data import DataReader
+from frictionsim2d.core.config import IntegritySettings
+from frictionsim2d.postprocessing.read_data import DataReader
 
 MODELS = {'afm': 'afm', 'sheet': 'sheetonsheet'}
 MARGINS = (0.5, 0.6, 0.7, 0.8, 0.9)

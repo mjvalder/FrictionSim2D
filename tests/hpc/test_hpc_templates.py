@@ -1,6 +1,6 @@
 """Every hpc/*.j2 must be rendered by some test: they are reached only by
 f-string name construction (`scripts.py` builds `f"{scheduler}_array.j2"` /
-`f"{scheduler}_combined.j2"`), so a filename grep across src/ finds no static
+`f"{scheduler}_combined.j2"`), so a filename grep across frictionsim2d/ finds no static
 reference and a typo in one scheduler/shape combination would ship undetected.
 
 Renders through HPCScriptGenerator directly (not the now-deleted
@@ -23,11 +23,11 @@ from pathlib import Path
 
 import pytest
 
-from src.hpc.manifest import JobEntry, JobManifest
-from src.hpc.scripts import HPCConfig, HPCScriptGenerator
+from frictionsim2d.hpc.manifest import JobEntry, JobManifest
+from frictionsim2d.hpc.scripts import HPCConfig, HPCScriptGenerator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE_DIR = REPO_ROOT / "src" / "templates" / "hpc"
+TEMPLATE_DIR = REPO_ROOT / "frictionsim2d" / "templates" / "hpc"
 
 
 def _config() -> HPCConfig:

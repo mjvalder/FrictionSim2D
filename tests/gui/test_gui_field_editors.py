@@ -17,7 +17,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.gui.schema.introspect import FieldKind, FieldSpec  # noqa: E402
+from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec  # noqa: E402
 
 
 @pytest.fixture(scope='module', name='qt_app')
@@ -34,13 +34,13 @@ class TestStringChoices:
     versus not-AA. A combo is honest about that without changing the model."""
 
     def test_a_string_field_with_choices_becomes_a_combo(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         assert hasattr(editor, 'box')
 
     def test_the_declared_choices_are_offered(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         offered = {editor.box.itemData(i) for i in range(editor.box.count())}
@@ -49,14 +49,14 @@ class TestStringChoices:
     def test_an_unrecognised_value_is_preserved_not_snapped(self, qt_app):
         """The regression: opening a hand-written `stack_type = ABC` and saving
         used to write AA, silently changing the simulation."""
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         editor.set_value('ABC')
         assert editor.value() == 'ABC'
 
     def test_an_unrecognised_value_is_flagged(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         editor.set_value('ABC')
@@ -64,7 +64,7 @@ class TestStringChoices:
         assert 'ABC' in editor.warning()
 
     def test_a_recognised_value_is_not_flagged(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         editor.set_value('AB')
@@ -74,7 +74,7 @@ class TestStringChoices:
         """load() reuses long-lived editors, so the same widget sees many
         configs. A stale synthetic item made findData succeed on the second
         visit, so the value was no longer recognised as unrecognised."""
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         editor.set_value('ABC')
@@ -84,7 +84,7 @@ class TestStringChoices:
         assert editor.warning() is not None
 
     def test_synthetic_entries_do_not_accumulate(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         before = editor.box.count()
@@ -96,7 +96,7 @@ class TestStringChoices:
         """The user correcting a flagged field is the normal path. Clearing the
         flag without removing the item leaves it for findData to match later,
         which silently un-flags the value on the next load()."""
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(), choices=('AA', 'AB'))
         before = editor.box.count()
@@ -115,7 +115,7 @@ class TestStringChoices:
 class TestRegistry:
 
     def test_an_unknown_slug_falls_back_to_the_kind(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         editor = build_editor(_spec(kind=FieldKind.STR), editor='no_such_slug')
         assert hasattr(editor, 'edit')
@@ -124,12 +124,12 @@ class TestRegistry:
 class TestStackingOverride:
 
     def test_stacking_offers_only_aa_and_ab(self):
-        from src.gui.schema.overrides import section_override
+        from frictionsim2d.gui.schema.overrides import section_override
 
         assert section_override('2D').fields['stack_type'].choices == ('AA', 'AB')
 
     def test_stacking_explains_itself(self):
-        from src.gui.schema.overrides import section_override
+        from frictionsim2d.gui.schema.overrides import section_override
 
         override = section_override('2D').fields['stack_type']
         assert override.help
@@ -146,7 +146,7 @@ class TestLangevinBands:
 
     @pytest.fixture(name='editor')
     def _editor(self, qt_app):
-        from src.gui.widgets.bands import LangevinBoundaryEditor
+        from frictionsim2d.gui.widgets.bands import LangevinBoundaryEditor
 
         return LangevinBoundaryEditor(_spec(key='langevin_boundaries',
                                             kind=FieldKind.DICT))
@@ -157,7 +157,7 @@ class TestLangevinBands:
 
     def test_the_settings_default_round_trips(self, editor):
         """Against the model, not a copy of it."""
-        from src.core.config import ThermostatSettings
+        from frictionsim2d.core.config import ThermostatSettings
 
         bands = ThermostatSettings().langevin_boundaries
         editor.set_value(bands)
@@ -207,7 +207,7 @@ class TestKeyValueGrid:
     @pytest.fixture(name='editor')
     def _editor(self, qt_app):
         """output.dump: Dict[str, bool]."""
-        from src.gui.widgets.keyvalue import KeyValueGridEditor
+        from frictionsim2d.gui.widgets.keyvalue import KeyValueGridEditor
 
         return KeyValueGridEditor(
             _spec(key='dump', kind=FieldKind.DICT, item_kind=FieldKind.BOOL))
@@ -215,7 +215,7 @@ class TestKeyValueGrid:
     @pytest.fixture(name='int_editor')
     def _int_editor(self, qt_app):
         """output.dump_frequency: Dict[str, int]."""
-        from src.gui.widgets.keyvalue import KeyValueGridEditor
+        from frictionsim2d.gui.widgets.keyvalue import KeyValueGridEditor
 
         return KeyValueGridEditor(
             _spec(key='dump_frequency', kind=FieldKind.DICT, item_kind=FieldKind.INT))
@@ -262,7 +262,7 @@ class TestKeyValueGrid:
         box instead of a checkbox."""
         from PySide6.QtWidgets import QCheckBox
 
-        from src.gui.widgets.keyvalue import KeyValueGridEditor
+        from frictionsim2d.gui.widgets.keyvalue import KeyValueGridEditor
 
         editor = KeyValueGridEditor(
             _spec(key='dump', kind=FieldKind.DICT, item_kind=FieldKind.BOOL))
@@ -275,7 +275,7 @@ class TestFixedList:
 
     @pytest.fixture(name='editor')
     def _editor(self, qt_app):
-        from src.gui.widgets.keyvalue import FixedListEditor
+        from frictionsim2d.gui.widgets.keyvalue import FixedListEditor
 
         return FixedListEditor(_spec(key='quench_slab_dims', kind=FieldKind.LIST,
                                      item_kind=FieldKind.INT))
@@ -301,7 +301,7 @@ class TestPathEditorBrowse:
     def test_a_file_browse_selection_raises_editing_finished(self, qt_app, monkeypatch):
         from PySide6.QtWidgets import QFileDialog
 
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
                                     kind=FieldKind.PATH, required=True))
@@ -319,7 +319,7 @@ class TestPathEditorBrowse:
                                                                    monkeypatch):
         from PySide6.QtWidgets import QFileDialog
 
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
                                     kind=FieldKind.PATH, required=True))
@@ -339,7 +339,7 @@ class TestPathEditorBrowse:
         """No path chosen -- nothing changed, nothing to rescan."""
         from PySide6.QtWidgets import QFileDialog
 
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
                                     kind=FieldKind.PATH, required=True))
@@ -356,7 +356,7 @@ class TestSetErrorIdempotence:
     """set_error should not restyle the field when repeating the same state."""
 
     def test_set_error_is_idempotent(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT, required=False))
         calls = []
@@ -372,8 +372,8 @@ class TestDefaultGhosting:
     box reads as "unset, will fall back to X" rather than "unset, no idea"."""
 
     def test_optional_field_ghosts_its_default(self, qt_app):
-        from src.gui.schema.introspect import FieldSpec, FieldKind
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.schema.introspect import FieldSpec, FieldKind
+        from frictionsim2d.gui.widgets.fields import build_editor
         ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT,
                                     required=False, default=80.0))
         assert ed.edit.placeholderText() == 'default: 80.0'
@@ -391,7 +391,7 @@ class TestEmptyListRoundTrip:
 
     def _editor(self, qt_app, default):
         del qt_app
-        from src.gui.widgets.fields import _ListEditor
+        from frictionsim2d.gui.widgets.fields import _ListEditor
 
         return _ListEditor(_spec(key='optional_channels',
                                  kind=FieldKind.LIST,
@@ -445,7 +445,7 @@ class TestAssistantHighlight:
     an error decoration on the same field must still show."""
 
     def test_highlight_sets_tooltip_and_background(self, qt_app):
-        from src.gui.widgets.fields import HIGHLIGHT_COLOR, build_editor
+        from frictionsim2d.gui.widgets.fields import HIGHLIGHT_COLOR, build_editor
 
         ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT, required=False))
         ed.set_base_tooltip('help text')
@@ -459,7 +459,7 @@ class TestAssistantHighlight:
         assert HIGHLIGHT_COLOR not in ed.edit.styleSheet()
 
     def test_error_and_highlight_combine(self, qt_app):
-        from src.gui.widgets.fields import HIGHLIGHT_COLOR, build_editor
+        from frictionsim2d.gui.widgets.fields import HIGHLIGHT_COLOR, build_editor
 
         ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT, required=False))
         ed.set_highlight('1 → 2')
@@ -472,7 +472,7 @@ class TestAssistantHighlight:
         assert HIGHLIGHT_COLOR in ed.edit.styleSheet()
 
     def test_non_text_editor_fills_its_background(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         ed = build_editor(FieldSpec(name='b', key='b', kind=FieldKind.BOOL, required=False))
         ed.set_highlight('False → True')
@@ -481,7 +481,7 @@ class TestAssistantHighlight:
         assert not ed.autoFillBackground()
 
     def test_palette_only_changes_with_the_highlight(self, qt_app):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         ed = build_editor(FieldSpec(name='b', key='b', kind=FieldKind.BOOL, required=False))
         calls = []
@@ -501,12 +501,12 @@ class TestPotTypeEditor:
     """pot_type: the known types in a combo, anything else via Custom…."""
 
     def _editor(self):
-        from src.gui.widgets.fields import build_editor
+        from frictionsim2d.gui.widgets.fields import build_editor
 
         return build_editor(_spec('pot_type'), editor='pot_type')
 
     def test_pot_type_editor_custom_roundtrip(self, qt_app):
-        from src.potentials.utils import KNOWN_TYPES
+        from frictionsim2d.potentials.utils import KNOWN_TYPES
 
         editor = self._editor()
         offered = [editor.box.itemData(i) for i in range(editor.box.count())]

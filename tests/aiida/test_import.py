@@ -19,13 +19,13 @@ pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
 
-from src.aiida.ingest import (  # noqa: E402
+from frictionsim2d.aiida.ingest import (  # noqa: E402
     ImportReport, LoadPoint, SetRootMismatch, group_label, import_root,
     load_points, supersede,
 )
-from src.aiida.store import DECK_KEY_EXTRA, DECK_SHA_EXTRA  # noqa: E402
-from src.data.provenance import config_hash  # noqa: E402
-from src.run.tree import discover_runs  # noqa: E402
+from frictionsim2d.aiida.store import DECK_KEY_EXTRA, DECK_SHA_EXTRA  # noqa: E402
+from frictionsim2d.data.provenance import config_hash  # noqa: E402
+from frictionsim2d.run.tree import discover_runs  # noqa: E402
 from tests.helpers.results_tree import (  # noqa: E402
     make_family_run, slide_config, write_final_data,
 )
@@ -436,7 +436,7 @@ def test_a_truncated_slide_trace_is_a_truncated_point(aiida_profile_clean, tmp_p
 
 def test_files_over_max_stored_file_mb_are_recorded_not_stored(aiida_profile_clean,
                                                               tmp_path, monkeypatch):
-    from src.aiida import calcjob
+    from frictionsim2d.aiida import calcjob
     monkeypatch.setattr(calcjob, '_max_stored_file_mb', lambda: 0)   # every byte is over
     root = tmp_path / 'sim'
     run_dir = make_family_run(root, 'afm', loads=(10.0, 30.0), tiers=('window', 'peratom'),
@@ -588,7 +588,7 @@ def test_a_machine_label_with_another_host_is_reused_with_a_warning(aiida_profil
                                                                     tmp_path):
     import yaml
 
-    from src.aiida.store import machine_computer
+    from frictionsim2d.aiida.store import machine_computer
 
     existing = machine_computer('archer2', {'hpc_host': 'login.archer2.ac.uk',
                                             'scheduler_type': 'slurm'})
@@ -611,7 +611,7 @@ def _with_settings_machine(monkeypatch, machine):
     """settings.aiida.machine = `machine`, as `ingest._settings_machine` reads it."""
     from types import SimpleNamespace
     settings = SimpleNamespace(aiida=SimpleNamespace(machine=machine))
-    monkeypatch.setattr('src.aiida.ingest._load_settings', lambda settings_file=None: settings)
+    monkeypatch.setattr('frictionsim2d.aiida.ingest._load_settings', lambda settings_file=None: settings)
 
 
 def test_settings_aiida_machine_names_the_computer(aiida_profile_clean, tmp_path,
@@ -668,7 +668,7 @@ def test_without_settings_yaml_the_machine_is_the_configs_hpc_host(aiida_profile
 
 def test_a_parse_failure_keeps_run_info_and_is_retried(aiida_profile_clean, tmp_path,
                                                       monkeypatch):
-    from src.aiida import calcjob
+    from frictionsim2d.aiida import calcjob
 
     def boom(self, *args, **kwargs):
         raise RuntimeError('boom')
@@ -704,7 +704,7 @@ def test_on_point_sees_every_new_point(aiida_profile_clean, tmp_path):
 
 
 def test_reindex_restores_the_deck_key(aiida_profile_clean, tmp_path):
-    from src.aiida.store import reindex
+    from frictionsim2d.aiida.store import reindex
     import_root(_tree(tmp_path / 'sim', materials=('h-MoS2',)), label='camp')
     keys = {n.pk: n.base.extras.get(DECK_KEY_EXTRA) for n in _calcjobs()}
     for node in _calcjobs():
@@ -812,7 +812,7 @@ def test_every_family_yields_a_load_point(tmp_path, family, rel, load_kind):
 
 
 def test_families_tuple_is_fully_covered():
-    from src.core.observables import FAMILIES
+    from frictionsim2d.core.observables import FAMILIES
     assert {f for f, _rel, _kind in FAMILY_CASES} == set(FAMILIES)
 
 
@@ -832,7 +832,7 @@ def test_importing_ingest_does_not_require_aiida():
     code = (
         "import sys\n"
         "sys.modules['aiida'] = None\n"
-        "import src.aiida.ingest as ingest\n"
+        "import frictionsim2d.aiida.ingest as ingest\n"
         "assert sys.modules.get('aiida') is None\n"
         "assert hasattr(ingest, 'load_points') and hasattr(ingest, 'import_root')\n"
         "print('OK')\n"

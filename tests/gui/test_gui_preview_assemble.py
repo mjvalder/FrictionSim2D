@@ -16,10 +16,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.run.artifacts import discover_preview_target, generate_package
-from src.gui.preview.assemble import assemble, to_ovito
-from src.gui.preview.init_script import parse_assembly
-from src.gui.preview.settings_file import parse_identity
+from frictionsim2d.run.artifacts import discover_preview_target, generate_package
+from frictionsim2d.gui.preview.assemble import assemble, to_ovito
+from frictionsim2d.gui.preview.init_script import parse_assembly
+from frictionsim2d.gui.preview.settings_file import parse_identity
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -110,7 +110,7 @@ class TestShiftIsApplied:
         placements = {p.group: (p, path) for p, path in assembly.resolved_placements()}
         placement, path = placements['tip']
 
-        from src.gui.preview.assemble import _read_component
+        from frictionsim2d.gui.preview.assemble import _read_component
         raw_positions, _ = _read_component(path)
 
         component = next(c for c in system.components if c.name == 'tip')
@@ -124,7 +124,7 @@ class TestShiftIsApplied:
         placements = {p.group: (p, path) for p, path in assembly.resolved_placements()}
         _, path = placements['sub']
 
-        from src.gui.preview.assemble import _read_component
+        from frictionsim2d.gui.preview.assemble import _read_component
         raw_positions, _ = _read_component(path)
 
         component = next(c for c in system.components if c.name == 'sub')

@@ -13,7 +13,7 @@ before -- and asserts the four contracts that go unchecked today:
 Nothing is mocked. Builds are session-scoped and shared: ``generate_package`` is
 the slow part, so each config is built at most once per session and every test
 reads that one tree. ``allow_generate_amorphous=False`` keeps the melt-quench out
-of the tier; the pre-generated ``src/data/materials/amor_Si.lmp`` is used instead.
+of the tier; the pre-generated ``frictionsim2d/data/materials/amor_Si.lmp`` is used instead.
 
 Two families need special handling.
 
@@ -28,7 +28,7 @@ that list, so its first member is byte-for-byte the member the real campaign
 would build first.
 
 *Hetero.* A hetero build shells out to ``lmp_serial``
-(``src/builders/construction/hetero_stack.py`` ``_run_lammps``), so it cannot run
+(``frictionsim2d/builders/construction/hetero_stack.py`` ``_run_lammps``), so it cannot run
 in the LAMMPS-free fast tier. Its case carries an ``lmp_serial`` skipif and
 ``conftest.py`` derives the ``lammps`` marker from that guard automatically.
 """
@@ -41,8 +41,8 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import pytest
 
-from src.core.config import read_config
-from src.run.expand import count_expansion
+from frictionsim2d.core.config import read_config
+from frictionsim2d.run.expand import count_expansion
 from tests.helpers.examples import (
     CAMPAIGNS, CASES, EXAMPLES, HETERO, REPO_ROOT,
 )

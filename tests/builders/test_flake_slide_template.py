@@ -23,7 +23,7 @@ vector.
 from pathlib import Path
 
 TEMPLATE = (Path(__file__).resolve().parents[2]
-            / 'src' / 'templates' / 'flake' / 'slide.lmp')
+            / 'frictionsim2d' / 'templates' / 'flake' / 'slide.lmp')
 
 
 def _source() -> str:

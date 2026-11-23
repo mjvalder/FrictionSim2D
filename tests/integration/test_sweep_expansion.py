@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from src.run.artifacts import generate_package
+from frictionsim2d.run.artifacts import generate_package
 from tests.helpers.examples import EXAMPLES, REPO_ROOT
 
 pytestmark = pytest.mark.integration

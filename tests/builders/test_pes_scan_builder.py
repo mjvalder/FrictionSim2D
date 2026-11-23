@@ -1,4 +1,4 @@
-"""Tests for the static PES-scan builders (src/builders/pes_scan.py)."""
+"""Tests for the static PES-scan builders (frictionsim2d/builders/pes_scan.py)."""
 
 import logging
 import math
@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.afm.pes_tip import PESTipSimulation
-from src.builders.utils.pes_common import _cell_period
-from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation, _tile_count
-from src.core.config import (
+from frictionsim2d.builders.afm.pes_tip import PESTipSimulation
+from frictionsim2d.builders.utils.pes_common import _cell_period
+from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation, _tile_count
+from frictionsim2d.core.config import (
     AFMSimulationConfig,
     FlakeConfig,
     SheetOnSheetSimulationConfig,
@@ -68,7 +68,7 @@ def test_cell_period_subtracts_lo_not_just_hi():
     # themselves are h-MoS2's own lattice constant (examples/materials/
     # h-MoS2.cif, a=3.1840664646845926) orthogonalized the way this
     # codebase's own hex-to-orthogonal conversions scale y by sqrt(3)
-    # (src/builders/construction/components.py:156,220,225-226) -- real
+    # (frictionsim2d/builders/construction/components.py:156,220,225-226) -- real
     # numbers, but the origin offset, not the numbers' realism, is what
     # makes the assertion discriminate a correct implementation from a
     # wrong one.
@@ -123,7 +123,7 @@ def test_pes_sheet_build_forces_none_constraint(tmp_path: Path, monkeypatch):
     def fake_super_build(self):
         seen["constraint_mode"] = self.config.settings.simulation.constraint_mode
 
-    monkeypatch.setattr("src.builders.sheetonsheet.SheetOnSheetSimulation.build", fake_super_build)
+    monkeypatch.setattr("frictionsim2d.builders.sheetonsheet.SheetOnSheetSimulation.build", fake_super_build)
     builder.build()
     assert seen["constraint_mode"] == "none"
 
@@ -162,7 +162,7 @@ def test_pes_sheet_write_inputs_renders_scan(tmp_path: Path):
 
 def test_pes_tip_uses_fixed_contact_gap():
     """Tip scan is a fixed firm-contact scan (no repulsive-load setpoint)."""
-    from src.builders.afm.pes_tip import PES_TIP_CONTACT_GAP
+    from frictionsim2d.builders.afm.pes_tip import PES_TIP_CONTACT_GAP
     assert PES_TIP_CONTACT_GAP > 0
 
 
@@ -317,7 +317,7 @@ def _build_example_pes_sheet(tmp_path, monkeypatch, **general) -> Path:
     12 x 12, or 20 x 20 under ilp/kc: the build refuses a cell narrower than
     their 16 A cutoff + skin (tests/builders/test_interlayer_box_guard.py).
     """
-    from src.core.config import GlobalSettings, read_config
+    from frictionsim2d.core.config import GlobalSettings, read_config
     repo = Path(__file__).resolve().parents[2]
     monkeypatch.chdir(repo)
     raw = read_config(repo / "examples" / "pes_sheet_config.ini")

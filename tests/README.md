@@ -1,10 +1,10 @@
 # tests/
 
-## Layout (mirrors `src/`)
+## Layout (mirrors `frictionsim2d/`)
 
 | directory | tests for |
 |---|---|
-| `core/ run/ potentials/ lattice/ builders/ interfaces/ hpc/ cli/` | the `src` package of the same name |
+| `core/ run/ potentials/ lattice/ builders/ interfaces/ hpc/ cli/` | the `frictionsim2d` package of the same name |
 | `integration/` | cross-package, artifact-level tests (marker `integration`), Phase 3. Nothing is mocked; `generate_package` builds are shared through the session-scoped `build_example` fixture in its `conftest.py`, with the example set in `helpers/examples.py`. Two files carry `lammps`: `test_smoke_lammps.py` and the one hetero case in `test_example_configs.py` (a hetero build shells out to `lmp_serial`) |
 | `repo/` | repo-wide invariants: import surface, import weight, marker derivation, settings isolation, mock-target rule |
 | `helpers/` | code shared by more than one test module — a test module never imports another test module |
@@ -21,7 +21,7 @@ pytest -m integration       # cross-package tier, 103 tests / ~3:20 -- NOTE it o
 pytest -m 'integration and not lammps'   # the same tier without LAMMPS: 97 tests / ~23 s
 pytest -m ""                # everything
 pytest tests/builders       # one package
-pytest --cov=src --cov-report=term-missing tests/core   # coverage for one package
+pytest --cov=frictionsim2d --cov-report=term-missing tests/core   # coverage for one package
 ```
 
 The `lammps` marker is derived in `conftest.py` from each test's `skipif(... lmp_serial ...)`

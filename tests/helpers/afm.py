@@ -3,8 +3,8 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.builders.afm import AFMSimulation
-from src.core.config import AFMSimulationConfig, load_settings
+from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
 # --- bodies moved verbatim from tests/builders/test_afm_builder.py ---
 
@@ -142,7 +142,7 @@ def build_example_afm(tmp_path: Path, monkeypatch, ini: str, builder_cls=AFMSimu
     only on the code. ``sections`` maps an .ini section (``general``, ``2D``,
     ``tip``, ...) to the keys it overrides.
     """
-    from src.core.config import GlobalSettings, read_config  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.core.config import GlobalSettings, read_config  # pylint: disable=import-outside-toplevel
     monkeypatch.chdir(REPO_ROOT)
     raw = read_config(REPO_ROOT / "examples" / ini)
     for section, values in sections.items():

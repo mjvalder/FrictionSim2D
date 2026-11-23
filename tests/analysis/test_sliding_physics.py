@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import src.analysis.catalogue  # noqa: F401  (registers the analyses)
-from src.analysis import sliding_physics as sp
-from src.analysis.base import get_analysis
-from src.analysis.source import RunSource
+import frictionsim2d.analysis.catalogue  # noqa: F401  (registers the analyses)
+from frictionsim2d.analysis import sliding_physics as sp
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.source import RunSource
 
 KB, EV = 8.617333262e-5, 1.602176634          # taxlib/constants.py:2-3
 

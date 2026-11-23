@@ -47,7 +47,7 @@ export LAMMPS_PLUGIN_PATH=$(python -c "import deepmd,os;print(os.path.join(os.pa
 ```
 
 This is the string that later becomes the DeePMD `LauncherSpec.env_lines`
-entry in `src/core/mlip.py`, and the `env_lines:` of the settings.yaml
+entry in `frictionsim2d/core/mlip.py`, and the `env_lines:` of the settings.yaml
 `hpc.frameworks.deepmd` overlay.
 
 DeePMD runs need no special `lmp` flags (`mpi_ranks = 1` is the design point;
@@ -179,7 +179,7 @@ needs neither `mace-torch` nor Python; ship it the `.json`.
 
 ### Runtime flags
 
-The registry (`src/core/mlip.py`, MACE `LauncherSpec.lmp_flags`) emits the
+The registry (`frictionsim2d/core/mlip.py`, MACE `LauncherSpec.lmp_flags`) emits the
 **Kokkos host (OpenMP)** backend, not CUDA:
 
 ```bash
@@ -232,7 +232,7 @@ builds here reach `dispersion/d3` by different routes:
 
 Both therefore accept `<damping> <functional> <rthr> <cn_thr>` with
 `original|zero|zerom|bj|bjm` today. `settings.potential.d3_damping` is
-nonetheless a **canonical** name that `src/core/mlip.py::d3_style_token`
+nonetheless a **canonical** name that `frictionsim2d/core/mlip.py::d3_style_token`
 translates into the token the target build accepts, and the emitted line is
 pinned by a golden test **for each build separately**, so a future divergence
 surfaces as a failing test rather than as wrong physics.

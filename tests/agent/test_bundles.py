@@ -2,8 +2,8 @@
 import json
 import logging
 
-from src.agent import bundles
-from src.agent.bundles import (FineTune, catalogue, sha256_file, verify,
+from frictionsim2d.agent import bundles
+from frictionsim2d.agent.bundles import (FineTune, catalogue, sha256_file, verify,
                                write_bundle)
 
 MANIFEST = {'tag': 'qwen3.5-4b', 'base': 'unsloth/Qwen3.5-4B', 'schema_hash': 'b8b7',
@@ -86,7 +86,7 @@ def test_local_bundle_keeps_published_registry(monkeypatch, tmp_path):
 
 
 def test_verified_schemas_count_as_a_fit(tmp_path):
-    from src.agent.bundles import FineTune
+    from frictionsim2d.agent.bundles import FineTune
     tune = FineTune(tag='t', base='b', schema_hash='old', knowledge_hash='k',
                     verified_schemas=('new',))
     assert tune.fits('old') and tune.fits('new') and not tune.fits('other')

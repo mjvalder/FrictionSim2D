@@ -4,7 +4,7 @@ import stat
 import pytest
 from pydantic import ValidationError
 
-from src.agent.settings import (AgentSettings, api_key, config_dir, gemini_key,
+from frictionsim2d.agent.settings import (AgentSettings, api_key, config_dir, gemini_key,
                                 load_agent_settings, save_agent_settings,
                                 store_api_key, store_gemini_key)
 
@@ -118,7 +118,7 @@ def _legacy(tmp_path, model):
 
 @pytest.mark.parametrize('legacy', ['fs2d-qwen3-4b', 'qwen3:4b'])
 def test_legacy_maps_to_default_when_installable(tmp_path, legacy):
-    from src.agent.settings import fallback_ollama_model
+    from frictionsim2d.agent.settings import fallback_ollama_model
     s = _legacy(tmp_path, legacy)
     assert s.ollama.model == legacy  # kept until we know what is installed
     note = fallback_ollama_model(s, [legacy, 'qwen3:8b'], ['fs2d-assistant:qwen3.5-4b'])
@@ -127,14 +127,14 @@ def test_legacy_maps_to_default_when_installable(tmp_path, legacy):
 
 
 def test_legacy_maps_to_stock_when_default_unavailable(tmp_path):
-    from src.agent.settings import fallback_ollama_model
+    from frictionsim2d.agent.settings import fallback_ollama_model
     s = _legacy(tmp_path, 'fs2d-qwen3-4b')
     note = fallback_ollama_model(s, ['fs2d-qwen3-4b:latest'], [])
     assert s.ollama.model == 'qwen3.5:4b' and 'qwen3.5:4b' in note
 
 
 def test_default_falls_back_to_stock_only_when_unavailable():
-    from src.agent.settings import fallback_ollama_model
+    from frictionsim2d.agent.settings import fallback_ollama_model
     s = AgentSettings()
     assert fallback_ollama_model(s, [], ['fs2d-assistant:qwen3.5-4b']) is None
     assert fallback_ollama_model(s, ['fs2d-assistant:qwen3.5-4b'], []) is None
@@ -144,7 +144,7 @@ def test_default_falls_back_to_stock_only_when_unavailable():
 
 
 def test_migration_runs_once_so_a_later_choice_sticks(tmp_path):
-    from src.agent.settings import fallback_ollama_model
+    from frictionsim2d.agent.settings import fallback_ollama_model
     s = _legacy(tmp_path, 'qwen3:4b')
     fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:qwen3.5-4b'])
     save_agent_settings(s, tmp_path / 'agent.yaml')
@@ -157,7 +157,7 @@ def test_migration_runs_once_so_a_later_choice_sticks(tmp_path):
 
 
 def test_user_choice_untouched(tmp_path):
-    from src.agent.settings import fallback_ollama_model
+    from frictionsim2d.agent.settings import fallback_ollama_model
     s = _legacy(tmp_path, 'mistral:7b')
     assert fallback_ollama_model(s, ['qwen3:4b'], []) is None and s.ollama.model == 'mistral:7b'
 
@@ -189,7 +189,7 @@ def test_new_config_dir_is_owner_only(tmp_path):
 @pytest.mark.parametrize('size', ['2b', '4b', '9b'])
 @pytest.mark.parametrize('v', ['', '-v3'])
 def test_a_fine_tunes_first_name_is_renamed(tmp_path, size, v):
-    from src.agent.settings import fallback_ollama_model
+    from frictionsim2d.agent.settings import fallback_ollama_model
     s = _legacy(tmp_path, f'fs2d-assistant:q35-{size}{v}')
     new = f'fs2d-assistant:qwen3.5-{size}'
     note = fallback_ollama_model(s, [new], [])

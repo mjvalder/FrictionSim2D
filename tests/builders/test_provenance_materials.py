@@ -5,17 +5,17 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from src.builders.afm.base import AFMSimulation
-from src.builders.afm.hetero import FiniteHeteroAFMSimulation, HeteroAFMSimulation
-from src.builders.afm.indent import IndentSimulation
-from src.builders.afm.pes_tip import PESTipSimulation
-from src.builders.sheetonsheet.base import SheetOnSheetSimulation
-from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
-from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
-from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
-from src.builders.simulation_base import SimulationBase
-from src.core.observables import FAMILIES
-from src.run.tree import discover_runs
+from frictionsim2d.builders.afm.base import AFMSimulation
+from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation, HeteroAFMSimulation
+from frictionsim2d.builders.afm.indent import IndentSimulation
+from frictionsim2d.builders.afm.pes_tip import PESTipSimulation
+from frictionsim2d.builders.sheetonsheet.base import SheetOnSheetSimulation
+from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+from frictionsim2d.builders.simulation_base import SimulationBase
+from frictionsim2d.core.observables import FAMILIES
+from frictionsim2d.run.tree import discover_runs
 from tests.helpers.examples import build
 
 FAMILY_BY_CLASS = [
@@ -52,7 +52,7 @@ def test_obs_ctx_is_built_from_the_class_family(monkeypatch):
     test built on it would pass against the un-fixed code just as well as the
     fixed one (confirmed: it did, in the RED run for this task).
     """
-    import src.builders.utils.obs_ctx as obs_mod
+    import frictionsim2d.builders.utils.obs_ctx as obs_mod
 
     seen = {}
     monkeypatch.setattr(obs_mod, 'build_obs_ctx',

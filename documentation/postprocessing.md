@@ -5,8 +5,8 @@ under a root, reads its results files, and writes two machine-readable exports p
 completeness reports. `postprocess plot` reads those exports — never the raw tree — and
 draws figures from a validated plot document.
 
-A "run" is one `provenance.json`. The walk is `src.run.tree.discover_runs`, and the
-directory is parsed by `src.run.naming.parse_run_path`, so the potential, the
+A "run" is one `provenance.json`. The walk is `frictionsim2d.run.tree.discover_runs`, and the
+directory is parsed by `frictionsim2d.run.naming.parse_run_path`, so the potential, the
 temperature, the twist and every other sweep axis reach the export as typed fields
 rather than as directory names nobody parsed.
 
@@ -74,7 +74,7 @@ first belongs to the reader.
     "summary_definition": {                    // which COF made the summary numbers
       "cof": "ratio_of_means: mean(LF)/mean(NF)",
       "skip_fraction": 0.2,
-      "source": "src.data.models.summarise_run"
+      "source": "frictionsim2d.data.models.summarise_run"
     }
   },
   "runs": [                                    // sorted by
@@ -207,7 +207,7 @@ One row per load point. Column order:
 5. **`gap_min, deflect_max, gap_min_il, corrugation_max`** — the post-stream channels,
    `NaN` where the family has none.
 
-**Every number in this file comes from `src.data.models.summarise_run`**, the single COF
+**Every number in this file comes from `frictionsim2d.data.models.summarise_run`**, the single COF
 on the store path — the same function the AiiDA node reads. In
 particular `mean_cof` is `mean(LF)/mean(NF)`, computed after discarding the first
 `skip_fraction` (0.2 by default) of the run as transient.
@@ -248,7 +248,7 @@ Two smaller changes in the same direction:
 
 An analysis turns one AiiDA dataset (`FrictionSim2D aiida dataset`, see
 [aiida.md](aiida.md#6-postprocessing-datasets-and-queries)) into one table. The code is
-`src/analysis/`; every analysis is registered in `src/analysis/catalogue.py`.
+`frictionsim2d/analysis/`; every analysis is registered in `frictionsim2d/analysis/catalogue.py`.
 
 - **Integrity-pass rule.** Every analysis reads only the dataset's points whose integrity
   verdict is `pass`. Each point it leaves out is recorded as `(point_uuid, reason)` in the
@@ -262,7 +262,7 @@ An analysis turns one AiiDA dataset (`FrictionSim2D aiida dataset`, see
 - **Reuse is keyed on the dataset name**, not on its content: a dataset deleted and
   rebuilt under the same name with other points reuses the old results. Rerun with
   `--force` after rebuilding a dataset. Deleting a dataset
-  (`src.aiida.steps.delete_dataset`) deletes every analysis result computed from it,
+  (`frictionsim2d.aiida.steps.delete_dataset`) deletes every analysis result computed from it,
   with a warning and their count in its return value.
 - **Read results.** The period analyses (below) read a stored `sheet_geometry` result,
   and `sliding_physics` the newest stored `contact` result. Each is linked as an input of
@@ -444,7 +444,7 @@ against.
 | `dataset_display_labels` | `Dict[str, str]` |  |
 | `series_color_map` | `Dict[str, Optional[str]]` |  |
 | `comment` | `Optional[str]` | Documentation only |
-| `plots` | `List[Annotated[Union[src.postprocessing.plot_config.SummaryPlot, src.postprocessing.plot_config.TimeseriesPlot, src.postprocessing.plot_config.StickSlipPlot, src.postprocessing.plot_config.ScatterComparisonPlot, src.postprocessing.plot_config.RankFrictionPlot, src.postprocessing.plot_config.CorrelationPlot, src.postprocessing.plot_config.CofHistogramPlot, src.postprocessing.plot_config.StickslipPeriodHistogramPlot, src.postprocessing.plot_config.ContactCofScatterPlot, src.postprocessing.plot_config.SheetProfilePlot, src.postprocessing.plot_config.IntegrityPanelPlot], FieldInfo(annotation=NoneType, required=True, discriminator='plot_type')]]` |  |
+| `plots` | `List[Annotated[Union[frictionsim2d.postprocessing.plot_config.SummaryPlot, frictionsim2d.postprocessing.plot_config.TimeseriesPlot, frictionsim2d.postprocessing.plot_config.StickSlipPlot, frictionsim2d.postprocessing.plot_config.ScatterComparisonPlot, frictionsim2d.postprocessing.plot_config.RankFrictionPlot, frictionsim2d.postprocessing.plot_config.CorrelationPlot, frictionsim2d.postprocessing.plot_config.CofHistogramPlot, frictionsim2d.postprocessing.plot_config.StickslipPeriodHistogramPlot, frictionsim2d.postprocessing.plot_config.ContactCofScatterPlot, frictionsim2d.postprocessing.plot_config.SheetProfilePlot, frictionsim2d.postprocessing.plot_config.IntegrityPanelPlot], FieldInfo(annotation=NoneType, required=True, discriminator='plot_type')]]` |  |
 
 ## `summary`
 
@@ -492,7 +492,7 @@ against.
 | `append_slope_to_legend` | `Optional[bool]` |  |
 | `clip_fit_to_data` | `Optional[bool]` |  |
 | `extend_fit_to_origin` | `Optional[bool]` |  |
-| `external_series` | `Optional[List[src.postprocessing.plot_config.ExternalSeries]]` |  |
+| `external_series` | `Optional[List[frictionsim2d.postprocessing.plot_config.ExternalSeries]]` |  |
 | `external_outline_width` | `Optional[float]` |  |
 | `fit_constraint` | `Optional[Literal['first_point', 'origin', 'none']]` |  |
 | `fit_only` | `Optional[bool]` |  |
@@ -698,8 +698,8 @@ against.
 | `show_identity_line` | `Optional[bool]` |  |
 | `show_point_labels` | `Optional[bool]` |  |
 | `show_r_squared` | `Optional[bool]` |  |
-| `x_source` | `Optional[src.postprocessing.plot_config.SourceSpec]` |  |
-| `y_source` | `Optional[src.postprocessing.plot_config.SourceSpec]` |  |
+| `x_source` | `Optional[frictionsim2d.postprocessing.plot_config.SourceSpec]` |  |
+| `y_source` | `Optional[frictionsim2d.postprocessing.plot_config.SourceSpec]` |  |
 
 ## `rank_friction`
 
@@ -837,7 +837,7 @@ against.
 | `average_timestep_range` | `Optional[List[int]]` |  |
 | `annotate_bars` | `Optional[bool]` |  |
 | `bar_width` | `Optional[float]` |  |
-| `external_series` | `Optional[List[src.postprocessing.plot_config.ExternalSeries]]` |  |
+| `external_series` | `Optional[List[frictionsim2d.postprocessing.plot_config.ExternalSeries]]` |  |
 | `fit_x_range` | `Optional[List[float]]` |  |
 | `slope_decimals` | `Optional[int]` |  |
 | `slope_fit_constraint` | `Optional[Literal['first_point', 'origin', 'none']]` |  |
@@ -894,8 +894,8 @@ against.
 | `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
 | `load_colors` | `Optional[List[str]]` |  |
 | `line_width` | `Optional[float]` |  |
-| `stickslip_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN (or force), lf_period_A, a_x_A, lf_period_clear |
-| `ranking_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, eligible |
+| `stickslip_file` | `Optional[frictionsim2d.postprocessing.plot_config.TableSource]` | material, load_nN (or force), lf_period_A, a_x_A, lf_period_clear |
+| `ranking_file` | `Optional[frictionsim2d.postprocessing.plot_config.TableSource]` | material, eligible |
 | `bins_arange` | `Optional[List[float]]` | [start, stop, step] |
 | `reference_line` | `Optional[float]` | x of the dashed line; null for none |
 
@@ -943,8 +943,8 @@ against.
 | `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
 | `load_colors` | `Optional[List[str]]` |  |
 | `line_width` | `Optional[float]` |  |
-| `contact_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN (or force), state, <x_column> |
-| `ranking_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, eligible, cof_<L>nN |
+| `contact_file` | `Optional[frictionsim2d.postprocessing.plot_config.TableSource]` | material, load_nN (or force), state, <x_column> |
+| `ranking_file` | `Optional[frictionsim2d.postprocessing.plot_config.TableSource]` | material, eligible, cof_<L>nN |
 | `x_column` | `Optional[str]` | Contact column on x (required) |
 | `state` | `Optional[str]` | 'load' (default) or 'final' |
 | `marker_scale` | `Optional[float]` | times markers.size**2 (0.8) |
@@ -1055,8 +1055,8 @@ against.
 | `dataset` | `Optional[str]` | Stored dataset holding the run (instead of run_dir) |
 | `layer` | `Optional[int]` |  |
 | `loads` | `Optional[List[float]]` |  |
-| `traces_file` | `Optional[src.postprocessing.plot_config.TableSource]` | run_id, step, temp_sheet_3d, comz_L1, comz_L2 |
-| `status_file` | `Optional[src.postprocessing.plot_config.TableSource]` | run_id, force, status |
+| `traces_file` | `Optional[frictionsim2d.postprocessing.plot_config.TableSource]` | run_id, step, temp_sheet_3d, comz_L1, comz_L2 |
+| `status_file` | `Optional[frictionsim2d.postprocessing.plot_config.TableSource]` | run_id, force, status |
 | `title_status` | `Literal['completion', 'verdict']` | Dataset panels: 'completion' titles a failed-integrity run as finished (as the published panels); 'verdict' shows its integrity verdict |
 | `dpi` | `Optional[int]` |  |
 

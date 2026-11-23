@@ -1,7 +1,7 @@
-"""Descriptor -> load band scaled by nominal pressure F/R^2 (src.core.scaling)."""
+"""Descriptor -> load band scaled by nominal pressure F/R^2 (frictionsim2d.core.scaling)."""
 import pytest
 
-from src.core.scaling import REGIMES, ScaleContext, ScaledRange, scale
+from frictionsim2d.core.scaling import REGIMES, ScaleContext, ScaledRange, scale
 
 
 AFM = ScaleContext(model='afm', tip_radius_A=25, driving_spring_N_m=8, temperature_K=300)
@@ -80,7 +80,7 @@ def test_every_regime_has_a_source_and_none_claims_measurement():
 
 
 def test_module_docstring_disclaims_measurement():
-    import src.core.scaling as module
+    import frictionsim2d.core.scaling as module
     assert 'not measured regimes' in module.__doc__
     assert 'not a contact model' in module.__doc__
 

@@ -1,12 +1,12 @@
 """Plot proposals: a plot validated against the plot schema, datasets from the workspace."""
 import pytest
 
-from src.agent.changes import ToolInputError, describe_change
-from src.agent.plot_changes import PlotChange, apply_plot_change, build_plot_change
-from src.agent.sandbox import SandboxError
-from src.agent.tools import RESULT_LIMIT
-from src.agent.tools.plots import PlotField, PlotProposalRequest, propose_plot
-from src.postprocessing.plot_config import PlotDocument
+from frictionsim2d.agent.changes import ToolInputError, describe_change
+from frictionsim2d.agent.plot_changes import PlotChange, apply_plot_change, build_plot_change
+from frictionsim2d.agent.sandbox import SandboxError
+from frictionsim2d.agent.tools import RESULT_LIMIT
+from frictionsim2d.agent.tools.plots import PlotField, PlotProposalRequest, propose_plot
+from frictionsim2d.postprocessing.plot_config import PlotDocument
 from tests.helpers.agent import make_deps
 
 
@@ -206,7 +206,7 @@ def test_symlinked_workspace_matches_loaded_datasets(tmp_path, mock_settings):
     link = tmp_path / 'link'
     link.symlink_to(real, target_is_directory=True)
     deps = make_deps(tmp_path, mock_settings)
-    from src.agent.sandbox import SearchRoots
+    from frictionsim2d.agent.sandbox import SearchRoots
     deps.roots = SearchRoots(link, None)
     deps.plot_document = PlotDocument(data_dirs=[str(real / 'campaign')],
                                       labels=['campaign']).model_dump(mode='json')

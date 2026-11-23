@@ -11,16 +11,16 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
-from src.gui.schema import introspect
-from src.gui.schema.introspect import (
+from frictionsim2d.core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
+from frictionsim2d.gui.schema import introspect
+from frictionsim2d.gui.schema.introspect import (
     EXCLUDED_ROOT_FIELDS,
     FieldKind,
     describe_model,
     describe_section,
 )
-from src.gui.schema.overrides import SectionOverride, overrides_for, section_override
-from src.gui.schema.simulation_types import (
+from frictionsim2d.gui.schema.overrides import SectionOverride, overrides_for, section_override
+from frictionsim2d.gui.schema.simulation_types import (
     FAMILIES,
     MODES,
     family_for_model,
@@ -81,13 +81,13 @@ class TestHeterostructureSupport:
     second sheet."""
 
     def test_all_modes_support_hetero(self):
-        from src.gui.schema.simulation_types import MODES as ALL
+        from frictionsim2d.gui.schema.simulation_types import MODES as ALL
 
         assert all(ALL[m][1].supports_hetero
                    for m in ('afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet'))
 
     def test_hetero_stacking_hidden_from_run_parameters(self):
-        from src.gui.schema.overrides import hidden_fields
+        from frictionsim2d.gui.schema.overrides import hidden_fields
 
         assert 'hetero_stacking' in hidden_fields('sheetonsheet', 'general')
 
@@ -95,7 +95,7 @@ class TestHeterostructureSupport:
     def test_stacking_is_hidden_for_every_mode(self, model):
         """It is shown on the `[2D-2]` form instead, which exists for every
         mode -- so no mode may keep it in Run parameters."""
-        from src.gui.schema.overrides import hidden_fields
+        from frictionsim2d.gui.schema.overrides import hidden_fields
 
         assert 'hetero_stacking' in hidden_fields(model, 'general')
 
@@ -300,7 +300,7 @@ class TestFieldClassification:
     def test_dict_item_kind_is_captured(self):
         """output.dump is Dict[str, bool]: KeyValueGridEditor.add_row needs
         this to give a newly added row a checkbox instead of a text box."""
-        from src.core.config import GlobalSettings
+        from frictionsim2d.core.config import GlobalSettings
 
         settings = {s.key: s.field_map() for s in describe_model(GlobalSettings)}
         assert settings['output']['dump'].item_kind is FieldKind.BOOL
@@ -328,7 +328,7 @@ class TestCaptionBudget:
     form read as a wall of grey text; the long form belongs in the tooltip."""
 
     def _all_overrides(self):
-        from src.gui.schema.overrides import SETTINGS_MODEL
+        from frictionsim2d.gui.schema.overrides import SETTINGS_MODEL
 
         for model in list(ALL_MODELS) + [SETTINGS_MODEL]:
             for section_key, section in overrides_for(model).items():
@@ -337,7 +337,7 @@ class TestCaptionBudget:
                     yield model, section_key, key, field
 
     def test_every_caption_is_one_short_line(self):
-        from src.gui.schema.overrides import CAPTION_BUDGET
+        from frictionsim2d.gui.schema.overrides import CAPTION_BUDGET
 
         offenders = [
             f"{model} [{section}] {key or '(section)'}: {len(entry.help)} chars"
@@ -413,7 +413,7 @@ class TestOuterLoopChoicesNarrowByMode:
 
     def test_pes_modes_offer_no_split_at_all(self):
         """Neither PES scan reaches the split code path (see
-        src/builders/pes_scan.py -- both write_inputs overrides render a
+        frictionsim2d/builders/pes_scan.py -- both write_inputs overrides render a
         single ``lammps/slide.in`` directly, without ever branching on
         ``outer_loop``), so unlike `indent` (which still narrows to `force`)
         the PES modes narrow all the way down to zero choices -- not `force`,
@@ -450,13 +450,13 @@ class TestOverrides:
         assert section_override('not_a_section').fields == {}
 
     def test_scan_speed_is_metres_per_second(self):
-        from src.gui.schema.overrides import field_override
+        from frictionsim2d.gui.schema.overrides import field_override
         fo = field_override('sheetonsheet', 'general', 'scan_speed')
         assert fo.unit == 'm/s'
         assert '100 m/s = 1 Å/ps' in (fo.help or '') + (fo.detail or '')
 
     def test_spring_constants_have_units(self):
-        from src.gui.schema.overrides import field_override
+        from frictionsim2d.gui.schema.overrides import field_override
         assert field_override('sheetonsheet', 'general', 'driving_spring').unit == 'N/m'
         assert field_override('sheetonsheet', 'general', 'bond_spring').unit == 'N/m'
 
@@ -464,7 +464,7 @@ class TestOverrides:
 class TestDescribeSection:
 
     def test_describes_an_arbitrary_model(self):
-        from src.core.config import TipConfig
+        from frictionsim2d.core.config import TipConfig
 
         spec = describe_section(TipConfig, name='tip', key='tip')
         assert spec.key == 'tip'
@@ -474,7 +474,7 @@ class TestDescribeSection:
 @pytest.mark.parametrize('field', ['bond_spring', 'driving_spring'])
 def test_the_spring_help_quotes_the_exact_conversion_factor(field):
     """The builders divide by NM_TO_EV_A2 = 16.02176565, not the old 16.02."""
-    from src.data.models import NM_TO_EV_A2
+    from frictionsim2d.data.models import NM_TO_EV_A2
 
     detail = overrides_for('sheetonsheet')['general'].fields[field].detail
     assert f'{NM_TO_EV_A2}' in detail

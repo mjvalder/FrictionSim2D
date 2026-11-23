@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip('pydantic_ai')
 
-from src.agent.providers import ProviderUnavailable  # noqa: E402
+from frictionsim2d.agent.providers import ProviderUnavailable  # noqa: E402
 from tests.agent.evals.cases import CASES, GROUP_OF, prepare_deps, verdict  # noqa: E402
 from tests.helpers.agent import make_deps  # noqa: E402
 from tests.helpers.agent_eval import build_session, eval_env, run_eval_turn  # noqa: E402

@@ -19,8 +19,8 @@ import yaml
 pytest.importorskip('aiida')
 pytestmark = pytest.mark.aiida
 
-from src.aiida.export import import_archive, rebuild_set  # noqa: E402
-from src.aiida.ingest import group_label, import_root  # noqa: E402
+from frictionsim2d.aiida.export import import_archive, rebuild_set  # noqa: E402
+from frictionsim2d.aiida.ingest import group_label, import_root  # noqa: E402
 from tests.helpers.results_tree import make_family_run  # noqa: E402
 from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 
@@ -51,7 +51,7 @@ LEGACY_DATABASE = {
 
 def _prov_dir(root: Path, rel: str) -> Path:
     """The provenance dir `make_run` writes for `rel` (AFM nests it one level
-    up from `L{n}`, mirroring `src.run.tree.provenance_dir_for`)."""
+    up from `L{n}`, mirroring `frictionsim2d.run.tree.provenance_dir_for`)."""
     run_dir = root / rel
     layers = int(rel.rsplit('/L', 1)[1]) if '/L' in rel else None
     return (run_dir.parent if layers is not None else run_dir) / 'provenance'
@@ -169,7 +169,7 @@ def _minimal_afm_config_with_secrets(tmp_path):
     `settings` carries an old central-DB block with credentials -- built the
     way `tests/aiida/test_export.py`'s `_minimal_sheet_flake_config` builds
     its sheet-on-sheet analogue."""
-    from src.core.config import AFMSimulationConfig, load_settings
+    from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
     dummy_pot = tmp_path / 'dummy.sw'
     dummy_cif = tmp_path / 'dummy.cif'
@@ -218,11 +218,11 @@ def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_pat
     def _fake(config_file, model, **kwargs):  # pylint: disable=unused-argument
         text = Path(config_file).read_text(encoding='utf-8')
         _assert_no_secrets(text, config_file)
-        from src.core.config import AFMSimulationConfig  # pylint: disable=import-outside-toplevel
+        from frictionsim2d.core.config import AFMSimulationConfig  # pylint: disable=import-outside-toplevel
         seen['config_obj'] = AFMSimulationConfig(**json.loads(text))
         return _FakeResult()
 
-    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
+    monkeypatch.setattr('frictionsim2d.aiida.export.generate_package', _fake)
 
     rebuild_set('secrets-rebuild', tmp_path / 'rebuilt')
 

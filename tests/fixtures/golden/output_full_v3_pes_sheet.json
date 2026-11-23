@@ -252,7 +252,7 @@
   "summary_definition": {
    "cof": "ratio_of_means: mean(LF)/mean(NF)",
    "skip_fraction": 0.2,
-   "source": "src.data.models.summarise_run"
+   "source": "frictionsim2d.data.models.summarise_run"
   }
  },
  "runs": [

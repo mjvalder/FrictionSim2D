@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import AFMSimulationConfig, load_settings
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
 pytestmark = [pytest.mark.lammps, pytest.mark.integration]
 
@@ -39,7 +39,7 @@ def _afm_smoke_raw():
 
 @pytest.fixture(scope="module")
 def built_run(tmp_path_factory):
-    from src.builders.afm import AFMSimulation
+    from frictionsim2d.builders.afm import AFMSimulation
     out = tmp_path_factory.mktemp("smoke")
     cfg = AFMSimulationConfig(**_afm_smoke_raw(), settings=load_settings())
     cfg.settings.hpc.modules = ["lammps"]
@@ -70,7 +70,7 @@ def built_run(tmp_path_factory):
 
 @pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")
 def test_all_three_result_tiers_parse(built_run):
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     out, _ = built_run
     r = DataReader.__new__(DataReader)
     for prefix, must_have in (("friction_", "nf"), ("raw_", "raw_lfx"),
@@ -84,7 +84,7 @@ def test_all_three_result_tiers_parse(built_run):
 
 @pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")
 def test_pe_partition_reconciles(built_run):
-    from src.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import DataReader
     out, _ = built_run
     r = DataReader.__new__(DataReader)
     df = r._read_dataframe(next(out.rglob("results/peratom_*")), "tip")
@@ -104,7 +104,7 @@ def test_pe_partition_reconciles(built_run):
 
 @pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")
 def test_ramp_status_and_hold_emitted(built_run):
-    from src.data.provenance import parse_log_extras
+    from frictionsim2d.data.provenance import parse_log_extras
     out, log_text = built_run
     assert "RAMP_STATUS" in log_text
     holds = list(out.rglob("data/hold_*N.txt"))

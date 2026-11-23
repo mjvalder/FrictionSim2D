@@ -11,10 +11,10 @@ import pytest
 
 pytest.importorskip('scipy')
 
-import src.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
-from src.analysis.base import get_analysis  # noqa: E402
-from src.analysis.source import RunSource  # noqa: E402
-from src.analysis.stick_slip import (BIN_A, on_displacement, period_from_acf,  # noqa: E402
+import frictionsim2d.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
+from frictionsim2d.analysis.base import get_analysis  # noqa: E402
+from frictionsim2d.analysis.source import RunSource  # noqa: E402
+from frictionsim2d.analysis.stick_slip import (BIN_A, on_displacement, period_from_acf,  # noqa: E402
                                      ring_period, slips, slips_per_period_taxlib)
 
 
@@ -176,10 +176,10 @@ _LATTICE = Path('/home/matteo/mnt/PhD/Sync/ML_taxonomy/baseline_inputs/descripto
 _PUB_SCRIPT = """
 import json, sys
 import numpy as np
-from src.aiida import load_aiida_profile
+from frictionsim2d.aiida import load_aiida_profile
 load_aiida_profile('friction2d_pub')
-from src.analysis.base import get_analysis
-from src.analysis.source import RunSource, StoreFetcher
+from frictionsim2d.analysis.base import get_analysis
+from frictionsim2d.analysis.source import RunSource, StoreFetcher
 dataset, params, out32, out64 = sys.argv[1:5]
 
 class Cached:

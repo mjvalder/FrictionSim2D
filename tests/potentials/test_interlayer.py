@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.core.config import (AFMSimulationConfig, GeneralConfig,
+from frictionsim2d.core.config import (AFMSimulationConfig, GeneralConfig,
                              SheetOnSheetSimulationConfig, load_settings)
-from src.potentials.interlayer import (EXAMPLES_POTENTIALS_DIR,
+from frictionsim2d.potentials.interlayer import (EXAMPLES_POTENTIALS_DIR,
                                        default_interlayer_file, gaussian_g,
                                        ilp_substyle, mixed_g,
                                        resolve_interlayer_file)
 
-from src.interfaces.lammps import lammps_pair_styles as REAL_PAIR_STYLES  # before the autouse patch
+from frictionsim2d.interfaces.lammps import lammps_pair_styles as REAL_PAIR_STYLES  # before the autouse patch
 
 MATERIALS = Path(__file__).resolve().parents[2] / 'examples' / 'materials'
 
@@ -175,7 +175,7 @@ def test_lammps_pair_styles_parses_help(monkeypatch):
 
 
 def test_write_gaussian_kc_file(tmp_path):
-    from src.potentials.interlayer import write_gaussian_kc_file
+    from frictionsim2d.potentials.interlayer import write_gaussian_kc_file
     path = write_gaussian_kc_file(tmp_path / 'g.KC', {('Mo', 'S'): 175.68}, -1)
     rows = [ln.split() for ln in path.read_text().splitlines()
             if ln.strip() and not ln.startswith('#')]
@@ -194,14 +194,14 @@ def test_write_gaussian_kc_file(tmp_path):
 def test_splits_chalcogens_covers_hetero_components(name, expected):
     """The hetero components (register_sheet_block's sheet_N, a hetero
     flake's flake_N) are build_monolayer data too, so they split as well."""
-    from src.potentials.interlayer import splits_chalcogens
+    from frictionsim2d.potentials.interlayer import splits_chalcogens
     assert splits_chalcogens(name) is expected
 
 
 def test_hetero_component_splits_under_ilp(tmp_path):
     """A registered ``sheet_1`` gets the ilp/tmd S top/bottom types."""
-    from src.core.config import GlobalSettings, SheetConfig
-    from src.potentials.manager import PotentialManager
+    from frictionsim2d.core.config import GlobalSettings, SheetConfig
+    from frictionsim2d.potentials.manager import PotentialManager
     pm = PotentialManager(GlobalSettings())
     pm.set_interlayer('ilp')
     sheet = SheetConfig(mat="h-MoS2", pot_type="sw", x=4.0, y=4.0, layers=[1],

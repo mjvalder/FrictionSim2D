@@ -1,9 +1,9 @@
-"""Tests for the AFM indentation ("indent") builder (src/builders/indent.py)."""
+"""Tests for the AFM indentation ("indent") builder (frictionsim2d/builders/indent.py)."""
 
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.builders.afm.indent import (
+from frictionsim2d.builders.afm.indent import (
     DEFAULT_HOLD_STEPS,
     DEFAULT_N_STEPS,
     DEFAULT_Z_STEP,
@@ -11,8 +11,8 @@ from src.builders.afm.indent import (
     IndentSimulation,
     derive_seed,
 )
-from src.builders.utils.obs_ctx import build_obs_ctx
-from src.core.config import AFMSimulationConfig, load_settings
+from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
+from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
 
 def _afm_cfg(tmp_path: Path, force, indent=None):
@@ -205,7 +205,7 @@ def test_build_render_context_hook_adds_hold_and_retract_keys(tmp_path: Path):
     builder = IndentSimulation(cfg, output_dir=str(tmp_path / "o"))
     from pathlib import PurePosixPath
     builder.relative_run_dir_layer = {1: PurePosixPath("indent/h-MoS2/60x_60y/x/K300/L1")}
-    import src.builders.afm as afm_mod
+    import frictionsim2d.builders.afm as afm_mod
     orig = afm_mod.AFMSimulation.build_render_context
     afm_mod.AFMSimulation.build_render_context = lambda self, n: {"n": n}
     try:
@@ -359,7 +359,7 @@ def test_indent_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):
 
 
 def test_indent_deck_writes_end_snapshot_before_indent_next(tmp_path: Path):
-    from src.postprocessing.integrity import writes_end_snapshot
+    from frictionsim2d.postprocessing.integrity import writes_end_snapshot
     builder = IndentSimulation(_afm_cfg(tmp_path, force=[10, 30]),
                                output_dir=str(tmp_path / "o"))
     script = builder.render_template("afm/indent.lmp", _indent_context())

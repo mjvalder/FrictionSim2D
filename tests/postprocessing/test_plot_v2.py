@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from src.postprocessing.plot_data import PlotDataError, Plotter
-from src.postprocessing.read_data import DataReader
+from frictionsim2d.postprocessing.plot_data import PlotDataError, Plotter
+from frictionsim2d.postprocessing.read_data import DataReader
 from tests.helpers.results_tree import make_family_run
 
 
@@ -401,7 +401,7 @@ def test_the_family_selects_the_label(tmp_path):
 def test_the_histogram_says_slope_not_cof(tmp_path):
     """A bar chart of `fit['slope']` labelled 'COF' put the regression slope
     and mean(LF)/mean(NF) on the same axis under one name."""
-    from src.postprocessing.labels import label_for
+    from frictionsim2d.postprocessing.labels import label_for
 
     root = _dataset(tmp_path, 'afm', loads=(10.0, 20.0, 30.0))
     out = tmp_path / 'out'
@@ -418,7 +418,7 @@ def test_the_histogram_says_slope_not_cof(tmp_path):
 def test_dataset_rows_carry_the_v3_identity_and_no_lf_aliases():
     """`dataset_rows` (a `Friction2DDB.query`-shaped row) to a summary row:
     the CSV path's names, no lateral-force variant aliased from `mean_lf`."""
-    from src.postprocessing.plot_common import PlotCommonMixin
+    from frictionsim2d.postprocessing.plot_common import PlotCommonMixin
 
     record = {
         'materials': ['h-MoS2'], 'flake_material': None, 'family': 'afm',
@@ -467,7 +467,7 @@ def test_both_ranking_modes_write_the_same_shape(tmp_path):
     average_f10_to_f50}; the per-force mode wrote a bare {f30.0: [...]}.
     `correlation` read every top-level key as a force and crashed on
     float('anking_mode')."""
-    from src.postprocessing.plot_ranking import read_ranking
+    from frictionsim2d.postprocessing.plot_ranking import read_ranking
 
     root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0, 50.0))
     out = tmp_path / 'out'
@@ -497,7 +497,7 @@ def test_both_ranking_modes_write_the_same_shape(tmp_path):
 
 
 def test_every_material_entry_has_every_key(tmp_path):
-    from src.postprocessing.plot_ranking import read_ranking
+    from frictionsim2d.postprocessing.plot_ranking import read_ranking
 
     root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0))
     out = tmp_path / 'out'
@@ -543,7 +543,7 @@ def test_correlation_ignores_a_file_that_is_not_a_ranking(tmp_path):
 
 
 def test_generate_plot_accepts_a_model(tmp_path):
-    from src.postprocessing.plot_config import SummaryPlot
+    from frictionsim2d.postprocessing.plot_config import SummaryPlot
 
     root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0))
     out = tmp_path / 'out'
@@ -560,7 +560,7 @@ def test_only_the_keys_that_were_set_reach_the_mixin(tmp_path, monkeypatch):
     """`spec.model_dump(exclude_unset=True)`: the mixins' own
     `.get(key, default)` defaults stay authoritative, and the Pydantic
     defaults document them. Dumping defaults would change every plot."""
-    from src.postprocessing.plot_config import SummaryPlot
+    from frictionsim2d.postprocessing.plot_config import SummaryPlot
 
     root = _dataset(tmp_path, 'afm')
     plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
@@ -707,7 +707,7 @@ def test_dataset_prefilter_mirrors_the_plots_force_filters():
     """`_row_may_match` keeps a superset of what a plot selects: `filter_forces`
     wins over `force` (the plots read `filter_forces or force`), and
     `plot_all_forces` lifts the load filters (a timeseries then plots every load)."""
-    from src.postprocessing.plot_common import PlotCommonMixin
+    from frictionsim2d.postprocessing.plot_common import PlotCommonMixin
     match = PlotCommonMixin._row_may_match  # pylint: disable=protected-access
     row = {'force': 30.0, 'pressure': float('nan'), 'id': 'h_MoS2'}
 

@@ -24,10 +24,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
 
-from src.gui.controllers.document import ConfigDocument, ExpansionDirs  # noqa: E402
-from src.gui.controllers.preview import cache_key, code_fingerprint  # noqa: E402
-from src.gui.preview.assemble import AssembledSystem, ComponentSlice  # noqa: E402
-from src.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
+from frictionsim2d.gui.controllers.document import ConfigDocument, ExpansionDirs  # noqa: E402
+from frictionsim2d.gui.controllers.preview import cache_key, code_fingerprint  # noqa: E402
+from frictionsim2d.gui.preview.assemble import AssembledSystem, ComponentSlice  # noqa: E402
+from frictionsim2d.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -158,13 +158,13 @@ class TestRawIniTruthiness:
     @pytest.mark.parametrize('value', ['false', 'False', 'FALSE', 'no', '0',
                                        'off', '', '  false  ', None, False, 0])
     def test_falsey(self, value):
-        from src.gui.app import _is_true
+        from frictionsim2d.gui.app import _is_true
         assert _is_true(value) is False
 
     @pytest.mark.parametrize('value', ['true', 'True', 'yes', '1', 'on',
                                        ' True ', True, 1])
     def test_truthy(self, value):
-        from src.gui.app import _is_true
+        from frictionsim2d.gui.app import _is_true
         assert _is_true(value) is True
 
 
@@ -173,7 +173,7 @@ class TestMainWindow:
     @pytest.fixture(name='window')
     def _window(self, qt_app, workspace, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
         # Tests here exercise edits that mark the document/settings dirty;
@@ -379,7 +379,7 @@ class TestMainWindow:
         rewrites that panel from scratch straight after the commit that
         produced the refusal.
         """
-        from src.gui.controllers.document import DocumentError
+        from frictionsim2d.gui.controllers.document import DocumentError
 
         dialogs = []
         for name in ('warning', 'critical', 'information'):
@@ -402,7 +402,7 @@ class TestMainWindow:
         """Refusals are per-commit, not cumulative. A list that is only ever
         appended to would leave the panel accusing a config of a problem the
         user had already fixed -- and there would be no way to clear it."""
-        from src.gui.controllers.document import DocumentError
+        from frictionsim2d.gui.controllers.document import DocumentError
 
         section = window.form.sections['2D']
         original = section.commit
@@ -423,7 +423,7 @@ class TestMainWindow:
     def _refuse_a_section(window, monkeypatch, form=None, key='2D'):
         """Make one section of `form` refuse its commit, as the document does
         when the form and the document have diverged."""
-        from src.gui.controllers.document import DocumentError
+        from frictionsim2d.gui.controllers.document import DocumentError
 
         def refuse():
             raise DocumentError('pair_mode says this config is not a pair')
@@ -568,7 +568,7 @@ class TestMainWindow:
         in is worse than the refusal: `_on_mode_changed` returns early when the
         combo already reads the document's model, so selecting that same mode
         again would then silently do nothing at all."""
-        from src.gui.controllers.document import DocumentError
+        from frictionsim2d.gui.controllers.document import DocumentError
 
         monkeypatch.setattr(QMessageBox, 'warning',
                             lambda *args, **kwargs: QMessageBox.Ok)
@@ -665,7 +665,7 @@ class TestMainWindow:
         assert str(dup) in message.split('WARNING', 1)[1]
 
     def test_saving_produces_a_config_the_cli_can_read(self, window, tmp_path):
-        from src.core.config import parse_config
+        from frictionsim2d.core.config import parse_config
 
         window.document = ConfigDocument.from_file(
             EXAMPLES / 'indent_config.ini', 'indent')
@@ -778,7 +778,7 @@ class TestSettingsTakeEffect:
     @pytest.fixture(name='window')
     def _window(self, qt_app, workspace, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
         # See TestMainWindow's fixture: avoid a real, blocking save prompt
@@ -788,12 +788,12 @@ class TestSettingsTakeEffect:
         window.close()
 
     def test_hpc_scripts_are_blocked_until_modules_are_set(self, window):
-        from src.run.hpc_dispatch import hpc_generation_blocker
+        from frictionsim2d.run.hpc_dispatch import hpc_generation_blocker
 
         assert hpc_generation_blocker(window.settings) is not None
 
     def test_typing_modules_applies_without_a_separate_save(self, window):
-        from src.run.hpc_dispatch import hpc_generation_blocker
+        from frictionsim2d.run.hpc_dispatch import hpc_generation_blocker
 
         window.settings_form.sections['hpc'].editors['modules'].set_value(
             ['lammps', 'openmpi'])
@@ -888,7 +888,7 @@ class TestRenderIgnoresNonBlockingRequired:
     @pytest.fixture(name='window')
     def _window(self, qt_app, workspace, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
         window.document.dirty = False
@@ -933,7 +933,7 @@ class TestValidateEnforcesBlockingRequired:
     @pytest.fixture(name='window')
     def _window(self, qt_app, workspace, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
         window.document.dirty = False
@@ -1021,7 +1021,7 @@ class TestSubstrateSection:
 
     def test_a_required_section_accepts_edits_even_if_it_was_absent(self, qt_app,
                                                                    monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.blank('afm')
@@ -1040,7 +1040,7 @@ class TestFamilyFieldFiltering:
 
     @pytest.fixture(name='general_fields')
     def _general_fields(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
 
@@ -1081,7 +1081,7 @@ class TestFamilyFieldFiltering:
     ])
     def test_outer_loop_offers_only_what_the_builder_acts_on(self, qt_app, model,
                                                              expected, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank(model))
@@ -1100,7 +1100,7 @@ class TestDependentFields:
 
     @pytest.fixture(name='form')
     def _form(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         return ConfigForm(ConfigDocument.blank('afm'))
@@ -1133,7 +1133,7 @@ class TestRequiredMarking:
 
     def test_required_fields_are_marked_and_optional_ones_are_not(self, qt_app,
                                                                  monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank('afm'))
@@ -1150,7 +1150,7 @@ class TestCollapsibleSections:
 
     @pytest.fixture(name='form')
     def _form(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank('afm'))
@@ -1204,7 +1204,7 @@ class TestFoldedSummary:
 
     @pytest.fixture(name='form')
     def _form(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.from_file(
@@ -1218,7 +1218,7 @@ class TestFoldedSummary:
         assert 'set' in section.summary.text()
 
     def test_missing_required_fields_are_called_out(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         blank = ConfigForm(ConfigDocument.blank('afm'))
@@ -1227,7 +1227,7 @@ class TestFoldedSummary:
         assert 'required still empty' in section.summary.text()
 
     def test_a_section_that_is_off_says_so(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         blank = ConfigForm(ConfigDocument.blank('afm'))
@@ -1246,7 +1246,7 @@ class TestPairOverrides:
 
     @pytest.fixture(name='section')
     def _section(self, qt_app, monkeypatch):
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.blank('afm')
@@ -1281,7 +1281,7 @@ class TestFormEditors:
     @pytest.fixture(name='form')
     def _form(self, qt_app, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
-        from src.gui.widgets.form import ConfigForm
+        from frictionsim2d.gui.widgets.form import ConfigForm
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         return ConfigForm(document)
 
@@ -1333,7 +1333,7 @@ class TestFormEditors:
 
     def test_full_form_round_trip_preserves_the_config(self, form, tmp_path):
         """Building the form and committing it unchanged must not alter values."""
-        from src.core.config import parse_config
+        from frictionsim2d.core.config import parse_config
 
         before = form.document.to_dict()
         form.commit()
@@ -1348,7 +1348,7 @@ class TestCloseConfirmation:
     @pytest.fixture(name='window')
     def _window(self, qt_app, workspace, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
         # Several tests here deliberately leave the document/settings dirty
@@ -1492,7 +1492,7 @@ class TestStaleRenderBadge:
     @pytest.fixture(name='window')
     def _window(self, qt_app, workspace, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
         # See TestCloseConfirmation's fixture: avoid a real, blocking save
@@ -1502,7 +1502,7 @@ class TestStaleRenderBadge:
         window.close()
 
     def test_stale_badge_toggles(self, qt_app, two_component_system):
-        from src.gui.preview.viewport import ViewportPanel
+        from frictionsim2d.gui.preview.viewport import ViewportPanel
 
         panel = ViewportPanel()
         panel.set_stale(True)

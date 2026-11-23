@@ -114,7 +114,7 @@ variable        sz equal f_fsbot[3]*1.602176565
 # Many-body potential (sw): compute group/group not supported.
 # Using bottom-layer reaction forces as lateral friction proxy.
 # If friction values look wrong, verify pot_type classification in
-# PotentialManager.is_sheet_lj() (src/core/potential_manager.py).
+# PotentialManager.is_sheet_lj() (frictionsim2d/core/potential_manager.py).
 variable        xfrict equal v_sx
 variable        yfrict equal v_sy
 

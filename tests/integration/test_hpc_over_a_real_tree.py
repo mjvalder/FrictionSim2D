@@ -27,8 +27,8 @@ from typing import Dict, List, Tuple
 
 import pytest
 
-from src.core.config import GlobalSettings
-from src.run.hpc_dispatch import generate_hpc_scripts_for_root
+from frictionsim2d.core.config import GlobalSettings
+from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root
 
 pytestmark = pytest.mark.integration
 

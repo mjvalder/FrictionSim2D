@@ -20,9 +20,9 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication, QFileDialog  # noqa: E402
 
-from src.gui.widgets.database.filters import EMPTY_FILTERS  # noqa: E402
-from src.gui.widgets.database.pane import SOURCES, DatabasePane  # noqa: E402
-from src.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
+from frictionsim2d.gui.widgets.database.filters import EMPTY_FILTERS  # noqa: E402
+from frictionsim2d.gui.widgets.database.pane import SOURCES, DatabasePane  # noqa: E402
+from frictionsim2d.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 
 RECORDS = [
     {'set_label': 's1', 'family': 'afm', 'materials': ['h-MoS2'], 'layers': 2,
@@ -50,7 +50,7 @@ def _pane(qt_app):
 @pytest.fixture(name='window')
 def _window(qt_app, tmp_path):
     del qt_app
-    from src.gui.app import MainWindow
+    from frictionsim2d.gui.app import MainWindow
     window = MainWindow(Workspace.open(tmp_path / 'ws'))
     yield window
     window.document.dirty = False
@@ -155,7 +155,7 @@ class TestDownloads:
         return pane
 
     def test_there_is_a_button_for_each_export_kind(self, pane):
-        from src.gui.db_worker import EXPORT_KINDS
+        from frictionsim2d.gui.db_worker import EXPORT_KINDS
         assert tuple(pane.download_buttons) == EXPORT_KINDS
 
     def test_results_files_export_carries_the_selection(self, ready):
@@ -270,7 +270,7 @@ class TestDownloads:
             self, pane, tmp_path, monkeypatch):
         """The Summary CSV promises the visible rows "with the columns shown"
         (D6): the worker writes exactly the payload's columns."""
-        from src.gui import db_worker
+        from frictionsim2d.gui import db_worker
         monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
         pane.set_records([{'set_label': 's1', 'family': 'afm',
                            'materials': ['h-MoS2'], 'load_kind': 'force',
@@ -336,7 +336,7 @@ class TestModalSeams:
     """
 
     def test_no_other_dialog_is_constructed_in_the_package(self):
-        package = (Path(__file__).resolve().parents[2] / 'src' / 'gui'
+        package = (Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'gui'
                    / 'widgets' / 'database')
         sources = {path.name: path.read_text(encoding='utf-8')
                    for path in package.glob('*.py')}
@@ -349,7 +349,7 @@ class TestModalSeams:
         assert sources['pane.py'].count('QFileDialog.') == 1
 
     def test_the_file_dialog_lives_only_in_ask_directory(self):
-        package = (Path(__file__).resolve().parents[2] / 'src' / 'gui'
+        package = (Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'gui'
                    / 'widgets' / 'database')
         text = (package / 'pane.py').read_text(encoding='utf-8')
         start = text.index('def _ask_directory')
@@ -716,7 +716,7 @@ class TestWorkspaceMemory:
     def test_a_new_window_restores_what_the_last_one_left(
             self, qt_app, tmp_path, monkeypatch):
         del qt_app
-        from src.gui.app import MainWindow
+        from frictionsim2d.gui.app import MainWindow
         workspace = Workspace.open(tmp_path / 'ws')
         workspace.remember('db_source', 'local')
         workspace.remember('db_filters', dict(EMPTY_FILTERS, family='hetero'))
@@ -769,13 +769,13 @@ class TestWorkspaceMemory:
 class TestDegradation:
     """A machine without aiida still gets a window.
 
-    The pane is reached from `src.gui.app`, which is reached from `src.cli`;
+    The pane is reached from `frictionsim2d.gui.app`, which is reached from `frictionsim2d.cli`;
     an unconditional `import aiida` here would break the CLI on every compute
     node that has no store.
     """
 
     def test_missing_backend_probes_without_importing(self, monkeypatch):
-        import src.gui.widgets.database.pane as pane_module
+        import frictionsim2d.gui.widgets.database.pane as pane_module
         monkeypatch.setattr(pane_module, 'find_spec',
                             lambda name: None if name == 'aiida' else object())
 
@@ -785,7 +785,7 @@ class TestDegradation:
     def test_a_missing_backend_says_what_to_install(
             self, qt_app, monkeypatch):
         del qt_app
-        import src.gui.widgets.database.pane as pane_module
+        import frictionsim2d.gui.widgets.database.pane as pane_module
         monkeypatch.setattr(pane_module, 'missing_backend',
                             lambda source: ['aiida'])
 
@@ -799,7 +799,7 @@ class TestDegradation:
     def test_both_backends_missing_leaves_a_usable_but_inert_pane(
             self, qt_app, monkeypatch):
         del qt_app
-        import src.gui.widgets.database.pane as pane_module
+        import frictionsim2d.gui.widgets.database.pane as pane_module
         monkeypatch.setattr(pane_module, 'missing_backend', lambda source: ['x'])
 
         pane = pane_module.DatabasePane()
@@ -841,14 +841,14 @@ class TestRemovedCentralSourceIsNeverReachable:
 class TestMessageLevels:
 
     def test_an_error_message_uses_the_error_token(self, pane):
-        from src.gui.style import STATUS_ERROR
+        from frictionsim2d.gui.style import STATUS_ERROR
 
         pane.message('boom', 'error')
 
         assert pane.messages.styleSheet() == STATUS_ERROR
 
     def test_a_warning_message_uses_the_warn_token(self, pane):
-        from src.gui.style import STATUS_WARN
+        from frictionsim2d.gui.style import STATUS_WARN
 
         pane.message('careful', 'warn')
 
