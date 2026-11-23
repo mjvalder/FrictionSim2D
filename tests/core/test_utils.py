@@ -16,20 +16,20 @@ from frictionsim2d.core.utils.tokens import is_float
 class TestIsFloat:
     """Test cases for is_float helper function."""
     
-    def testis_float_integer(self):
+    def test_is_float_integer(self):
         """Test integer string parsing."""
         assert is_float("42") is True
         assert is_float("0") is True
         assert is_float("-100") is True
     
-    def testis_float_decimal(self):
+    def test_is_float_decimal(self):
         """Test decimal float parsing."""
         assert is_float("3.14") is True
         assert is_float("0.5") is True
         assert is_float("-2.7") is True
         assert is_float(".5") is True
     
-    def testis_float_scientific_notation(self):
+    def test_is_float_scientific_notation(self):
         """Test scientific notation parsing."""
         assert is_float("1e-5") is True
         assert is_float("3.2e+4") is True
@@ -37,7 +37,7 @@ class TestIsFloat:
         assert is_float("1E5") is True
         assert is_float("2.0E-10") is True
     
-    def testis_float_invalid(self):
+    def test_is_float_invalid(self):
         """Test invalid float strings."""
         assert is_float("abc") is False
         assert is_float("1.2.3") is False
@@ -107,7 +107,7 @@ mixed_array = [0.1, 1e-5, text_value]
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
     
-    def testis_float_edge_cases(self):
+    def test_is_float_edge_cases(self):
         """Test edge case float strings."""
         assert is_float("0.0") is True
         assert is_float("-0") is True

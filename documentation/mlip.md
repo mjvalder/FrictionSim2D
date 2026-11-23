@@ -423,7 +423,7 @@ symmetrix_extract_mace -m mace-mpa-0-medium.model --chemical-symbols Mo S
   see `MLIPSpec.model_in_style_line`.
 - Keep **float64**; float32 shifts energies at the meV level.
 
-#### Two traps that decide whether your MACE numbers are real
+#### Traps that decide whether your MACE numbers are real
 
 **1. The CUDA backend is silently wrong on a stock checkout.** symmetrix
 allocates `mace_types` with one slot per *model element* but fills one per
@@ -439,6 +439,19 @@ is exactly why it is the default.
 fires *after* the output is written, even on a bare `lmp -h`. Harmless to the
 physics; fatal to PBS job dependencies. Check that the run completed rather than
 blanket-ignoring the exit code.
+
+**3. `atom_modify map yes` is required.** Without it `pair_symmetrix_mace` aborts
+with a hard run-time error (`pair_symmetrix_mace.cpp:172`). The registry's
+`deck_directives` emit it, together with `newton on`.
+
+**4. A bundled `liblammps.so` can shadow your build.** The conda `mlip` env ships
+one with deepmd-kit; put the build directory first on `LD_LIBRARY_PATH` or the
+run aborts with `undefined symbol: lammps_plugin_finalize`.
+
+The `mace_types` overflow (trap 1) also corrupts the heap on the host backend, so
+`hybrid/overlay` + `dispersion/d3` can die within seconds in
+`malloc_consolidate(): invalid chunk size`. symmetrix needs LAMMPS >= 10 Sep 2025,
+which also makes `dispersion/d3` native (no backport, unlike DeePMD).
 
 ---
 

@@ -25,12 +25,12 @@ def test_format_dimension_token_returns_non_numeric_input_unchanged(value):
 
 
 @pytest.mark.parametrize('s, ok', [('1', True), ('-3.2e+4', True), ('', False), ('nan', True), ('1,5', False)])
-def testis_float(s, ok):
+def test_is_float(s, ok):
     assert is_float(s) is ok
 
 
 @pytest.mark.parametrize('s, ok', [('7', True), ('+7', True), ('-0', True), ('7.0', False), ('', False)])
-def testis_int_token(s, ok):
+def test_is_int_token(s, ok):
     assert is_int_token(s) is ok
 
 
