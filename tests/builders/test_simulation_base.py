@@ -56,3 +56,60 @@ def test_add_component_files_to_provenance_keeps_existing_explicit_paths(tmp_pat
     sim._add_component_files_to_provenance("sheet", component_cfg)
 
     assert calls == [(cif_path, "cif", "sheet")]
+
+
+def _sim(tmp_path, **cfg):
+    cfg.setdefault("settings", SimpleNamespace(hpc=SimpleNamespace()))
+    return _ConcreteSimulation(SimpleNamespace(**cfg), output_dir=tmp_path)
+
+
+def test_add_to_provenance_merges_components_for_one_file(tmp_path):
+    import json
+    sim = _sim(tmp_path)
+    src = tmp_path / "Si.sw"
+    src.write_text("potential", encoding="utf-8")
+    sim.add_to_provenance(src, "potential", component="tip")
+    sim.add_to_provenance(src, "potential", component="sub")
+    files = json.loads((tmp_path / "provenance" / "manifest.json").read_text())["files"]
+    assert len(files) == 1
+    assert files[0]["components"] == ["tip", "sub"]
+
+
+def test_add_to_provenance_dedupes_same_checksum_other_path(tmp_path):
+    import json
+    sim = _sim(tmp_path)
+    a, b = tmp_path / "a.sw", tmp_path / "sub" / "b.sw"
+    b.parent.mkdir()
+    a.write_text("same", encoding="utf-8")
+    b.write_text("same", encoding="utf-8")
+    sim.add_to_provenance(a, "potential", component="tip")
+    sim.add_to_provenance(b, "potential", component="sub")
+    files = json.loads((tmp_path / "provenance" / "manifest.json").read_text())["files"]
+    assert len(files) == 1
+    assert files[0]["components"] == ["tip", "sub"]
+
+
+def test_git_identity_falls_back_when_git_is_absent(monkeypatch):
+    def _no_git(*_a, **_k):
+        raise FileNotFoundError("git")
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", _no_git)
+    assert SimulationBase._git_identity() == ("unknown", False)
+
+
+def test_simulation_root_of_a_standalone_builder(tmp_path):
+    run_dir = Path("afm") / "MoS2" / "K300"
+    sim = _ConcreteSimulation(SimpleNamespace(), output_dir=tmp_path / run_dir)
+    sim.relative_run_dir = run_dir
+    assert sim.simulation_root == tmp_path.resolve()
+
+
+def test_write_file_checks_in_decks_against_the_z_box(tmp_path):
+    import pytest
+    from frictionsim2d.builders.utils.z_vacuum import ZBox
+    sim = _sim(tmp_path)
+    sim.z_box = ZBox(zmin=0.0, zmax=10.0, cutoff=10.0, skin=2.0, margin=1.0)
+    bad = "region box block 0 1 0 1 0 5\n"
+    with pytest.raises(ValueError):
+        sim.write_file("lammps/bad.in", bad)
+    assert sim.write_file("lammps/bad.txt", bad).exists()
