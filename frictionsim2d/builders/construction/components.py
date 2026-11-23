@@ -2620,30 +2620,25 @@ def build_sheet(
         lat_c_info_out['layer_thickness'] = thickness
         lat_c_info_out['lat_c_source'] = (
             'config' if config.lat_c is not None else 'not_applicable')
-    if not stack_if_multi:
+    if not stack_if_multi or n_layers <= 1:
         shutil.copy(base_path, stacked_path)
         return stacked_path, dims, lat_c
 
-    if stack_if_multi and n_layers > 1:
-        lat_c = stack_multilayer_sheet(
-            base_layer_path=base_path,
-            config=config,
-            output_path=stacked_path,
-            box_dims=dims,
-            n_layers=n_layers,
-            types_per_layer=total_pot_types,
-            pot_counts=pot_counts,
-            supercell_dims=supercell_dims,
-            lat_c=lat_c,
-            settings=settings,
-            use_pair_bonding=use_pair_bonding,
-            stacking_type=stacking_type,
-            edge_mode=edge_mode,
-            info_out=lat_c_info_out,
-            interlayer_general=interlayer_general,
-        )
-        return stacked_path, dims, lat_c
-
-    if n_layers == 1:
-        shutil.copy(base_path, stacked_path)
+    lat_c = stack_multilayer_sheet(
+        base_layer_path=base_path,
+        config=config,
+        output_path=stacked_path,
+        box_dims=dims,
+        n_layers=n_layers,
+        types_per_layer=total_pot_types,
+        pot_counts=pot_counts,
+        supercell_dims=supercell_dims,
+        lat_c=lat_c,
+        settings=settings,
+        use_pair_bonding=use_pair_bonding,
+        stacking_type=stacking_type,
+        edge_mode=edge_mode,
+        info_out=lat_c_info_out,
+        interlayer_general=interlayer_general,
+    )
     return stacked_path, dims, lat_c
