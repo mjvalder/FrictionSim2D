@@ -39,20 +39,12 @@ from ...potentials.utils import (
     check_potential_cif_compatibility, get_potential_element_order
 )
 from ...interfaces.jinja import PackageLoader, render_lammps_commands
-from ...interfaces.lammps import run_lammps_commands
+from ...interfaces.lammps import create_lammps_instance, run_lammps_commands
 # No cycle: builders/utils/interlayer imports only frictionsim2d.potentials.interlayer.
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 from ...potentials.interlayer import CHALCOGENS, chalcogen_split_elements
 
 logger = logging.getLogger(__name__)
-
-
-def _create_lammps_instance():
-    # Lazy: the lammps python bindings are an optional, heavy dependency;
-    # import only when a caller actually needs to drive LAMMPS in-process.
-    from lammps import lammps  # pylint: disable=import-outside-toplevel
-
-    return lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
 
 
 # =============================================================================
@@ -749,7 +741,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
 
     if not has_tilt:
         # Orthogonal box: LAMMPS change_box approach
-        lmp = _create_lammps_instance()
+        lmp = create_lammps_instance()
         try:
             lmp.command("clear")
             lmp.command("units metal")
@@ -1136,7 +1128,7 @@ def _duplicate_lammps_data(
     if output_path.exists():
         output_path.unlink()
 
-    lmp = _create_lammps_instance()
+    lmp = create_lammps_instance()
     try:
         lmp.command("clear")
         lmp.command("units metal")
@@ -1938,7 +1930,7 @@ def stack_multilayer_sheet(
 
     commands = render_lammps_commands('common/stack_layers.lmp', context)
 
-    lmp = _create_lammps_instance()
+    lmp = create_lammps_instance()
     try:
         for cmd in commands:
             lmp.command(cmd)

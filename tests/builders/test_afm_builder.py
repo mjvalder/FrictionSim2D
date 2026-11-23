@@ -736,7 +736,7 @@ def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkey
 
     config.sheet.x = config.sheet.y = 12.0
 
-    real_create = components._create_lammps_instance  # pylint: disable=protected-access
+    real_create = components.create_lammps_instance  # pylint: disable=protected-access
 
     class _MinimisedLatC:
         """The real LAMMPS instance, except the minimised lat_c is a known value."""
@@ -752,7 +752,7 @@ def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkey
         def __getattr__(self, name):
             return getattr(self._lmp, name)
 
-    monkeypatch.setattr(components, "_create_lammps_instance", _MinimisedLatC)
+    monkeypatch.setattr(components, "create_lammps_instance", _MinimisedLatC)
     build_dir = tmp_path / "build"
     build_dir.mkdir()
     builder._build_sheet_for_layers(build_dir, 2)  # pylint: disable=protected-access

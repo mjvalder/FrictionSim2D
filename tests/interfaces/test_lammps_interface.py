@@ -102,3 +102,16 @@ def test_run_lammps_commands_closes_and_reraises_on_failure(monkeypatch, caplog)
     assert events[-1] == ('close',)
     assert ('cmd', 'never') not in events
     assert 'LAMMPS execution failed' in caplog.text
+
+
+def test_create_lammps_instance_is_headless():
+    seen = {}
+
+    def _fake_lammps(cmdargs):
+        seen["cmdargs"] = cmdargs
+        return "instance"
+
+    with patch.object(lmp_mod, "_import_lammps_module",
+                      return_value=SimpleNamespace(lammps=_fake_lammps)):
+        assert lmp_mod.create_lammps_instance() == "instance"
+    assert seen["cmdargs"] == ["-log", "none", "-screen", "none", "-nocite"]

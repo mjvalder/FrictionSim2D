@@ -18,23 +18,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..interfaces.lammps import create_lammps_instance
 from .matching import _max_strain, rotation_angle_between
 
 _TILT_EPS = 1e-9
-
-
-def _create_lammps_instance():
-    """Start a headless LAMMPS instance.
-
-    Mirrors ``frictionsim2d/builders/components.py::_create_lammps_instance`` (same
-    import style and cmdargs) so geometry ops are driven from Python the same
-    way everywhere in the codebase.
-    """
-    from lammps import lammps  # pylint: disable=import-outside-toplevel
-    # (deferred: the lammps python bindings are an optional, heavy dependency
-    # only this LAMMPS-launching helper needs)
-
-    return lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
 
 
 def _detect_atom_style(path: str) -> str:
@@ -99,7 +86,7 @@ def strain_monolayer_to_cell(input_data_path: str,
     atom_style = _detect_atom_style(input_data_path)
     needs_mass_fallback = not _has_masses_section(input_data_path)
 
-    lmp = _create_lammps_instance()
+    lmp = create_lammps_instance()
     try:
         lmp.command("clear")
         lmp.command("units metal")

@@ -518,7 +518,7 @@ def _stack_with_fake_lmp(monkeypatch, tmp_path, fake_lat_c, lat_c, info,
     )
     base, dims, pot_counts, total_types, supercell = \
         components.build_monolayer(config)
-    monkeypatch.setattr(components, '_create_lammps_instance',
+    monkeypatch.setattr(components, 'create_lammps_instance',
                         lambda: _FakeLmp(fake_lat_c))
     result = components.stack_multilayer_sheet(
         base_layer_path=base, config=config, output_path=tmp_path / "s.lmp",

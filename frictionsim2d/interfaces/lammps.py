@@ -63,6 +63,12 @@ except (ImportError, OSError, ValueError):
     logger.debug("LAMMPS preload skipped", exc_info=True)
 
 
+def create_lammps_instance():
+    """Start a headless LAMMPS instance (no log, no screen output)."""
+    return _import_lammps_module().lammps(
+        cmdargs=["-log", "none", "-screen", "none", "-nocite"])
+
+
 def run_lammps_commands(commands: list[str]) -> None:
     """Runs a list of LAMMPS commands using the Python interface.
     
@@ -72,9 +78,7 @@ def run_lammps_commands(commands: list[str]) -> None:
     Raises:
         Exception: If any LAMMPS command fails during execution.
     """
-    lammps = _import_lammps_module().lammps
-
-    lmp = lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
+    lmp = create_lammps_instance()
     try:
         for cmd in commands:
             lmp.command(cmd)
