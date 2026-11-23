@@ -73,6 +73,13 @@ KNOWN_VIOLATIONS = {
         "frictionsim2d.builders.components.apply_sheet_edge_types",
         "frictionsim2d.builders.components.stack_multilayer_sheet",
     },
+    "builders/test_components_substrate_match.py": {
+        # A real match never yields a sheared supercell for an orthogonal box,
+        # so the refusal branch is reached by stubbing the matcher; the
+        # single-cell copy branch stubs the straining step as well.
+        "frictionsim2d.lattice.matching.match_to_fixed_box",
+        "frictionsim2d.lattice.apply.strain_monolayer_to_cell",
+    },
     "builders/test_pes_scan_builder.py": {
         "frictionsim2d.builders.sheetonsheet.SheetOnSheetSimulation.build",
     },
