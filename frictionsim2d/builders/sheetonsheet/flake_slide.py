@@ -626,21 +626,11 @@ class FlakeSlideSimulation(SimulationBase):
         return groups
 
     def _get_hpc_job_name(self) -> str:
-        """Job name keyed by the substrate AND the flake material(s).
+        """Job name keyed by the substrate and the flake material(s).
 
-        Named off the substrate ``[2D]`` material alone before this fix -- the
-        same collision as ``output_dir_for``/``material_token`` (see
-        :func:`frictionsim2d.run.naming.flake_material_token`): two flake configs sharing
-        the substrate but differing only in flake material produced identical
-        HPC job identities. Mirrors that helper's rule exactly, so the two
-        stay in lockstep: a hetero flake (``flake_sheets`` has 2 entries, each
-        with a required ``mat``) always contributes; a single ``[Flake]``
-        section only contributes when it sets an EXPLICIT ``mat`` of its own
-        (``self.config.flake.mat`` stays ``None`` otherwise --
-        ``_filled_flake_config`` returns a copy and never mutates
-        ``self.config.flake``) -- the common single-material case (the flake
-        reuses the substrate's material) stays byte-identical to before this
-        fix.
+        Mirrors :func:`frictionsim2d.run.naming.flake_material_token`: a hetero
+        flake always contributes, a single ``[Flake]`` only when it sets its own
+        ``mat``.
         """
         sheet_mat = self.config.sheet.mat
         if len(self.config.flake_sheets) == 2:

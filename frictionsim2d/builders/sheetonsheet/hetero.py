@@ -1,4 +1,4 @@
-"""D1 hetero sheet-on-sheet slide assembly (consumes hetero.py's structure builder)."""
+"""Hetero sheet-on-sheet slide builder (consumes construction/hetero_stack.py)."""
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -22,7 +22,6 @@ from ..construction.hetero_stack import (
 logger = logging.getLogger(__name__)
 
 PAD = 1.0  # Å pad above/below each layer's atom z-range
-
 
 
 def compute_layer_zbands(data_path, layers) -> List[Dict]:
@@ -101,18 +100,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
     read from the bottom-layer reaction force (many-body ``sw`` hybrid, no
     ``compute group/group``).
 
-    Path convention: the SAME as every other builder in the package -- every
-    path in the render context, and the ``provenance/potentials/...`` prefix in
-    the written ``system.in.settings``, is prefixed with
-    :attr:`~frictionsim2d.builders.simulation_base.SimulationBase.relative_run_dir`, i.e. it
-    is relative to the SIMULATION ROOT. That is the directory the generated HPC
-    job scripts run LAMMPS from (``cd $PBS_O_WORKDIR``, or the scratch mirror
-    of it), so a hetero run's job scripts open the same files a local run does.
-    The stack is still assembled directly into ``output_dir``; only how the
-    scripts *name* those files is root-relative. When the builder is used
-    standalone (no ``set_base_output_dir``), ``relative_run_dir`` is the
-    ``output_dir`` argument itself, so an absolute ``output_dir`` yields
-    absolute paths that resolve from any working directory.
+    Every script path is root-relative, as for every builder (see
+    :attr:`~frictionsim2d.builders.simulation_base.SimulationBase.relative_run_dir`).
     """
 
     FAMILY = 'hetero'
@@ -137,22 +126,13 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
         self.config: SheetOnSheetSimulationConfig = config
-        # Assembled-stack state, populated by build() and consumed by
-        # write_run_scripts() (the run-phase seam a subclass overrides to write
-        # something other than the dynamic slide -- see
-        # :class:`~frictionsim2d.builders.sheetonsheet.pes_sheet.HeteroPESSheetSimulation`).
+        # Assembled-stack state, populated by build() and read by write_run_scripts().
         self._stack = None
         self._layer_bands: List[Dict] = []
         self._hetero_box: Dict[str, float] = {}
-        #: (lx, ly) of the assembled stack's in-plane box. The hetero
-        #: sheet-on-sheet stack is NOT replicated in-plane, so this box IS the
-        #: matched interface's coincidence cell -- the cell both materials'
-        #: lattices were strained onto, and the only in-plane periodicity the
-        #: interface actually has. Exposed under the same name
-        #: ``HeteroAFMSimulation._build_hetero_sheet`` uses (where the box IS
-        #: replicated, so the two are distinct there) for the static PES scan,
-        #: whose scan period must be this cell rather than either
-        #: constituent's own unit cell.
+        #: (lx, ly) of the assembled stack's box. The stack is not replicated
+        #: in-plane, so this is the matched interface's coincidence cell: the
+        #: static PES scan's period.
         self._hetero_coincidence_cell: Optional[tuple] = None
         #: xy tilt of the assembled box; a triclinic cell cannot be scanned by
         #: an axis-aligned (dx, dy) grid, so the PES variant refuses it.
@@ -165,13 +145,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
     def _material_id(self) -> str:
         """Every configured material, numeric ``[2D-N]`` order, joined with ``+``.
 
-        The hetero override of
-        :meth:`~frictionsim2d.builders.sheetonsheet.SheetOnSheetSimulation._material_id`
-        (same convention as :func:`frictionsim2d.run.naming.material_token` and
-        :meth:`frictionsim2d.builders.afm.hetero.HeteroAFMSimulation._material_id`), so
-        every job name built from it -- this class's ``friction_<pair>`` and
-        the PES variant's ``pes_sheet_<pair>`` -- keys on the full pair rather
-        than material 1 alone.
+        Same convention as :func:`frictionsim2d.run.naming.material_token`.
         """
         return '+'.join(sheet.mat for sheet in self.config.sheets)
 
