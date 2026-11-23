@@ -791,9 +791,11 @@ class SheetOnSheetSimulation(SimulationBase):
                 n_layers, results_file_pattern, has_internal_lj,
                 interlayer_ctx),
             'results_file_raw': self._run_dir_path("results", "raw_p${pressure}_a${a}_s${speed}"),
-            'results_file_peratom': self._run_dir_path("results", "peratom_p${pressure}_a${a}_s${speed}"),
+            'results_file_peratom': self._run_dir_path(
+                "results", "peratom_p${pressure}_a${a}_s${speed}"),
             'hold_steps': sim.sheet_hold_steps,
-            'dump_file_pattern': self._run_dir_path("visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"),
+            'dump_file_pattern': self._run_dir_path(
+                "visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"),
             'drive_method': sim.drive_method,
             'thermostat_type': self.config.settings.thermostat.type,
             'atom_style': atom_style,
