@@ -472,6 +472,7 @@ class HeteroAFMSimulation(AFMSimulation):
         check_interlayer_box_from_data(
             self.config.general, self._hetero_rep_path,
             skin=self.config.settings.simulation.neighbor_list)
+        self._check_d3_fits(self.sheet_dims)
 
     def _built_geometry(self, n_layers):
         """Hetero stack: no interlayer distance, no single unit cell."""

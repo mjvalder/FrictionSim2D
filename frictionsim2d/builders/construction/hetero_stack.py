@@ -402,6 +402,8 @@ def register_hetero_potentials(
                 pm.add_cross_interaction(name_i, component_names[j])
     if emit_interlayer:
         pm.add_interlayer(component_names)
+    if sheets[0].dispersion == 'd3':
+        pm.enable_d3()
 
     settings_path = workdir / "lammps" / "system.in.settings"
     pm.write_file(settings_path)

@@ -344,6 +344,7 @@ class FlakeSlideSimulation(SimulationBase):
              float(_sheet_dims['yhi'] - _sheet_dims['ylo'])),
             settings.potential.lj_cutoff,
         )
+        self._check_d3_fits(_sheet_dims)
 
         # 3. ONE PotentialManager: sheet -> flake(s) -> reserved virtual, so global
         #    atom types are sheet 1..S, flake S+1..S+F, virtual S+F+1.
@@ -597,6 +598,8 @@ class FlakeSlideSimulation(SimulationBase):
                     pm.add_cross_interaction(name_i, flake_names[j])
         if not lj_terms:
             pm.add_interlayer(["sheet"] + flake_names)
+        if sheet_cfg.dispersion == 'd3':
+            pm.enable_d3()
         pm.write_file(settings_path)
         return pm
 

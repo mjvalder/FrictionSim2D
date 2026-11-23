@@ -11,7 +11,7 @@ from typing import List, Optional, Union, Dict, Any, Literal, Mapping, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-from .mlip import get_mlip, is_mlip
+from .mlip import check_bound_stack, get_mlip, is_mlip
 from .utils.paths import get_material_path, get_potential_path
 from .utils.tokens import is_float
 
@@ -716,31 +716,9 @@ class SheetConfig(ComponentConfig):
                 f"the value from scripts/mlip_bilayer_benchmark.py."
             )
 
-        # A multilayer stack of a bare DPA-3 has no interlayer minimum (PBE carries
-        # no dispersion), so with D3 absent the layers drift apart; D3 gives
-        # 6.112 A. MACE-MPA-0 does bind a bare bilayer, so only frameworks without
-        # binding are blocked, and allow_unbound lets a deliberate control through.
-        spec = get_mlip(self.pot_type) if is_mlip(self.pot_type) else None
-        if (spec is not None and self.dispersion == 'none'
-                and not spec.binds_interlayer and not self.allow_unbound):
-            layers = self.layers if isinstance(self.layers, list) else [self.layers]
-            n_layers = max(int(n) for n in layers) if layers else 1
-            if n_layers > 1:
-                raise ValueError(
-                    f"pot_type = '{self.pot_type}' with {n_layers} layers "
-                    f"requires dispersion = 'd3'. A bare MLIP has no "
-                    f"interlayer binding: measured on DPA-3.1-3M/Alex2D the "
-                    f"binding curve has no minimum at all (5.7e-7 J/m^2), so "
-                    f"the layers drift apart and every interlayer friction or "
-                    f"adhesion number from the run is meaningless. Adding D3 "
-                    f"gives 6.112 A / 0.265 J/m^2, within 0.6% of experiment. "
-                    f"Set dispersion = d3 (see documentation/mlip.md, "
-                    f"'D3 is mandatory, not optional'). Single-layer cells, "
-                    f"which have no interlayer gap, are exempt. If you are "
-                    f"deliberately running this as a no-D3 CONTROL arm, set "
-                    f"allow_unbound = true to acknowledge the run is expected "
-                    f"to come apart."
-                )
+        layers = self.layers if isinstance(self.layers, list) else [self.layers]
+        check_bound_stack(self.pot_type, self.dispersion, self.allow_unbound,
+                          max(int(n) for n in layers) if layers else 1)
         return self
 
 

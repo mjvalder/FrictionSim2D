@@ -144,6 +144,7 @@ class AFMSimulation(SimulationBase):
         check_interlayer_box_from_data(
             self._sheet_interlayer_general(n_layers), sheet_path,
             skin=self.config.settings.simulation.neighbor_list)
+        self._check_d3_fits(sheet_dims)
         if self.lat_c is None:
             self.lat_c = lat_c
             self.lat_c_source = info.get('lat_c_source')

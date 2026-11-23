@@ -17,7 +17,7 @@ import hashlib
 from jinja2 import Environment
 
 from ..interfaces.jinja import PackageLoader
-from ..core.mlip import get_mlip, is_mlip
+from ..core.mlip import check_d3_fits_box, get_mlip, is_mlip
 from ..core.utils.paths import get_material_path, get_potential_path
 from ..potentials.manager import stage_model_file
 from ..hpc import HPCScriptGenerator, HPCConfig
@@ -544,6 +544,24 @@ class SimulationBase(ABC):
                 self.add_to_provenance(pot, 'potential', component=component_name)
             except (FileNotFoundError, ValueError, KeyError):
                 pass
+
+    def _check_d3_fits(self, dims: Dict[str, float]) -> None:
+        """Refuse a D3 overlay whose cutoff does not fit the periodic in-plane box.
+
+        ``dims`` is the built box (``xlo``/``xhi``/``ylo``/``yhi``): the actual
+        cell is a supercell rounded up from the requested x/y, so only the built
+        box is authoritative. The cell's dispersion is the first sheet's.
+        """
+        config = self.config
+        sheets = getattr(config, 'sheets', None) or [config.sheet]
+        if getattr(sheets[0], 'dispersion', 'none') != 'd3':
+            return
+        check_d3_fits_box(
+            box_x=float(dims.get('xhi', 0.0)) - float(dims.get('xlo', 0.0)),
+            box_y=float(dims.get('yhi', 0.0)) - float(dims.get('ylo', 0.0)),
+            d3_cutoff=config.settings.potential.d3_cutoff,
+            skin=config.settings.simulation.neighbor_list,
+        )
 
     def _provenance_components(self) -> List[Tuple[str, Any]]:
         """``(component name, component config)`` pairs whose input files are recorded."""

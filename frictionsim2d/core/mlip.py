@@ -29,6 +29,7 @@ __all__ = [
     'd3_coeff_line',
     'model_elements',
     'validate_mlip_cell',
+    'check_bound_stack',
     'check_d3_fits_box',
     'mlip_by_style',
 ]
@@ -305,6 +306,60 @@ def _labelled_configs(sheet, components):
             yield label, cfg
 
 
+def check_bound_stack(pot_type, dispersion, allow_unbound, n_layers) -> None:
+    """Reject a multilayer MLIP stack that nothing binds.
+
+    A bare DPA-3 has no interlayer minimum (PBE carries no dispersion), so with
+    D3 absent the layers drift apart; D3 gives 6.112 A. MACE-MPA-0 does bind a
+    bare bilayer, so only frameworks without binding are blocked, and
+    ``allow_unbound`` lets a deliberate control through. Classical potentials
+    and single-layer cells are exempt.
+
+    Raises:
+        ValueError: when ``n_layers > 1`` with ``dispersion == 'none'`` on a
+            non-binding MLIP framework.
+    """
+    if not (pot_type and is_mlip(pot_type)):
+        return
+    spec = get_mlip(pot_type)
+    if dispersion != 'none' or spec.binds_interlayer or allow_unbound or n_layers <= 1:
+        return
+    raise ValueError(
+        f"pot_type = '{pot_type}' with {n_layers} layers "
+        f"requires dispersion = 'd3'. A bare MLIP has no "
+        f"interlayer binding: measured on DPA-3.1-3M/Alex2D the "
+        f"binding curve has no minimum at all (5.7e-7 J/m^2), so "
+        f"the layers drift apart and every interlayer friction or "
+        f"adhesion number from the run is meaningless. Adding D3 "
+        f"gives 6.112 A / 0.265 J/m^2, within 0.6% of experiment. "
+        f"Set dispersion = d3 (see documentation/mlip.md, "
+        f"'D3 is mandatory, not optional'). Single-layer cells, "
+        f"which have no interlayer gap, are exempt. If you are "
+        f"deliberately running this as a no-D3 CONTROL arm, set "
+        f"allow_unbound = true to acknowledge the run is expected "
+        f"to come apart."
+    )
+
+
+def _max_layers(cfg) -> int:
+    layers = getattr(cfg, 'layers', None)
+    if layers is None:
+        return 0
+    layers = layers if isinstance(layers, list) else [layers]
+    return max(int(n) for n in layers) if layers else 0
+
+
+def _cell_layer_count(sheet, components) -> int:
+    """Layers stacked in the cell: every sheet, plus one per flake without its own count."""
+    total = max(_max_layers(sheet), 1)
+    for label, cfg in components or ():
+        if cfg is None:
+            continue
+        own = _max_layers(cfg)
+        total += own if own else int(str(label).startswith('flake'))
+    return total
+
+
 def validate_mlip_cell(sheet, components=(), constraint_mode='none') -> None:
     """Check the MLIP rules that need to see the *whole* cell.
 
@@ -385,6 +440,13 @@ def validate_mlip_cell(sheet, components=(), constraint_mode='none') -> None:
             f"silently override the first rather than share the cell. Every "
             f"component in a cell must use the SAME MLIP. See {_MLIP_DOC}."
         )
+
+    # --- Rule 5: a stack that nothing binds. The layers are counted across the
+    # whole cell and the sheet's dispersion is the cell's, so a monolayer beside
+    # a second sheet or a flake is judged as the stack it forms.
+    check_bound_stack(sheet_pot, getattr(sheet, 'dispersion', 'none'),
+                      getattr(sheet, 'allow_unbound', False),
+                      _cell_layer_count(sheet, components))
 
     # --- Rule 3c: `amorph='a'` runs a melt-quench MD at generation time, which
     # can use neither the force-free `pair_style zero` surrogate nor the MLIP.

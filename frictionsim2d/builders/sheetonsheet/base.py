@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional, List, Sequence, Union, TYPE_CHECKING
 from ..simulation_base import (SimulationBase, drive_spring, halt_temperature,
                                mlip_template_context)
 from ...core.config import SheetOnSheetSimulationConfig
-from ...core.mlip import check_d3_fits_box, validate_mlip_cell
+from ...core.mlip import validate_mlip_cell
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import POTENTIALS_WITH_INTERNAL_LJ
 from ..utils.lammps_data import atomic2molecular
@@ -440,18 +440,7 @@ class SheetOnSheetSimulation(SimulationBase):
         self.lat_c = lat_c
         self.sheet_dims = dims
 
-        # F3: a D3 overlay whose cutoff exceeds the periodic box aborts deep
-        # inside LAMMPS ("Communication cutoff ... cannot exceed periodic box
-        # length"). Only the ACTUAL box is authoritative -- the built cell is a
-        # supercell rounded up from the requested x/y -- so this is checked here,
-        # after build_sheet, rather than in SheetConfig.
-        if getattr(self.config.sheet, 'dispersion', 'none') == 'd3':
-            check_d3_fits_box(
-                box_x=float(dims.get('xhi', 0.0)) - float(dims.get('xlo', 0.0)),
-                box_y=float(dims.get('yhi', 0.0)) - float(dims.get('ylo', 0.0)),
-                d3_cutoff=self.config.settings.potential.d3_cutoff,
-                skin=self.config.settings.simulation.neighbor_list,
-            )
+        self._check_d3_fits(dims)
 
         self.write_inputs()
         self._generate_hpc_scripts()

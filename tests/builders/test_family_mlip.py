@@ -233,14 +233,14 @@ def test_hetero_sheetonsheet_deepmd_builds_as_one_full_cell(tmp_path):
     config = SheetOnSheetSimulationConfig(**{
         'general': {'temp': 300.0, 'pressure': 1.0},
         '2D-1': _deepmd_sheet(tmp_path, mat='h-MoS2', layers=(2,),
-                              x=16.0, y=16.0, model=model),
+                              x=24.0, y=24.0, model=model),
         '2D-2': _deepmd_sheet(tmp_path, mat='h-WS2', layers=(2,),
-                              x=16.0, y=16.0, model=model),
+                              x=24.0, y=24.0, model=model),
         'settings': load_settings().model_dump(),
     })
     text = _build(HeteroSheetOnSheetSimulation, config, tmp_path)
-    # A lone full-cell MLIP emits a non-hybrid deck, which strips the style
-    # token from the coeff line -- so match the `* *` form, not the token.
+    assert 'pair_style hybrid/overlay deepmd' in text
+    assert any(l.startswith('pair_coeff * * dispersion/d3') for l in text.splitlines())
     coeffs = [l for l in text.splitlines()
               if l.startswith('pair_coeff') and 'dispersion/d3' not in l]
     assert len(coeffs) == 1, coeffs
@@ -259,13 +259,13 @@ def test_hetero_rejects_mace_beside_a_classical_material(tmp_path):
     config = SheetOnSheetSimulationConfig(**{
         'general': {'temp': 300.0, 'pressure': 1.0},
         '2D-1': {**_deepmd_sheet(tmp_path, mat='h-MoS2', layers=(2,),
-                                 x=16.0, y=16.0),
+                                 x=24.0, y=24.0),
                  'pot_type': 'mace',
                  'pot_path': _model(tmp_path, 'mace-mp.json')},
         '2D-2': {'mat': 'h-WS2', 'pot_type': 'sw',
                  'pot_path': str(POT / 'sw_lammps' / 't-WS2.sw'),
                  'cif_path': str(MAT / 'h-WS2.cif'),
-                 'x': 16.0, 'y': 16.0, 'layers': [2]},
+                 'x': 24.0, 'y': 24.0, 'layers': [2]},
         'settings': load_settings().model_dump(),
     })
     with pytest.raises(ValueError, match='Partial-cell MLIP is not available'):
@@ -296,7 +296,9 @@ def test_flake_slide_deepmd_builds_as_one_full_cell(tmp_path):
     # S L1, S L2 -- matching the stacked sheet file's per-layer types), then
     # flake Mo,Mo(corner),S,S(corner), then the virtual atom taking the
     # placeholder element.
-    assert coeffs[0] == 'pair_coeff * * Mo Mo S S Mo Mo S S Mo # sheet, flake'
+    assert coeffs[0] == 'pair_coeff * * deepmd Mo Mo S S Mo Mo S S Mo # sheet, flake'
+    assert 'pair_style hybrid/overlay deepmd' in text
+    assert 'dispersion/d3' in text
     assert 'NULL' not in text
     assert 'lj/cut' not in text
     assert 'deepmd 1' not in text

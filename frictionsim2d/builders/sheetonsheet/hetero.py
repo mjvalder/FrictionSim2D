@@ -212,6 +212,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         check_interlayer_box(self.config.general, lx=xhi - xlo, ly=yhi - ylo,
                              xy=float(cell[1, 0]),
                              skin=settings.simulation.neighbor_list)
+        self._check_d3_fits({'xlo': xlo, 'xhi': xhi, 'ylo': ylo, 'yhi': yhi})
 
         atom_style = _detect_atom_style(stack.data_path)  # 'atomic' for sw
         lat_c = stack.interface_spacing or settings.geometry.lat_c_default

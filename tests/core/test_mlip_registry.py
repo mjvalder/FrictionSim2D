@@ -408,3 +408,73 @@ def test_model_extensions_come_from_the_registry_and_feed_every_consumer():
     assert is_mlip_model_file("m.PTH") and is_mlip_model_file("m.json")
     assert not is_mlip_model_file("m.pt") and not is_mlip_model_file("m.sw")
     assert set(MLIP_MODEL_EXTENSIONS) | {".pt"} <= set(SINGLE_TYPE_EXTENSIONS)
+
+
+class TestUnboundStackAcrossTheCell:
+    """The no-binding rule counts layers over the whole cell, not per sheet."""
+
+    @staticmethod
+    def _cfg(pot_type='deepmd', dispersion='none', layers=(1,), allow_unbound=False,
+             path='m.pth'):
+        from types import SimpleNamespace
+        return SimpleNamespace(pot_type=pot_type, pot_path=path, dispersion=dispersion,
+                               layers=list(layers), allow_unbound=allow_unbound)
+
+    def test_two_monolayers_without_d3_are_an_unbound_stack(self):
+        from frictionsim2d.core.mlip import validate_mlip_cell
+        with pytest.raises(ValueError, match='requires dispersion'):
+            validate_mlip_cell(self._cfg(), components=[('sheet_2', self._cfg(dispersion='d3'))])
+
+    def test_d3_on_the_first_sheet_binds_the_stack(self):
+        from frictionsim2d.core.mlip import validate_mlip_cell
+        validate_mlip_cell(self._cfg(dispersion='d3'),
+                           components=[('sheet_2', self._cfg())])
+
+    def test_a_flake_on_a_monolayer_is_an_unbound_stack(self):
+        from types import SimpleNamespace
+        from frictionsim2d.core.mlip import validate_mlip_cell
+        flake = SimpleNamespace(pot_type='deepmd', pot_path='m.pth')
+        with pytest.raises(ValueError, match='requires dispersion'):
+            validate_mlip_cell(self._cfg(), components=[('flake', flake)])
+
+    def test_a_tip_and_substrate_add_no_layers(self):
+        from types import SimpleNamespace
+        from frictionsim2d.core.mlip import validate_mlip_cell
+        part = SimpleNamespace(pot_type='deepmd', pot_path='m.pth')
+        validate_mlip_cell(self._cfg(), components=[('tip', part), ('sub', part)])
+
+    def test_allow_unbound_is_the_escape(self):
+        from frictionsim2d.core.mlip import validate_mlip_cell
+        validate_mlip_cell(self._cfg(allow_unbound=True),
+                           components=[('sheet_2', self._cfg())])
+
+    def test_a_binding_framework_needs_no_d3(self):
+        from frictionsim2d.core.mlip import validate_mlip_cell
+        validate_mlip_cell(self._cfg('mace', path='m.json'),
+                           components=[('sheet_2', self._cfg('mace', path='m.json'))])
+
+    def test_a_multilayer_sheet_alone_is_still_rejected(self):
+        from frictionsim2d.core.mlip import validate_mlip_cell
+        with pytest.raises(ValueError, match='requires dispersion'):
+            validate_mlip_cell(self._cfg(layers=(3,)))
+
+
+def test_register_hetero_potentials_emits_the_d3_overlay(tmp_path):
+    from frictionsim2d.builders.construction.hetero_stack import register_hetero_potentials
+    from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
+    from tests.builders.test_family_mlip import _deepmd_sheet, _model
+
+    def _text(dispersion):
+        model = _model(tmp_path)
+        sheets = {k: {**_deepmd_sheet(tmp_path, mat=mat, layers=(2,), model=model),
+                      'dispersion': dispersion, 'allow_unbound': True}
+                  for k, mat in (('2D-1', 'h-MoS2'), ('2D-2', 'h-WS2'))}
+        cfg = SheetOnSheetSimulationConfig(
+            general={'temp': 300.0, 'pressure': 1.0}, **sheets,
+            settings=load_settings().model_dump())
+        out = tmp_path / dispersion
+        hp = register_hetero_potentials(cfg.sheets, cfg.settings, out)
+        return hp.settings_path.read_text(encoding='utf-8')
+
+    assert 'pair_style hybrid/overlay deepmd' in _text('d3')
+    assert 'dispersion/d3' not in _text('none')
