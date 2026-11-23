@@ -164,9 +164,6 @@ COMPONENT_SECTIONS: Dict[str, Dict[str, str]] = {
     'tip': _TIP, 'sub': _SUBSTRATE, 'flake': _FLAKE,
 }
 
-#: config.json sections that are lists of components.
-LIST_SECTIONS = ('sheets', 'flake_sheets')
-
 _OTHER_SECTIONS: Dict[str, Dict[str, str]] = {
     'general': _GENERAL, 'pes': _PES, 'indent': _INDENT,
     'lattice_match': _LATTICE_MATCH,

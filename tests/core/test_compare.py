@@ -154,3 +154,14 @@ def test_integers_compare_exactly_floats_to_tolerance():
     merged, _ = merge_varying([({'b': {'n': 12345678}}, {}, {}),
                                ({'b': {'n': 12345679}}, {}, {})])
     assert merged['b']['n'] == VARIES
+
+
+def test_refill_writes_back_elided_fields_but_not_indexed_ones():
+    from frictionsim2d.core.compare import refill
+    defaults = {'general.temp': 300.0, 'general.speed': 2.0, 'sheets.x': 50.0}
+    kinds = {'general.temp': 'general', 'general.speed': 'general', 'sheets.x': 'general'}
+    bare = {'general.temp': 400.0, 'sheets.0.x': 60.0}
+    out = refill('general', bare, defaults, kinds)
+    assert out == {'general.temp': 400.0, 'sheets.0.x': 60.0, 'general.speed': 2.0}
+    assert refill('general', {'kind': 'general', 'fields': bare}, defaults, kinds) == out
+    assert refill('general', {}, defaults, kinds) == {'general.temp': 300.0, 'general.speed': 2.0}

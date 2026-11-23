@@ -46,12 +46,13 @@ import numbers
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple, Union
 
+from ..core.compare import LIST_SECTIONS
 from ..data.provenance import MATERIAL_ROLES, sha256_file
 from ..run.tree import provenance_dir_for
 from . import block_schema as _schema
 from .block_schema import (
     ANNOTATIONS, BLOCK_KINDS, BLOCK_SCHEMA_VERSION, DERIVED_PATHS, EXCLUDED,
-    FIELD_MAP, INTERLAYER_DERIVED, LIST_SECTIONS, PROVENANCE_EXCLUDED,
+    FIELD_MAP, INTERLAYER_DERIVED, PROVENANCE_EXCLUDED,
     PROVENANCE_MAP, PROVENANCE_SOURCED, REALIZATION_FIELDS, SWEPT, RunBlocks,
     coerce, defaults_for, is_sweep_union, leaf_field_paths, unindexed, version_key,
 )

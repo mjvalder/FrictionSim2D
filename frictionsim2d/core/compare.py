@@ -18,9 +18,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-__all__ = ['DEFAULT_ATOL', 'DEFAULT_RTOL', 'VARIES', 'CompareReport', 'compare_blocks',
-           'canonical', 'canonical_text', 'merge_varying', 'real_key', 'refill',
-           'same_value']
+__all__ = ['DEFAULT_ATOL', 'DEFAULT_RTOL', 'LIST_SECTIONS', 'VARIES', 'CompareReport',
+           'compare_blocks', 'canonical_text', 'merge_varying', 'refill']
 
 #: Stands for a field that takes several values within a campaign.
 VARIES = '<varies>'
@@ -29,8 +28,8 @@ DEFAULT_RTOL = 1e-6
 DEFAULT_ATOL = 1e-9
 
 #: Content sections holding one entry per index (``sheets.0.x``); a default
-#: for one cannot be placed without an index. Mirrors ``block_schema.LIST_SECTIONS``.
-_LIST_SECTIONS = ('sheets', 'flake_sheets')
+#: for one cannot be placed without an index.
+LIST_SECTIONS = ('sheets', 'flake_sheets')
 
 _EMPTY: Mapping[str, Any] = MappingProxyType({})
 
@@ -196,7 +195,7 @@ def _visible(name: str, fields: Iterable[Mapping[str, Any]],
     for table in defaults:
         for path in table:
             if (kinds.get(path) == kind and path not in written
-                    and path.partition('.')[0] not in _LIST_SECTIONS):
+                    and path.partition('.')[0] not in LIST_SECTIONS):
                 paths.add(path)
     return sorted(paths)
 
