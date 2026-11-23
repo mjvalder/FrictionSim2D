@@ -1554,7 +1554,7 @@ def build_matched_crystalline_substrate(
     surface_cell, _ = extract_substrate_surface_cell(sub_config, build_dir)
 
     # 2) Fixed-reference match: pin the hetero box, strain the substrate onto it.
-    strain_tol = getattr(sub_config, 'match_strain_tol', 0.02)
+    strain_tol = sub_config.match_strain_tol
     match = match_to_fixed_box(hetero_box, surface_cell, strain_tol=strain_tol)
     matrix = match.supercell_matrix
     if int(matrix[0, 1]) != 0 or int(matrix[1, 0]) != 0:
