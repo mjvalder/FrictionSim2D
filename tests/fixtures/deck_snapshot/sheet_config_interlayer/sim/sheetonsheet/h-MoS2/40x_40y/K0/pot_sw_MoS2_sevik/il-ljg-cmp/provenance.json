@@ -22,7 +22,7 @@
   "damping_ratio": null,
   "damp_ev": null,
   "git_commit": "<GITHASH>",
-  "git_dirty": true,
+  "git_dirty": <GITDIRTY>,
   "config_hash": "aec313c36267fe7c7159bb81051c3e337890e75c63d2adb908504dbe2a457645",
   "lammps_version": null,
   "layer_type_map": {

@@ -26,6 +26,7 @@ _UUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
                    r"|\b[0-9a-f]{32}\b")
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
 _GIT = re.compile(r"\b[0-9a-f]{40}\b")
+_GIT_DIRTY = re.compile(r'("git_dirty":\s*)(?:true|false)')
 _PYTEST_TMP = re.compile(r"(?:/private)?/(?:var/)?tmp/pytest-of-[^/\s]+/pytest-\d+/[^/\s\"']*?\d+(?=[/\s\"'),:;]|$)")
 _TMP_HEX = re.compile(r"(?<=_)[0-9a-f]{8}(?=_|\.)")
 
@@ -47,6 +48,7 @@ def normalise_deck(text: str) -> str:
     text = _TIMESTAMP.sub("<TIMESTAMP>", text)
     text = _UUID.sub("<UUID>", text)
     text = _GIT.sub("<GITHASH>", text)
+    text = _GIT_DIRTY.sub(r"\g<1><GITDIRTY>", text)
     return _abs_paths(text)
 
 
