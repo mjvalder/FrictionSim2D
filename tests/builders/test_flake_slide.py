@@ -252,7 +252,7 @@ def test_flake_slide_assembly_keeps_sheet_types_and_periodic_box(tmp_path):
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     sim = FlakeSlideSimulation(cfg, str(tmp_path))
     sim.build()
-    run_dir = Path(sim.run_dir())
+    run_dir = Path(sim.output_dir)
 
     sheet_file = next(run_dir.glob("build/h-MoS2_*.lmp"))
     sheet = read_lammps_data(sheet_file)
@@ -471,7 +471,7 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
     sim = FlakeSlideSimulation(cfg, str(tmp_path))
     sim.build()
 
-    run_dir = sim.run_dir()
+    run_dir = sim.output_dir
     assert (run_dir / "flake_slide.data").exists()
     assert (run_dir / "lammps" / "system.in.settings").exists()
 
@@ -559,7 +559,7 @@ def test_flake_slide_twisted_with_hold_off_translates(tmp_path):
     cfg.settings.simulation.slide_run_steps = 4000
     cfg.general.scan_speed = 100
     sim = FlakeSlideSimulation(cfg, str(tmp_path)); sim.build()
-    run_dir = sim.run_dir()
+    run_dir = sim.output_dir
     slide = next(Path(run_dir).rglob("*slide*.in"))
     proc, out = _run_lammps_slide(run_dir, slide.name)
     assert proc.returncode == 0 and "Lost atoms" not in out
@@ -586,7 +586,7 @@ def test_flake_slide_twisted_with_hold_on_keeps_corners_near_start(tmp_path):
     cfg.settings.simulation.slide_run_steps = 4000
     cfg.general.scan_speed = 100
     sim = FlakeSlideSimulation(cfg, str(tmp_path)); sim.build()
-    run_dir = sim.run_dir()
+    run_dir = sim.output_dir
     slide = next(Path(run_dir).rglob("*slide*.in"))
     text = slide.read_text()
     assert "corner_hold" in text
@@ -1068,7 +1068,7 @@ def test_flake_slide_under_load_reports_the_applied_normal_force(tmp_path):
 
     sim = FlakeSlideSimulation(cfg, str(tmp_path))
     sim.build()
-    run_dir = sim.run_dir()
+    run_dir = sim.output_dir
     slide = next(Path(run_dir).rglob("*slide*.in"))
     proc, out = _run_lammps_slide(run_dir, slide.name)
     assert proc.returncode == 0, f"lmp_serial exited {proc.returncode}:\n{out[-3000:]}"

@@ -477,16 +477,6 @@ class SheetOnSheetSimulation(SimulationBase):
             tip_r=None,
         )
 
-    def _init_provenance(self) -> None:
-        """Initialize provenance folder and collect input files."""
-        prov_dir = self.output_dir / 'provenance'
-        prov_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug("Provenance folder initialized at: %s", prov_dir)
-
-        self._add_component_files_to_provenance('sheet', self.config.sheet)
-
-        logger.info("Initialized provenance folder: %s", prov_dir)
-
     def _generate_potentials(self) -> PotentialManager:
         """Configure potential file for the sheet-on-sheet simulation.
 

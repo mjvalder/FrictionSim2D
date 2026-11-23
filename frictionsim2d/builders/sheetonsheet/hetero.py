@@ -191,19 +191,9 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
                 )
         return sum(int(sheet.layers[0]) for sheet in self.config.sheets)
 
-    def _init_provenance(self) -> None:
-        """Create the provenance folder and record each material's input files.
-
-        :class:`SimulationBase` has no ``_init_provenance`` (only
-        :class:`SheetOnSheetSimulation` does, and that one is single-material),
-        so the hetero builder provides its own: one provenance component per
-        stacked material. ``build_hetero_structure`` separately stages the real
-        potential files under ``provenance/potentials/`` for the run itself.
-        """
-        prov_dir = self.output_dir / "provenance"
-        prov_dir.mkdir(parents=True, exist_ok=True)
-        for i, sheet in enumerate(self.config.sheets):
-            self._add_component_files_to_provenance(f"sheet_{i + 1}", sheet)
+    def _provenance_components(self):
+        """One provenance component per stacked material."""
+        return [(f"sheet_{i + 1}", sheet) for i, sheet in enumerate(self.config.sheets)]
 
     def build(self) -> None:
         """Assemble the hetero stack and write the run phase (``lammps/slide.in``).

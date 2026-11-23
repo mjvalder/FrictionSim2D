@@ -155,16 +155,15 @@ class FlakeSlideSimulation(SimulationBase):
         super().__init__(config, output_dir, config_path=config_path)
         self.config: SheetOnSheetSimulationConfig = config
 
-    def _init_provenance(self) -> None:
-        """Create the provenance folder and record the substrate + flake inputs."""
-        prov_dir = self.output_dir / "provenance"
-        prov_dir.mkdir(parents=True, exist_ok=True)
-        self._add_component_files_to_provenance("sheet", self.config.sheet)
+    def _provenance_components(self):
+        """The substrate sheet plus the flake material(s)."""
+        components = [("sheet", self.config.sheet)]
         if self.config.flake_sheets:
-            for i, fs in enumerate(self.config.flake_sheets):
-                self._add_component_files_to_provenance(f"flake_{i + 1}", fs)
+            components += [(f"flake_{i + 1}", fs)
+                           for i, fs in enumerate(self.config.flake_sheets)]
         elif self.config.flake is not None:
-            self._add_component_files_to_provenance("flake", self.config.flake)
+            components.append(("flake", self.config.flake))
+        return components
 
     def _filled_flake_config(self):
         """Return the [Flake] config with its material fields ensured.
@@ -625,10 +624,6 @@ class FlakeSlideSimulation(SimulationBase):
                 groups.append({"name": f"mol_{name}",
                                "types": " ".join(map(str, pm.types.ids_by_component(name)))})
         return groups
-
-    def run_dir(self) -> Path:
-        """Return the run directory (where LAMMPS is launched: cwd = output_dir)."""
-        return self.output_dir
 
     def _get_hpc_job_name(self) -> str:
         """Job name keyed by the substrate AND the flake material(s).

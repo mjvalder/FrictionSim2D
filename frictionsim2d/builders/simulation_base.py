@@ -545,6 +545,16 @@ class SimulationBase(ABC):
             except (FileNotFoundError, ValueError, KeyError):
                 pass
 
+    def _provenance_components(self) -> List[Tuple[str, Any]]:
+        """``(component name, component config)`` pairs whose input files are recorded."""
+        return [('sheet', self.config.sheet)]
+
+    def _init_provenance(self) -> None:
+        """Create the provenance folder and record every component's input files."""
+        (self.output_dir / 'provenance').mkdir(parents=True, exist_ok=True)
+        for name, component in self._provenance_components():
+            self._add_component_files_to_provenance(name, component)
+
     def _generate_hpc_scripts(self) -> None:
         """Generate HPC job submission scripts for all simulations.
 

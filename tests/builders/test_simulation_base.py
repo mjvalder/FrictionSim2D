@@ -181,3 +181,31 @@ def test_build_provenance_record_fills_shared_identity(tmp_path):
     assert (record.family, record.model, record.run_role) == ("flake", "sheetonsheet", "label")
     assert len(record.config_hash) == 64 and record.run_uuid
     assert record.seed_velocity is None and record.load_requested is None
+
+
+def test_init_provenance_records_each_listed_component(tmp_path, monkeypatch):
+    sim = _sim(tmp_path, sheet="S")
+    calls = []
+    monkeypatch.setattr(sim, "_add_component_files_to_provenance",
+                        lambda name, comp: calls.append((name, comp)))
+    sim._init_provenance()
+    assert (tmp_path / "provenance").is_dir()
+    assert calls == [("sheet", "S")]
+
+
+def test_hetero_sheet_provenance_components_are_numbered_per_material():
+    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    sim = HeteroSheetOnSheetSimulation.__new__(HeteroSheetOnSheetSimulation)
+    sim.config = SimpleNamespace(sheets=["A", "B"])
+    assert sim._provenance_components() == [("sheet_1", "A"), ("sheet_2", "B")]
+
+
+def test_flake_slide_provenance_components_follow_the_flake_kind():
+    from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    sim = FlakeSlideSimulation.__new__(FlakeSlideSimulation)
+    sim.config = SimpleNamespace(sheet="S", flake_sheets=["F1", "F2"], flake="X")
+    assert sim._provenance_components() == [("sheet", "S"), ("flake_1", "F1"), ("flake_2", "F2")]
+    sim.config = SimpleNamespace(sheet="S", flake_sheets=[], flake="X")
+    assert sim._provenance_components() == [("sheet", "S"), ("flake", "X")]
+    sim.config = SimpleNamespace(sheet="S", flake_sheets=[], flake=None)
+    assert sim._provenance_components() == [("sheet", "S")]
