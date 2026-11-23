@@ -97,13 +97,7 @@ def _require_box_dims(
     missing = [k for k in keys if dims.get(k) is None]
     if missing:
         raise ValueError(f"Could not parse box dimensions ({missing}) from {context}")
-    out: Dict[str, float] = {}
-    for key in keys:
-        value = dims[key]
-        if value is None:
-            raise ValueError(f"Missing required box dimension '{key}' in {context}")
-        out[key] = float(value)
-    return out
+    return {key: float(cast(float, dims[key])) for key in keys}
 
 
 def _parse_lmp_atoms(
