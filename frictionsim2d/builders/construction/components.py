@@ -615,6 +615,34 @@ def check_flake_pbc_clearance(
     )
 
 
+def carve_flake(
+    src_path: Path, flake_path: Path, cfg: FlakeConfig,
+) -> Dict[str, float]:
+    """Carve ``cfg``'s shape out of ``src_path`` into ``flake_path``, split core/corner types.
+
+    Returns:
+        The flake's box dimensions.
+    """
+    center_xy: Optional[Tuple[float, float]] = None
+    if cfg.center_x is not None and cfg.center_y is not None:
+        center_xy = (float(cfg.center_x), float(cfg.center_y))
+
+    build_flake(
+        src_path,
+        flake_path,
+        shape=cfg.shape,
+        edge_length=float(cfg.edge_length),
+        rotation_deg=float(cfg.rotation_deg),
+        center_xy=center_xy,
+    )
+    apply_flake_corner_types(
+        flake_path,
+        shape=cfg.shape,
+        corner_radius=float(cfg.corner_radius),
+    )
+    return _require_box_dims(get_model_dimensions(flake_path), context=str(flake_path))
+
+
 def build_flake_component(
     config: "FlakeConfig",
     build_dir: Path,
@@ -642,30 +670,9 @@ def build_flake_component(
         config, edge_mode='none', edge_width=0.0, interlayer=interlayer,
     )
 
-    center_xy: Optional[Tuple[float, float]] = None
-    if config.center_x is not None and config.center_y is not None:
-        center_xy = (float(config.center_x), float(config.center_y))
-
     flake_path = build_dir / f"flake_{config.mat}_{config.shape}.data"
-    build_flake(
-        base_path,
-        flake_path,
-        shape=config.shape,
-        edge_length=float(config.edge_length),
-        rotation_deg=float(config.rotation_deg),
-        center_xy=center_xy,
-    )
+    flake_dims = carve_flake(base_path, flake_path, config)
     base_path.unlink(missing_ok=True)
-
-    apply_flake_corner_types(
-        flake_path,
-        shape=config.shape,
-        corner_radius=float(config.corner_radius),
-    )
-
-    flake_dims = _require_box_dims(
-        get_model_dimensions(flake_path), context=str(flake_path)
-    )
     logger.info("Built flake component: %s", flake_path.name)
     return flake_path, flake_dims
 
@@ -759,31 +766,10 @@ def build_hetero_flake_component(
     # 5. Carve the requested shape from the assembled bilayer. build_flake keeps
     #    every type and both layers (they share xy), removing only out-of-shape
     #    atoms via the boundary mask.
-    center_xy: Optional[Tuple[float, float]] = None
-    if flake_cfg.center_x is not None and flake_cfg.center_y is not None:
-        center_xy = (float(flake_cfg.center_x), float(flake_cfg.center_y))
-
-    flake_path = workdir / f"hetero_flake_{flake_cfg.shape}.data"
-    build_flake(
-        stack.data_path,
-        flake_path,
-        shape=flake_cfg.shape,
-        edge_length=float(flake_cfg.edge_length),
-        rotation_deg=float(flake_cfg.rotation_deg),
-        center_xy=center_xy,
-    )
-
     # 6. Corner-type ALL bilayer types (core 2t-1 / corner 2t, across both
     #    materials) -> matches register_component(..., regions=[None, 'corner']).
-    apply_flake_corner_types(
-        flake_path,
-        shape=flake_cfg.shape,
-        corner_radius=float(flake_cfg.corner_radius),
-    )
-
-    flake_dims = _require_box_dims(
-        get_model_dimensions(flake_path), context=str(flake_path)
-    )
+    flake_path = workdir / f"hetero_flake_{flake_cfg.shape}.data"
+    flake_dims = carve_flake(stack.data_path, flake_path, flake_cfg)
     logger.info("Built hetero flake component: %s", flake_path.name)
     return flake_path, flake_dims
 

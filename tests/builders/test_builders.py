@@ -588,3 +588,20 @@ def test_replicate_or_copy_replicates_only_above_one(tmp_path: Path) -> None:
         assert (tmp_path / "same.lmp").read_text() == "data"
         components._replicate_or_copy(src, tmp_path / "big.lmp", 1, 2, 1)
         dup.assert_called_once_with(src, tmp_path / "big.lmp", 1, 2, 1)
+
+
+def test_carve_flake_passes_shape_centre_and_returns_box(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(shape="circle", edge_length=40, rotation_deg=5, corner_radius=3,
+                          center_x=1.0, center_y=2.0)
+    dims = dict(xlo=0.0, xhi=10.0, ylo=0.0, yhi=10.0, zlo=0.0, zhi=3.0)
+    mod = "frictionsim2d.builders.construction.components"
+    with patch(f"{mod}.build_flake") as build, \
+         patch(f"{mod}.apply_flake_corner_types") as corner, \
+         patch(f"{mod}.get_model_dimensions", return_value=dims):
+        out = components.carve_flake(tmp_path / "in.data", tmp_path / "out.data", cfg)
+    assert out == dims
+    build.assert_called_once_with(
+        tmp_path / "in.data", tmp_path / "out.data", shape="circle", edge_length=40.0,
+        rotation_deg=5.0, center_xy=(1.0, 2.0))
+    corner.assert_called_once_with(tmp_path / "out.data", shape="circle", corner_radius=3.0)
