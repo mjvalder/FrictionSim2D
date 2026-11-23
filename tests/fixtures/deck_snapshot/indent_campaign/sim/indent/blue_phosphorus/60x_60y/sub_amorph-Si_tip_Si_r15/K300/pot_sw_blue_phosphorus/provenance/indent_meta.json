@@ -1,0 +1,17 @@
+{
+  "base_seed": 46890,
+  "hold_steps": 10000,
+  "z_step": 0.2,
+  "n_steps": 100,
+  "material": "blue_phosphorus",
+  "layers": {
+    "1": 593754,
+    "2": 400043
+  },
+  "loads": [
+    5.0,
+    10.0,
+    20.0,
+    30.0
+  ]
+}

@@ -4,7 +4,7 @@
   "files": [
     {
       "filename": "h-MoSe2.cif",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/materials/h-MoSe2.cif",
       "stored_path": "provenance/cif/h-MoSe2.cif",
       "category": "cif",
       "components": [
@@ -15,7 +15,7 @@
     },
     {
       "filename": "h-MoSe2.sw",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/potentials/sw/sw_lammps/h-MoSe2.sw",
       "stored_path": "provenance/potentials/h-MoSe2.sw",
       "category": "potential",
       "components": [
@@ -26,7 +26,7 @@
     },
     {
       "filename": "h-WSe2.cif",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/materials/h-WSe2.cif",
       "stored_path": "provenance/cif/h-WSe2.cif",
       "category": "cif",
       "components": [
@@ -37,7 +37,7 @@
     },
     {
       "filename": "h-WSe2.sw",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/potentials/sw/sw_lammps/h-WSe2.sw",
       "stored_path": "provenance/potentials/h-WSe2.sw",
       "category": "potential",
       "components": [

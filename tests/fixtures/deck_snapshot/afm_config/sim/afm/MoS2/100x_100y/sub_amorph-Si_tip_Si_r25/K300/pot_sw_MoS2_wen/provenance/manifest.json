@@ -4,7 +4,7 @@
   "files": [
     {
       "filename": "h-MoS2.cif",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/materials/h-MoS2.cif",
       "stored_path": "provenance/cif/h-MoS2.cif",
       "category": "cif",
       "components": [
@@ -15,7 +15,7 @@
     },
     {
       "filename": "MoS2_wen.sw",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/potentials/sw/MoS2_wen.sw",
       "stored_path": "provenance/potentials/MoS2_wen.sw",
       "category": "potential",
       "components": [
@@ -26,7 +26,7 @@
     },
     {
       "filename": "Si.cif",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/materials/Si.cif",
       "stored_path": "provenance/cif/Si.cif",
       "category": "cif",
       "components": [
@@ -38,7 +38,7 @@
     },
     {
       "filename": "Si.sw",
-      "original_path": "<ABS>",
+      "original_path": "<REPO>/examples/potentials/sw/Si.sw",
       "stored_path": "provenance/potentials/Si.sw",
       "category": "potential",
       "components": [

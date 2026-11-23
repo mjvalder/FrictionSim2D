@@ -1,8 +1,19 @@
 """Deck normalisation: strip run-specific noise so decks compare and hash stably."""
 from __future__ import annotations
 
+import contextlib
+import datetime as _dt
+import difflib
+import hashlib
+import os
+import random
 import re
+import shutil
+import sys
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, Iterator, List
 
 _REPO = str(Path(__file__).resolve().parents[2])
 
@@ -15,18 +26,22 @@ _UUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
                    r"|\b[0-9a-f]{32}\b")
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
 _GIT = re.compile(r"\b[0-9a-f]{40}\b")
-_TAIL = r"(?:/[^\s\"'),:;]*)?"
+_PYTEST_TMP = re.compile(r"(?:/private)?/(?:var/)?tmp/pytest-of-[^/\s]+/pytest-\d+/[^/\s\"']*?\d+(?=[/\s\"'),:;]|$)")
+_TMP_HEX = re.compile(r"(?<=_)[0-9a-f]{8}(?=_|\.)")
 
 
 def _abs_paths(text: str) -> str:
-    text = text.replace(_REPO, "<ABS>")
-    for prefix in (r"/(?:var/)?tmp", r"/var/folders", r"/home/[^/\s]+"):
-        text = re.sub(prefix + _TAIL, "<ABS>", text)
-    return re.sub(r"<ABS>" + _TAIL, "<ABS>", text)
+    """Replace only the root prefix of a path; the relative tail stays visible."""
+    text = text.replace(_REPO, "<REPO>")
+    text = _PYTEST_TMP.sub("<BUILD>", text)
+    text = re.sub(r"/(?:var/)?tmp(?=/)", "<TMP>", text)
+    text = re.sub(r"/var/folders/[^/\s]+/[^/\s]+/T", "<TMP>", text)
+    text = re.sub(r"/home/[^/\s]+", "<HOME>", text)
+    return _TMP_HEX.sub("<HEX>", text)
 
 
 def normalise_deck(text: str) -> str:
-    """Replace seeds, uuids, timestamps, commit hashes and absolute paths."""
+    """Replace seeds, uuids, timestamps, commit hashes and path roots (tails stay)."""
     for pat in _SEED_PATTERNS:
         text = pat.sub(r"\g<1><SEED>", text)
     text = _TIMESTAMP.sub("<TIMESTAMP>", text)
@@ -36,16 +51,6 @@ def normalise_deck(text: str) -> str:
 
 
 # ---------------------------------------------------------------- rendering
-import contextlib
-import datetime as _dt
-import difflib
-import hashlib
-import os
-import random
-import uuid
-from dataclasses import dataclass
-from typing import Dict, Iterator, List
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT_DIR = _REPO_ROOT / "tests" / "fixtures" / "deck_snapshot"
 #: Task 20: append scenario-matrix configs here (``RenderCase(name, run_type, ini)``).
@@ -77,7 +82,6 @@ class _FixedDatetime(_dt.datetime):
 
 @contextlib.contextmanager
 def _deterministic() -> Iterator[None]:
-    import sys
     counter = iter(range(1, 10**9))
     patched = []
     for mod in list(sys.modules.values()):
@@ -106,10 +110,12 @@ def render(case: RenderCase, out: Path) -> Dict[str, str]:
     os.chdir(_REPO_ROOT)
     try:
         with _deterministic():
-            generate_package(ini, case.run_type, output_root=out, generate_hpc=True,
+            result = generate_package(ini, case.run_type, output_root=out, generate_hpc=True,
                              allow_generate_amorphous=False, simulation_root_name="sim")
     finally:
         os.chdir(cwd)
+    if result.failures:
+        raise RuntimeError(f"{case.name}: build failed: {result.failures[0].error!r}")
     files: Dict[str, str] = {}
     for path in sorted(p for p in out.rglob("*") if p.is_file()):
         rel = path.relative_to(out).as_posix()
@@ -118,20 +124,20 @@ def render(case: RenderCase, out: Path) -> Dict[str, str]:
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
+            files[rel] = f"<binary sha256 {hashlib.sha256(path.read_bytes()).hexdigest()}>\n"
             continue
-        files[rel] = normalise_deck(text)
+        files[rel] = normalise_deck(text.replace(str(out), "<BUILD>"))
     return files
 
 
 def stored_form(text: str) -> str:
-    """What the snapshot keeps for a file: its text (digest only when SNAPSHOT_HASH_BIG is set)."""
+    """What the snapshot keeps for a file: its text (digest only when HASH_BIG is set)."""
     if HASH_BIG and len(text) > _BIG_FILE:
         return "sha256:" + hashlib.sha256(text.encode()).hexdigest() + "\n"
     return text
 
 
 def write_snapshot(case: RenderCase, files: Dict[str, str]) -> None:
-    import shutil
     target = SNAPSHOT_DIR / case.name
     shutil.rmtree(target, ignore_errors=True)
     for rel, text in files.items():

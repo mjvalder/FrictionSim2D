@@ -6,14 +6,14 @@ boundary        p p p
 region box block 0.0 14.194937 0.0 12.293176 -2.500000 27.123924
 create_box      24 box
 
-read_data       <ABS> add append shift 0.0 0.0 0.0 group g1 offset 0 0 0 0 0 nocoeff
-read_data       <ABS> add append shift 0.0 0.0 6.000000 group g2 offset 12 0 0 0 0 nocoeff
+read_data       <BUILD>/sim/sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/a_supercell.lmp add append shift 0.0 0.0 0.0 group g1 offset 0 0 0 0 0 nocoeff
+read_data       <BUILD>/sim/sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/b_supercell.lmp add append shift 0.0 0.0 6.000000 group g2 offset 12 0 0 0 0 nocoeff
 displace_atoms  g2 move 0.946329 1.639090 0.0 units box
 mass 1*4 95.950000 #Mo
 mass 5*12 127.600000 #Te
 mass 17*24 127.600000 #Te
 mass 13*16 183.840000 #W
-include         <ABS>
+include         <BUILD>/sim/sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/lammps/system.in.settings
 run             0
 
 min_style       cg

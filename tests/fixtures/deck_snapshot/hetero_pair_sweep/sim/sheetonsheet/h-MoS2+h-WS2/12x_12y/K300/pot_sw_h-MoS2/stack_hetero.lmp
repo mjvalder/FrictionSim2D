@@ -24,15 +24,15 @@ create_box      24 box
 
 # ---- read layers (bottom -> top) ---------------------------------------
 # material 0, layer 0  (z = 0.0000)
-read_data       <ABS> add append shift 0.0 0.0 0.000000 group _m0l0 offset 0 0 0 0 0 nocoeff
+read_data       <BUILD>/sim/sheetonsheet/h-MoS2+h-WS2/12x_12y/K300/pot_sw_h-MoS2/a_supercell.lmp add append shift 0.0 0.0 0.000000 group _m0l0 offset 0 0 0 0 0 nocoeff
 # material 0, layer 1  (z = 6.0000)
-read_data       <ABS> add append shift 0.0 0.0 6.000000 group _m0l1 offset 0 0 0 0 0 nocoeff
+read_data       <BUILD>/sim/sheetonsheet/h-MoS2+h-WS2/12x_12y/K300/pot_sw_h-MoS2/a_supercell.lmp add append shift 0.0 0.0 6.000000 group _m0l1 offset 0 0 0 0 0 nocoeff
 displace_atoms  _m0l1 move 0.000000 3.677728 0.0 units box
 # material 1, layer 0  (z = 12.8900)
-read_data       <ABS> add append shift 0.0 0.0 12.890006 group _m1l0 offset 12 0 0 0 0 nocoeff
+read_data       <BUILD>/sim/sheetonsheet/h-MoS2+h-WS2/12x_12y/K300/pot_sw_h-MoS2/b_supercell.lmp add append shift 0.0 0.0 12.890006 group _m1l0 offset 12 0 0 0 0 nocoeff
 displace_atoms  _m1l0 move 10.616687 3.677728 0.0 units box
 # material 1, layer 1  (z = 18.8900)
-read_data       <ABS> add append shift 0.0 0.0 18.890006 group _m1l1 offset 12 0 0 0 0 nocoeff
+read_data       <BUILD>/sim/sheetonsheet/h-MoS2+h-WS2/12x_12y/K300/pot_sw_h-MoS2/b_supercell.lmp add append shift 0.0 0.0 18.890006 group _m1l1 offset 12 0 0 0 0 nocoeff
 displace_atoms  _m1l1 move 10.616687 7.355457 0.0 units box
 
 # ---- masses (explicit, from the PotentialManager registry) --------------
@@ -42,7 +42,7 @@ mass 17*24 32.060000 #S
 mass 13*16 183.840000 #W
 
 # ---- real potential (pair_style / pair_coeff / masses) ------------------
-include         <ABS>
+include         <BUILD>/sim/sheetonsheet/h-MoS2+h-WS2/12x_12y/K300/pot_sw_h-MoS2/lammps/system.in.settings
 
 run             0
-write_data      <ABS>
+write_data      <BUILD>/sim/sheetonsheet/h-MoS2+h-WS2/12x_12y/K300/pot_sw_h-MoS2/hetero.data

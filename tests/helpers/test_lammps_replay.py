@@ -37,8 +37,8 @@ def test_missing_key_raises_lookup_error(tmp_path):
 
 
 def test_key_ignores_seed_and_paths():
-    a = "read_data /home/alice/x/a.lmp\nvelocity all create 300 111 dist gaussian\n"
-    b = "read_data /tmp/pytest-9/b/a.lmp\nvelocity all create 300 999 dist gaussian\n"
+    a = "read_data /tmp/pytest-of-alice/pytest-3/test_a0/x/a.lmp\nvelocity all create 300 111 dist gaussian\n"
+    b = "read_data /tmp/pytest-of-bob/pytest-9/test_b12/x/a.lmp\nvelocity all create 300 999 dist gaussian\n"
     assert lr.replay_key(a) == lr.replay_key(b)
 
 
