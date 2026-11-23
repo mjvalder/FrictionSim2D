@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from frictionsim2d.builders import AFMSimulation as ExportedAFMSimulation
@@ -23,6 +24,7 @@ from frictionsim2d.builders import SheetOnSheetSimulation as ExportedSheetOnShee
 from frictionsim2d.builders import components
 from frictionsim2d.builders import components as exported_components
 from frictionsim2d.builders.construction.components import cifread, get_amorphous_path
+from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
 from frictionsim2d.core.config import AFMSimulationConfig, SheetConfig, load_settings
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
@@ -605,3 +607,46 @@ def test_carve_flake_passes_shape_centre_and_returns_box(tmp_path: Path) -> None
         tmp_path / "in.data", tmp_path / "out.data", shape="circle", edge_length=40.0,
         rotation_deg=5.0, center_xy=(1.0, 2.0))
     corner.assert_called_once_with(tmp_path / "out.data", shape="circle", corner_radius=3.0)
+
+
+def test_calculate_layer_shifts_phosphorene_shifts_half_the_box_in_x_and_y() -> None:
+    dims = {'xhi': 10.0, 'xlo': 0.0, 'yhi': 30.0, 'ylo': 0.0}
+    for name in ("p-SnS", "black_phosphorus"):
+        assert components.calculate_layer_shifts(name, dims, n_layers=3) == [
+            (0.0, 0.0), (5.0, 15.0), (10.0, 30.0)]
+
+
+def test_calculate_layer_shifts_aa_stacking_is_all_zero() -> None:
+    dims = {'xhi': 10.0, 'xlo': 0.0, 'yhi': 30.0, 'ylo': 0.0}
+    assert components.calculate_layer_shifts(
+        "p-SnS", dims, n_layers=4, stacking_type='aa') == [(0.0, 0.0)] * 4
+
+
+def _hex_data(tmp_path: Path, a2_over_a1: float) -> Path:
+    a, height = 3.0, 0.866 * 3.0
+    path = tmp_path / "hex.lmp"
+    path.write_text(
+        "hex\n\n2 atoms\n2 atom types\n\n"
+        f"0.0 {a} xlo xhi\n0.0 {height} ylo yhi\n0.0 5.0 zlo zhi\n"
+        f"{a2_over_a1 * a:.6f} 0.0 0.0 xy xz yz\n\n"
+        "Masses\n\n1 95.95  # Mo\n2 32.06  # S\n\n"
+        "Atoms # atomic\n\n1 1 0.0 0.0 0.0\n2 2 1.5 0.866 1.0\n"
+    )
+    return path
+
+
+def test_find_ortho_transform_accepts_a_near_hexagonal_cell() -> None:
+    cell = np.array([[3.0, 0.0, 0.0], [-0.50002 * 3.0, 0.866 * 3.0, 0.0], [0.0, 0.0, 5.0]])
+    transform = components._find_ortho_transform(cell)
+    assert np.abs(transform[1]).tolist() == [1, 2, 0]
+
+
+def test_orthogonalize_snaps_the_residual_tilt_of_a_near_hexagonal_cell(tmp_path: Path) -> None:
+    src = _hex_data(tmp_path, -0.50002)
+    out = tmp_path / "ortho.lmp"
+    components._orthogonalize_lammps_data(src, out)
+    text = out.read_text()
+    assert "xy xz yz" not in text
+    dims = get_model_dimensions(out)
+    assert dims['xhi'] - dims['xlo'] == pytest.approx(3.0, abs=1e-3)
+    assert dims['yhi'] - dims['ylo'] == pytest.approx(2 * 0.866 * 3.0, abs=1e-3)
