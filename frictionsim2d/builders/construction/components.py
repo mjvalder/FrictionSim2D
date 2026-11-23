@@ -48,14 +48,15 @@ from ...potentials.interlayer import CHALCOGENS, chalcogen_split_elements
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Flake Geometry and Building
-# =============================================================================
-
 def _tmp_path(stem: str, tag: str = "", ext: str = ".lmp") -> Path:
     """A unique scratch path ``<tmp>/<stem>_<hex>[_<tag>]<ext>``."""
     suffix = f"_{tag}" if tag else ""
     return Path(tempfile.gettempdir()) / f"{stem}_{uuid.uuid4().hex[:8]}{suffix}{ext}"
+
+
+# =============================================================================
+# Flake Geometry and Building
+# =============================================================================
 
 
 def _require_box_dims(
@@ -767,7 +768,6 @@ def _find_ortho_transform(cell) -> "np.ndarray":
     return _np.eye(3, dtype=int)
 
 
-
 def _assign_pot_types_by_order(path: Path, order: List[str],
                                counts: Dict[str, int]) -> None:
     """Assign potential sublattice types to a primitive cell, in-place.
@@ -982,14 +982,14 @@ def calculate_layer_shifts(
     stacking_type: str = 'AB'
 ) -> List[Tuple[float, float]]:
     """Calculate in-plane stacking shifts for each layer.
-    
+
     Args:
         mat_name: Material name.
         dims: Box dimensions.
         n_layers: Number of layers.
         use_pair_bonding: If True, first and last pairs are bonded with no relative shift.
         stacking_type: Stacking type ('AA' or 'AB'). AA has no shifts, AB has shifts.
-        
+
     Returns:
         List of (shift_x, shift_y) tuples per layer.
     """
@@ -1027,6 +1027,7 @@ def calculate_layer_shifts(
 
     return layer_shifts
 
+
 def create_orthogonal_slab(
     cif_path: Path,
     output_path: Path,
@@ -1035,14 +1036,14 @@ def create_orthogonal_slab(
     target_z: Optional[float] = None,
 ) -> Tuple[Path, Dict[str, float], List[int]]:
     """Create orthogonalized slab from CIF file sized to target dimensions.
-    
+
     Args:
         cif_path: Input CIF file path.
         output_path: Output LAMMPS data file path.
         target_x: Target X dimension (Angstroms).
         target_y: Target Y dimension (Angstroms).
         target_z: Target Z dimension (Angstroms), or None for single layer.
-        
+
     Returns:
         Tuple of (output_path, box_dimensions, duplication_factors).
     """
@@ -1080,6 +1081,7 @@ def create_orthogonal_slab(
     assert all(final_dims[k] is not None for k in ['xhi', 'xlo', 'yhi', 'ylo', 'zhi', 'zlo'])
     final_dims_typed: Dict[str, float] = {k: cast(float, v) for k, v in final_dims.items()}
     return output_path, final_dims_typed, duplication
+
 
 def _orthogonal_primitive_cell(cif_path: Path, out_path: Path) -> Dict[str, float]:
     """Write the orthogonalized **primitive** unit cell of a CIF (no supercelling).
@@ -1256,16 +1258,17 @@ def build_matched_crystalline_substrate(
 
 def get_amorphous_path(mat_name: str) -> Optional[Path]:
     """Get path to pre-generated amorphous material file if it exists.
-    
+
     Args:
         mat_name: Material name.
-        
+
     Returns:
         Path to amorphous file or None.
     """
     mat_dir = resources.files('frictionsim2d.data.materials')
     amor_file = mat_dir.joinpath(f"amor_{mat_name}.lmp")
     return Path(str(amor_file)) if amor_file.is_file() else None
+
 
 class AmorphousNotCachedError(RuntimeError):
     """A cached amorphous structure was required but is unusable.
@@ -1509,6 +1512,7 @@ def make_amorphous(
     logger.info("Created amorphous structure in materials folder: %s", amor_file)
     return amor_file
 
+
 def _create_base_slab(
     config,
     cif_path: Path,
@@ -1549,6 +1553,7 @@ def _create_base_slab(
             cif_path, output_path,
             target_x=target_x, target_y=target_y, target_z=target_z
         )
+
 
 def build_stacking_potential_file(
     config: SheetConfig,
@@ -1635,7 +1640,7 @@ def stack_multilayer_sheet(
     interlayer_general: Any = None,
 ) -> float:
     """Stack multiple 2D material layers with proper atom type renumbering.
-    
+
     Args:
         base_layer_path: Single-layer LAMMPS data file path.
         config: Sheet configuration.
@@ -1803,6 +1808,7 @@ def stack_multilayer_sheet(
 
     return lat_c
 
+
 def build_tip(
     config: TipConfig,
     build_dir: Path,
@@ -1856,6 +1862,7 @@ def build_tip(
     run_lammps_commands(commands)
     base_lmp.unlink()
     return final_lmp, radius
+
 
 def build_substrate(
     config: SubstrateConfig,
@@ -1927,6 +1934,7 @@ def build_substrate(
     base_lmp.unlink()
     return final_lmp
 
+
 def apply_langevin_regions(
     component_name: str,
     component_path: Path,
@@ -1935,22 +1943,22 @@ def apply_langevin_regions(
     substrate_thickness: Optional[float] = None
 ) -> Path:
     """Apply Langevin thermostat region splitting to a component.
-    
+
     Splits a component (tip or substrate) into three spatial regions:
     - fix: Bottom region (fixed atoms)
     - thermo: Middle region (thermalized atoms)
     - normal: Top region (mobile atoms)
-    
+
     Each original atom type gets expanded to 3 types (normal, fix, thermo).
     Generates appropriate mass and potential commands.
-    
+
     Args:
         component_name: Name of component ('tip' or 'sub').
         component_path: Path to the component LAMMPS data file.
         settings: Global simulation settings with langevin_boundaries.
         component_height: Height of component (tip_height or substrate thickness).
         substrate_thickness: Required if component_name='sub' to calculate boundaries.
-        
+
     Returns:
         Path to the modified component file with 3-region types.
     """
@@ -2014,6 +2022,7 @@ def apply_sheet_edge_types(component_path: Path, edge_width: float) -> Path:
 
     return component_path
 
+
 def build_monolayer(
     config: SheetConfig,
     edge_mode: str = 'none',
@@ -2021,13 +2030,13 @@ def build_monolayer(
     interlayer: Optional[str] = None,
 ) -> Tuple[Path, dict, dict, int, Dict[str, float]]:
     """Build single-layer 2D material sheet.
-    
+
     Workflow:
     1. Read CIF structure and validate against potential.
     2. Write as LAMMPS data with types matching CIF element order.
     3. Renumber types to match potential file expectations (if multi-type).
     4. Duplicate and orthogonalize as needed.
-    
+
     Args:
         config: Sheet configuration.
         interlayer: The run's interlayer style. Under ``ilp`` resolving to
@@ -2038,7 +2047,7 @@ def build_monolayer(
 
     Returns:
         Tuple of (path, box_dims, pot_counts, total_types, supercell_dims).
-        
+
     Raises:
         ValueError: If CIF elements do not match potential file expectations.
     """
@@ -2160,6 +2169,7 @@ def build_monolayer(
     )
 
     return base_path, dims, pot_counts, total_pot_types, supercell_dims
+
 
 def build_sheet(
     config: SheetConfig,
