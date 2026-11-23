@@ -1,0 +1,17 @@
+mass 1*2 95.950000 #Mo
+mass 3*4 32.060000 #S
+group 2D_all type 1 2 3 4
+group 2D_core type 1 2 3 4
+group layer_1 type 1 3
+group layer_2 type 2 4
+pair_style hybrid sw sw lj/cut 11.0
+# Self-interactions (intra-component)
+pair_coeff * * sw 1 pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw Mo NULL S NULL # sheet Layer 1
+pair_coeff * * sw 2 pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw NULL Mo NULL S # sheet Layer 2
+
+# Cross-interactions (inter-component LJ)
+pair_coeff 1 2 lj/cut 0.0024283504 3.052 # Mo(L1)-Mo(L2)
+pair_coeff 1 4 lj/cut 0.00537146340837286 3.5435 # Mo(L1)-S(L2)
+pair_coeff 2 3 lj/cut 0.00537146340837286 3.5435 # S(L1)-Mo(L2)
+pair_coeff 3 4 lj/cut 0.0118815716 4.035 # S(L1)-S(L2)
+

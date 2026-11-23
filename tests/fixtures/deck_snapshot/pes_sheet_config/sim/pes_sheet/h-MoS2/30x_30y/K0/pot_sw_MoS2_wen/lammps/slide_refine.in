@@ -1,0 +1,77 @@
+# LAMMPS input script for Sheet-on-Sheet interlayer PES scan
+# Static energy-vs-lateral-position map over one surface unit cell.
+#   - Bottom layer (layer_1) frozen.
+#   - Top layer (layer_2) rigid in-plane, grid-scanned laterally.
+#   - At each (dx, dy) the out-of-plane (z) coordinates relax, then the
+#     total potential energy is recorded (normalized per surface unit cell).
+# No dynamics, no thermostat, no sliding: each grid point is one energy evaluation.
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+comm_style      tiled
+
+read_data       pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/build/h-MoS2_2.lmp
+change_box      all z final -9.650000 24.754534 units box
+include         pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/lammps/system.in.settings
+
+
+# layer_1 (bottom) and layer_2 (top) groups are defined in system.in.settings.
+velocity        layer_1 set 0.0 0.0 0.0 units box
+velocity        layer_2 set 0.0 0.0 0.0 units box
+
+# Bottom layer fully frozen; top layer held rigid in-plane.
+fix             freeze_bottom layer_1 setforce 0.0 0.0 0.0
+# setforce with a NULL z-component leaves the top layer free to relax out-of-plane.
+fix             top_inplane layer_2 setforce 0.0 0.0 NULL
+
+min_style       cg
+timestep        0.001
+thermo          100000
+
+# --- lateral scan grid over one surface unit cell -----------------------------
+variable        Nx     equal 20
+variable        Ny     equal 20
+variable        Lx     equal 3.1840664646845926
+variable        Ly     equal 5.514964891509928
+variable        ncell  equal 45
+variable        dxstep equal v_Lx/v_Nx
+variable        dystep equal v_Ly/v_Ny
+
+# Energy is normalized per surface unit cell so materials are comparable.
+variable        pe_cell equal pe/v_ncell
+
+# CSV: dx, dy in Angstrom (top-layer displacement); energy_eV per surface cell.
+print           "# family=pes_sheet" file pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/results/pes_scan_refine.csv screen no
+print           "dx,dy,energy_eV" append pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/results/pes_scan_refine.csv screen no
+
+# We only ever move the top layer by the delta from the previous grid point to
+# the current one, so the xy positions stay exactly on the grid (z relaxation
+# never touches xy) and periodic wrap-around is harmless. prev_dx/prev_dy are
+# snapshotted with immediate $(...) evaluation each step: `variable ... equal v_dx`
+# would be re-evaluated lazily (always == current dx), making the delta always 0.
+variable        prev_dx equal 0.0
+variable        prev_dy equal 0.0
+
+variable        ix loop ${Nx}
+label           loop_ix
+variable        iy loop ${Ny}
+label           loop_iy
+variable        dx equal (v_ix-1)*v_dxstep
+variable        dy equal (v_iy-1)*v_dystep
+displace_atoms  layer_2 move $(v_dx-v_prev_dx) $(v_dy-v_prev_dy) 0.0 units box
+variable        prev_dx equal $(v_dx)
+variable        prev_dy equal $(v_dy)
+minimize 0.0 1.0e-6 10000 100000
+print           "$(v_dx),$(v_dy),$(v_pe_cell)" append pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/results/pes_scan_refine.csv screen no
+next            iy
+jump            SELF loop_iy
+next            ix
+jump            SELF loop_ix
+
+# End-of-scan snapshot (integrity stage 3).
+write_data      pes_sheet/h-MoS2/30x_30y/K0/pot_sw_MoS2_wen/data/final_pes.data

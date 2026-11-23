@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "h-MoS2.cif",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/cif/h-MoS2.cif",
+      "category": "cif",
+      "components": [
+        "sheet_1"
+      ],
+      "checksum": "5f616f04f1ea45fa178fabd6070b616c71c07214c0b78968e986e2a22fa55ee7",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "h-MoS2.sw",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/potentials/h-MoS2.sw",
+      "category": "potential",
+      "components": [
+        "sheet_1"
+      ],
+      "checksum": "43c6eb8710db13ee934466e57584e1b5489c969763856ae1b3a0b4feef45e784",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "h-WS2.cif",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/cif/h-WS2.cif",
+      "category": "cif",
+      "components": [
+        "sheet_2"
+      ],
+      "checksum": "0bccd059d3139d0ccb2717ab3dd87b7f2c4ff64d848421153302129d5f0316ed",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "h-WS2.sw",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/potentials/h-WS2.sw",
+      "category": "potential",
+      "components": [
+        "sheet_2"
+      ],
+      "checksum": "6eed376809a87ff93c9ce5095f0e656480c6ce92cd7e4a80e290ecb2fba666ca",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

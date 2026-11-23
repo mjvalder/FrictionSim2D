@@ -1,0 +1,99 @@
+{
+  "schema_version": "2.2.0",
+  "run_uuid": "<UUID>",
+  "family": "indent",
+  "model": "indent",
+  "materials": [
+    {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "examples/potentials/sw/MoS2_wen.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d12d20b09969e7624c7dd6d0844b2e59802282fb3eac876ef18d4dc7e47883"
+    },
+    {
+      "name": "Si",
+      "role": "tip",
+      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
+    },
+    {
+      "name": "Si",
+      "role": "substrate",
+      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
+    }
+  ],
+  "twist_angle": null,
+  "seed_thermal_tip": 48014721,
+  "seed_thermal_sub": 12011594,
+  "seed_velocity": 154551,
+  "seed_sheet_center": null,
+  "substrate_realization_id": "498bb9e934121e4f28ae946e5298d76f7c23f1ee49639e006a4f550dd97ef54b",
+  "damping_ratio": 0.0,
+  "damp_ev": null,
+  "git_commit": "<GITHASH>",
+  "git_dirty": true,
+  "config_hash": "96aabee33b562035da5084635456fea8a9703289e61d2e408be03e2484edafdb",
+  "lammps_version": null,
+  "layer_type_map": {
+    "layer_1": [
+      7,
+      9
+    ],
+    "layer_2": [
+      8,
+      10
+    ]
+  },
+  "unloaded_reference_z": null,
+  "contact_cutoff": 6.2475,
+  "cutoff_source": "uff_sigma_k1.5",
+  "thermostat_scheme": "langevin_y_tip_sub_nve_sheet",
+  "tip_group_sizes": null,
+  "run_role": "label",
+  "load_requested": null,
+  "load_achieved": null,
+  "pressure_requested": null,
+  "pressure_achieved": null,
+  "ramp_converged": null,
+  "ramp_r": null,
+  "ramp_iterations": null,
+  "drive_k": null,
+  "drive_rest_length": null,
+  "geometry": {
+    "lat_c": 8.650615104869901,
+    "lat_c_source": "minimised",
+    "unit_cell": {
+      "xlo": 0.0,
+      "xhi": 3.1840664646845926,
+      "ylo": 0.0,
+      "yhi": 5.514964891509928,
+      "zlo": 0.0,
+      "zhi": 18.12711264635152
+    },
+    "cell_a": 3.1840664646845926,
+    "cell_b": 5.514964891509928,
+    "sheet_dims": {
+      "xlo": 0.0,
+      "xhi": 60.49726282900726,
+      "ylo": 0.0,
+      "yhi": 60.66461380660921,
+      "zlo": -7.499999999999998,
+      "zhi": 10.627112646351522
+    },
+    "atoms_per_layer": 1254,
+    "layer_thickness": 3.127112646351518,
+    "tip_r": 15.0
+  },
+  "ramp_by_load": null,
+  "load_achieved_by_load": null,
+  "wall_time_s": null,
+  "n_procs": null,
+  "atoms_per_proc": null
+}

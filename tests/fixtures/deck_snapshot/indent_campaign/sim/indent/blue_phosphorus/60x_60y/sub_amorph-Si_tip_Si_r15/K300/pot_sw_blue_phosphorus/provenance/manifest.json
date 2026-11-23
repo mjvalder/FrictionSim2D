@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "blue_phosphorus.cif",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/cif/blue_phosphorus.cif",
+      "category": "cif",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "bd019ead569328c1ed78a305f7727db77a1c65c3045ddab484230ea7392b6d87",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "blue_phosphorus.sw",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/potentials/blue_phosphorus.sw",
+      "category": "potential",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "6971456aff7928d92b0aa2809317300e5b77e7bdf6feb930591d1ec192c6907f",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "Si.cif",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/cif/Si.cif",
+      "category": "cif",
+      "components": [
+        "tip",
+        "sub"
+      ],
+      "checksum": "209feb4266a2198f0da226f01d44a4bd9639e1636b15acf6966691fad70dc5ed",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "Si.sw",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/potentials/Si.sw",
+      "category": "potential",
+      "components": [
+        "tip",
+        "sub"
+      ],
+      "checksum": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

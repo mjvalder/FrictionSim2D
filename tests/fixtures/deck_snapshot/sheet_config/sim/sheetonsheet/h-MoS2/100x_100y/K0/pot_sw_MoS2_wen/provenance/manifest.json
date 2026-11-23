@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "h-MoS2.cif",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/cif/h-MoS2.cif",
+      "category": "cif",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "5f616f04f1ea45fa178fabd6070b616c71c07214c0b78968e986e2a22fa55ee7",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "MoS2_wen.sw",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/potentials/MoS2_wen.sw",
+      "category": "potential",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "c6d12d20b09969e7624c7dd6d0844b2e59802282fb3eac876ef18d4dc7e47883",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

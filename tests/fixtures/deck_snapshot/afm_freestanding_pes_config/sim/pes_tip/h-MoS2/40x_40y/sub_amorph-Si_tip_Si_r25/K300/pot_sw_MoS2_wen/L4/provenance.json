@@ -1,0 +1,99 @@
+{
+  "schema_version": "2.2.0",
+  "run_uuid": "<UUID>",
+  "family": "pes_tip",
+  "model": "pes_tip",
+  "materials": [
+    {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "examples/potentials/sw/MoS2_wen.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d12d20b09969e7624c7dd6d0844b2e59802282fb3eac876ef18d4dc7e47883"
+    },
+    {
+      "name": "Si",
+      "role": "tip",
+      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
+    }
+  ],
+  "twist_angle": null,
+  "seed_thermal_tip": 12011594,
+  "seed_thermal_sub": 319798551,
+  "seed_velocity": 48014721,
+  "seed_sheet_center": null,
+  "substrate_realization_id": null,
+  "damping_ratio": null,
+  "damp_ev": 0.0,
+  "git_commit": "<GITHASH>",
+  "git_dirty": true,
+  "config_hash": "90452c1cf1b8ae4a3fd23f98d8b24513e3392d092b502483203b5679f4ce536c",
+  "lammps_version": null,
+  "layer_type_map": {
+    "layer_1": [
+      4,
+      8
+    ],
+    "layer_2": [
+      5,
+      9
+    ],
+    "layer_3": [
+      6,
+      10
+    ],
+    "layer_4": [
+      7,
+      11
+    ]
+  },
+  "unloaded_reference_z": null,
+  "contact_cutoff": 6.2475,
+  "cutoff_source": "uff_sigma_k1.5",
+  "thermostat_scheme": "langevin_y_tip_sub_nve_sheet",
+  "tip_group_sizes": null,
+  "run_role": "label",
+  "load_requested": 2.0,
+  "load_achieved": null,
+  "pressure_requested": null,
+  "pressure_achieved": null,
+  "ramp_converged": null,
+  "ramp_r": null,
+  "ramp_iterations": null,
+  "drive_k": null,
+  "drive_rest_length": null,
+  "geometry": {
+    "lat_c": 8.60980981843163,
+    "lat_c_source": "minimised",
+    "unit_cell": {
+      "xlo": 0.0,
+      "xhi": 3.1840664646845926,
+      "ylo": 0.0,
+      "yhi": 5.514964891509928,
+      "zlo": 0.0,
+      "zhi": 18.12711264635152
+    },
+    "cell_a": 3.1840664646845926,
+    "cell_b": 5.514964891509928,
+    "sheet_dims": {
+      "xlo": 0.0,
+      "xhi": 41.3928640408997,
+      "ylo": 0.0,
+      "yhi": 38.6047542405695,
+      "zlo": -7.499999999999998,
+      "zhi": 10.627112646351522
+    },
+    "atoms_per_layer": 546,
+    "layer_thickness": 3.127112646351518,
+    "tip_r": 25.0
+  },
+  "ramp_by_load": null,
+  "load_achieved_by_load": null,
+  "wall_time_s": null,
+  "n_procs": null,
+  "atoms_per_proc": null
+}

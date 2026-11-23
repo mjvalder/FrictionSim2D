@@ -1,0 +1,24 @@
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+region box block 0.0 14.194937 0.0 12.293176 -2.500000 27.123924
+create_box      24 box
+
+read_data       <ABS> add append shift 0.0 0.0 0.0 group g1 offset 12 0 0 0 0 nocoeff
+read_data       <ABS> add append shift 0.0 0.0 6.000000 group g2 offset 12 0 0 0 0 nocoeff
+displace_atoms  g2 move 0.000000 4.097725 0.0 units box
+mass 1*4 95.950000 #Mo
+mass 5*12 127.600000 #Te
+mass 17*24 127.600000 #Te
+mass 13*16 183.840000 #W
+include         <ABS>
+run             0
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+variable        z1 equal xcm(g1,z)
+variable        z2 equal xcm(g2,z)
+variable        lat_c equal v_z2-v_z1
+print           "RESULT_LAT_C ${lat_c}"

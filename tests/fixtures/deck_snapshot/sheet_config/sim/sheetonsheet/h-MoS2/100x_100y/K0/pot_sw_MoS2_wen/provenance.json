@@ -1,0 +1,87 @@
+{
+  "schema_version": "2.2.0",
+  "run_uuid": "<UUID>",
+  "family": "sheetonsheet",
+  "model": "sheetonsheet",
+  "materials": [
+    {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "examples/potentials/sw/MoS2_wen.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d12d20b09969e7624c7dd6d0844b2e59802282fb3eac876ef18d4dc7e47883"
+    }
+  ],
+  "twist_angle": null,
+  "seed_thermal_tip": null,
+  "seed_thermal_sub": null,
+  "seed_velocity": null,
+  "seed_sheet_center": 48014721,
+  "substrate_realization_id": null,
+  "damping_ratio": null,
+  "damp_ev": null,
+  "git_commit": "<GITHASH>",
+  "git_dirty": true,
+  "config_hash": "7bbcb464dab12c1ce502e16d5d89b7510aed6f7e2921f4b49d48ad73c62812db",
+  "lammps_version": null,
+  "layer_type_map": {
+    "layer_1": [
+      1,
+      4
+    ],
+    "layer_2": [
+      2,
+      5
+    ],
+    "layer_3": [
+      3,
+      6
+    ]
+  },
+  "unloaded_reference_z": null,
+  "contact_cutoff": 6.0525,
+  "cutoff_source": "uff_sigma_k1.5",
+  "thermostat_scheme": "langevin_center_nve",
+  "tip_group_sizes": null,
+  "run_role": "label",
+  "load_requested": null,
+  "load_achieved": null,
+  "pressure_requested": null,
+  "pressure_achieved": null,
+  "ramp_converged": null,
+  "ramp_r": null,
+  "ramp_iterations": null,
+  "drive_k": 3.12075467163009,
+  "drive_rest_length": 0.0,
+  "geometry": {
+    "lat_c": 8.649544612696419,
+    "lat_c_source": "minimised",
+    "unit_cell": {
+      "xlo": 0.0,
+      "xhi": 3.1840664646845926,
+      "ylo": 0.0,
+      "yhi": 5.514964891509928,
+      "zlo": 0.0,
+      "zhi": 18.12711264635152
+    },
+    "cell_a": 3.1840664646845926,
+    "cell_b": 5.514964891509928,
+    "sheet_dims": {
+      "xlo": 0.0,
+      "xhi": 98.70606040522237,
+      "ylo": 0.0,
+      "yhi": 99.2693680471787,
+      "zlo": -7.499999999999998,
+      "zhi": 10.627112646351522
+    },
+    "atoms_per_layer": 3348,
+    "layer_thickness": 3.127112646351518,
+    "tip_r": null
+  },
+  "ramp_by_load": null,
+  "load_achieved_by_load": null,
+  "wall_time_s": null,
+  "n_procs": null,
+  "atoms_per_proc": null
+}

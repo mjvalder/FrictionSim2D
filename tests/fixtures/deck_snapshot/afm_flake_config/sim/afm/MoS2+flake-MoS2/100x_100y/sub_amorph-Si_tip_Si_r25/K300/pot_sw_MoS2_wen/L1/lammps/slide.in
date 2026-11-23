@@ -1,0 +1,164 @@
+# LAMMPS input script for AFM Sliding Simulation
+
+variable        speed equal 2.0
+
+variable        find index 5.0 20.0 50.0
+label           force_loop
+
+
+variable        a equal 0.0
+
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+timestep        0.001
+thermo          100000
+comm_style      tiled
+
+# A load whose system.in ramp halted (common/halt.lmp) or never ran has no
+# load_*.data: skip it rather than let read_data end the whole script.
+variable        load_file string afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/data/load_$(v_find)N.data
+variable        have_load equal is_file(${load_file})
+if              "${have_load} == 0" then &
+                "print '# SKIP no ${load_file}'" &
+                "jump SELF slide_next"
+read_data       ${load_file}
+include         afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/lammps/system.in.settings
+
+group           2D type 7 8
+velocity        2D zero angular
+
+
+
+dump            sys all atom 10000 afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/visuals/slide_f$(v_find)_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0
+fix             tip_f tip_fix rigid/nve single force * on on on torque * off off off
+
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix_modify      lang_sub temp temp_sub
+
+group           nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error continue message yes
+
+compute         COM_top 2D_all com
+variable        comx equal c_COM_top[1]
+variable        comy equal c_COM_top[2]
+variable        comz equal c_COM_top[3]
+
+compute         COM_tip tip_fix com
+variable        comx_tip equal c_COM_tip[1]
+variable        comy_tip equal c_COM_tip[2]
+variable        comz_tip equal c_COM_tip[3]
+
+# --- observable registry channels (spec §3) ---------------------------------
+compute T_sheet 2D_all temp
+compute cz_tip_s tip_all reduce min z
+compute COM_L1 layer_1 com
+compute eint tip_all group/group 2D_all pair yes
+compute peat_tip_all tip_all pe/atom
+compute pesum_tip_all tip_all reduce sum c_peat_tip_all
+compute peat_sub_all sub_all pe/atom
+compute pesum_sub_all sub_all reduce sum c_peat_sub_all
+compute peat_2D_all 2D_all pe/atom
+compute pesum_2D_all 2D_all reduce sum c_peat_2D_all
+compute coordc 2D_all coord/atom cutoff 6.2475 group tip_all
+compute contacts 2D_all reduce sum c_coordc
+compute satom 2D_all stress/atom NULL
+compute sxx 2D_all reduce sum c_satom[1]
+compute syy 2D_all reduce sum c_satom[2]
+variable etot equal etotal
+variable pe_now equal pe
+variable ke_now equal ke
+variable w_lang_tip equal f_lang_tip
+variable w_lang_sub equal f_lang_sub
+variable temp_sheet equal c_T_sheet
+variable tip_min_z equal c_cz_tip_s
+variable comx_L1 equal c_COM_L1[1]
+variable comy_L1 equal c_COM_L1[2]
+variable comz_L1 equal c_COM_L1[3]
+variable e_int equal c_eint
+variable pe_tip_all equal c_pesum_tip_all
+variable pe_sub_all equal c_pesum_sub_all
+variable pe_2D_all equal c_pesum_2D_all
+variable n_contact equal c_contacts
+variable sxx_2d equal c_sxx
+variable syy_2d equal c_syy
+
+run             0
+
+variable        Ftotal equal -v_find/1.602176565
+variable        n equal v_Ftotal/count(tip_fix)
+fix             forcetip tip_fix aveforce 0.0 0.0 $n
+
+variable        fz_tip equal f_forcetip[3]*1.602176565
+
+variable        fx_spr equal f_spr[1]*1.602176565
+variable        fy_spr equal f_spr[2]*1.602176565
+
+fix             damp tip_fix viscous 9.999999999999999e-05
+
+variable        spring_x equal cos(v_a*PI/180)
+variable        spring_y equal sin(v_a*PI/180)
+variable        drive_vx equal v_spring_x*v_speed/100
+variable        drive_vy equal v_spring_y*v_speed/100
+
+run             0
+variable        virtual_x equal xcm(tip_fix,x)+37.5*v_spring_x
+variable        virtual_y equal xcm(tip_fix,y)+37.5*v_spring_y
+variable        virtual_z equal xcm(tip_fix,z)
+
+create_atoms    13 single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
+group           virtual type 13
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr tip_fix spring couple virtual 3.12075467163009 0.0 0.0 NULL 37.5
+fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
+
+# Output fixes AFTER the drive block: fix spr must exist before any tier can
+# sample v_fx_spr. With Nrepeat=1, ave/time samples IMMEDIATELY at setup when
+# the (restored) timestep is a multiple of Nfreq — the load_*.data timestep
+# always is a multiple of 100, so fc_raw defined earlier fires at run 0 and
+# dies on the missing fix. (The legacy fc_ave survived the same layout only
+# because Nrepeat=1000's phase shift never aligns.)
+fix             fc_win all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip v_etot v_pe_now v_ke_now v_w_lang_tip v_w_lang_sub v_temp_sheet v_tip_min_z v_comx_L1 v_comy_L1 v_comz_L1 file afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=afm"
+fix             fc_raw all ave/time 100 1 100 v_fx_spr v_fy_spr v_fz_tip v_comx_tip v_comy_tip v_comz_tip file afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/results/raw_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=afm"
+fix             fc_pa all ave/time 1000 1 1000 v_e_int v_pe_tip_all v_pe_sub_all v_pe_2D_all v_n_contact v_sxx_2d v_syy_2d file afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/results/peratom_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=afm"
+
+
+run             500000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide load=$(v_find) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
+
+# Final-state retention (spec §5 F6): the post-slide configuration is always
+# available for contact/deflection reconstruction — never lucky again.
+write_data      afm/MoS2+flake-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L1/data/final_f$(v_find)N_a$(v_a).data
+
+# A halted or skipped point jumps here, past its write_data.
+label           slide_next
+
+
+
+next            find
+clear
+jump            SELF force_loop
+

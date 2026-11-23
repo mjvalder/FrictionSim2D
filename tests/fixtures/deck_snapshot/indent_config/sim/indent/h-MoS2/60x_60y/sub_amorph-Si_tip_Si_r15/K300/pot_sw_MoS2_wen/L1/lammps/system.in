@@ -1,0 +1,188 @@
+# LAMMPS input script for AFM System Initialization and Indentation
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+comm_style tiled
+region          box block 0.0 60.49726282900726 0.0 60.66461380660921 -9.314867 94.115735
+create_box      9 box
+
+read_data       indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/build/sub.lmp add append group sub
+read_data       indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/build/tip.lmp add append shift 30.24863141450363 30.332306903304605 57.661107109999996 group tip offset 3 0 0 0 0
+read_data       indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/build/h-MoS2_1.lmp add append shift 0.0 0.0 16.665 group 2D offset 6 0 0 0 0
+
+include         indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/lammps/system.in.settings
+
+balance         1.0 rcb
+
+dump            sys all atom 10000 indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/visuals/system.lammpstrj
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+
+# --- Approach: lower the tip from its clear start height to the computed contact gap
+# above the surface it indents (the flake if present, else the top sheet). Done on the
+# freshly minimized geometry, BEFORE any dynamics — so a thermally desorbed outlier
+# atom can never corrupt the reduce-max surface measurement (mirrors the PES approach).
+# Measured live (tip-bottom minus surface-top) so it self-adjusts to tip radius,
+# material and stack height instead of assuming a fixed drop. The computes are named in
+# thermo_style + a zero-step run so LAMMPS actually evaluates them before the approach
+# variable reads them (a compute used only by an equal-style variable is never current).
+compute         cz_tip tip_all reduce min z
+compute         cz_surf 2D_all reduce max z
+thermo_style    custom step pe c_cz_tip c_cz_surf
+run             0
+variable        approach equal (c_cz_tip-c_cz_surf)-4.665
+displace_atoms  tip_all move 0.0 0.0 $(-v_approach) units box
+thermo_style    one
+uncompute       cz_tip
+uncompute       cz_surf
+
+
+timestep        0.001
+thermo          100000
+
+group           fixset union sub_fix tip_fix
+group           system subtract all fixset
+
+velocity        system create 300.0 <SEED>
+velocity        2D zero angular
+
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix_modify      lang_sub temp temp_sub
+
+group           nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error continue message yes
+
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0
+velocity        sub_fix set 0.0 0.0 0.0
+
+
+fix             tip_f tip_fix rigid/nve single force * off off off torque * off off off
+run             10000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=system_equil load=none T=$(v_halt_T) step=$(step)' append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/halted.txt screen yes" &
+                "jump SELF halt_exit"
+
+unfix           tip_f
+
+# --- Unloaded reference (spec §5 F3): per-layer sheet z AFTER equilibration,
+# BEFORE any load. deflect_max is computed in post against these values (the
+# slide script clears and reads the already-loaded .data, so no unloaded
+# reference is in scope there). Parsed into provenance.json from the log.
+variable        zref_L1 equal xcm(layer_1,z)
+print           "# UNLOADED_REF layer=1 z=$(v_zref_L1)"
+
+fix             tip_f tip_fix rigid/nve single force * off off on torque * off off off
+variable        f equal 0.0
+
+variable        find index 5.0 10.0 20.0 30.0 50.0
+label           force_loop
+
+balance         1.0 rcb
+
+variable        num_floads equal 100
+variable        r equal 0.0
+variable        fincr equal (${find}-${f})/${num_floads}
+
+variable        i loop ${num_floads}
+label           loop_load
+
+variable        f equal ${f}+${fincr}
+variable        n equal -v_f/(count(tip_fix)*1.602176565)
+fix             forcetip tip_fix aveforce 0.0 0.0 $n
+run             100
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=system load=$(v_find) T=$(v_halt_T) step=$(step)' append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/halted.txt screen yes" &
+                "jump SELF halt_exit"
+
+unfix           forcetip
+
+next            i
+jump            SELF loop_load
+
+fix             forcetip tip_fix aveforce 0.0 0.0 $n
+variable        dispz equal xcm(tip_all,z)
+run             100 pre yes post no
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=system load=$(v_find) T=$(v_halt_T) step=$(step)' append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/halted.txt screen yes" &
+                "jump SELF halt_exit"
+
+
+# --- Capped settle loop (spec §1.1 defect 4). Previously the outer jump was
+# unbounded and a seized contact spun forever. On exhaustion, `next` deletes
+# ramp_iter and skips the jump below, falling through to the unconverged
+# branch. The converged branch deletes ramp_iter itself: LAMMPS silently
+# ignores re-declaration of an existing loop variable, so without the delete
+# the cap would shrink across the enclosing force loop.
+label           check_r
+variable        ramp_iter loop 40
+label           ramp_iter_loop
+variable        disp_l equal ${dispz}
+variable        disp_h equal ${dispz}
+variable        disploop loop 50
+
+label           disp
+run             100 pre no post no
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=system load=$(v_find) T=$(v_halt_T) step=$(step)' append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/halted.txt screen yes" &
+                "jump SELF halt_exit"
+
+if              '${dispz}>${disp_h}' then 'variable disp_h equal ${dispz}'
+if              '${dispz}<${disp_l}' then 'variable disp_l equal ${dispz}'
+next            disploop
+jump            SELF disp
+
+variable        r equal ${disp_h}-${disp_l}
+if              '${r} < 0.1' then 'jump SELF loop_end'
+next            ramp_iter
+jump            SELF ramp_iter_loop
+# cap exhausted (next deleted ramp_iter and skipped the jump above)
+print           "# RAMP_STATUS converged=0 r=${r} iterations=40 load=$(v_find)"
+jump            SELF hold_start
+
+label           loop_end
+print           "# RAMP_STATUS converged=1 r=${r} iterations=${ramp_iter} load=$(v_find)"
+variable        ramp_iter delete
+
+label           hold_start
+# --- Instrumented constant-load hold (spec §6): channel_role=diagnostic,
+# forbidden as ML features (same run as the COF label). Self-contained
+# variables: v_fz_tip/v_comz live only in slide.lmp.
+variable        hold_fz   equal f_forcetip[3]*1.602176565
+variable        hold_tipz equal xcm(tip_all,z)
+variable        hold_shz  equal xcm(2D_all,z)
+fix             hold_ave all ave/time 1 1000 1000 v_hold_fz v_hold_tipz v_hold_shz file indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/data/hold_$(v_find)N.txt
+run             10000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=system load=$(v_find) T=$(v_halt_T) step=$(step)' append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/halted.txt screen yes" &
+                "jump SELF halt_exit"
+
+unfix           hold_ave
+variable        hold_fz delete
+variable        hold_tipz delete
+variable        hold_shz delete
+
+write_data      indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/data/load_$(v_find)N.data
+
+next            find
+jump            SELF force_loop
+
+# A runaway (common/halt.lmp) jumps here: the loads written so far keep their
+# load_*.data and still slide; the later ones would ramp from the blown-up
+# state, so they are abandoned.
+label           halt_exit

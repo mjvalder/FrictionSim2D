@@ -1,0 +1,159 @@
+# LAMMPS Input Script for Sheet-vs-Sheet Sliding
+# 4-layer model, constraint_mode: none
+
+variable        speed equal 1.0
+
+variable        pressure equal 0.1
+
+variable        a equal 0.0
+
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+comm_style      tiled
+
+region          box block 0.0 14.194937067804 0.0 12.29317610584 -2.150000 41.912657 units box
+read_data       sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/hetero.data extra/atom/types 1 group all_atoms
+change_box      all z final -2.150000 41.912657 units box
+
+include         sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/lammps/system.in.settings
+
+# ---- Layer groups by initial z-slab (hetero: shared types, so region not type) ----
+region          reg_layer_1 block INF INF INF INF 6.5000 12.1102 units box
+group           layer_1 region reg_layer_1
+region          reg_layer_2 block INF INF INF INF 12.5000 18.1102 units box
+group           layer_2 region reg_layer_2
+region          reg_layer_3 block INF INF INF INF 20.2887 25.9127 units box
+group           layer_3 region reg_layer_3
+region          reg_layer_4 block INF INF INF INF 26.2887 31.9127 units box
+group           layer_4 region reg_layer_4
+
+
+dump            sys all atom 10000 sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/visuals/slide_p${pressure}_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+
+# Thermostat on middle layers (2 through 3)
+group           center union layer_2 layer_3
+velocity        center create 300.0 <SEED>
+fix             lang center langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix             nve_center center nve
+
+timestep        0.001
+thermo          100000
+
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error continue message yes
+
+# Top layer (layer 4): driven
+fix             fstage_top layer_4 rigid/nve single force * on on on torque * off off off
+# Bottom layer (layer 1): fixed
+fix             fsbot layer_1 setforce 0.0 0.0 0.0
+velocity        layer_1 set 0.0 0.0 0.0 units box
+
+# COM computes for key layers
+compute         COM_top layer_4 com
+variable        comx_top equal c_COM_top[1]
+variable        comy_top equal c_COM_top[2]
+variable        comz_top equal c_COM_top[3]
+
+# --- observable registry channels (spec §3) ---------------------------------
+compute T_center center temp
+compute T_layer_1 layer_1 temp
+compute T_Ltop layer_4 temp
+compute COM_L1 layer_1 com
+compute COM_L2 layer_2 com
+compute COM_L3 layer_3 com
+compute COM_L4 layer_4 com
+variable etot equal etotal
+variable pe_now equal pe
+variable ke_now equal ke
+variable w_lang_center equal f_lang
+variable temp_center_3d equal c_T_center
+variable temp_L1_3d equal c_T_layer_1
+variable temp_Ltop_3d equal c_T_Ltop
+variable comx_L1 equal c_COM_L1[1]
+variable comy_L1 equal c_COM_L1[2]
+variable comz_L1 equal c_COM_L1[3]
+variable comx_L2 equal c_COM_L2[1]
+variable comy_L2 equal c_COM_L2[2]
+variable comz_L2 equal c_COM_L2[3]
+variable comx_L3 equal c_COM_L3[1]
+variable comy_L3 equal c_COM_L3[2]
+variable comz_L3 equal c_COM_L3[3]
+variable comx_L4 equal c_COM_L4[1]
+variable comy_L4 equal c_COM_L4[2]
+variable comz_L4 equal c_COM_L4[3]
+
+
+# Apply Uniform Pressure
+# 1 eV/Å³ = 160.2176565 GPa
+variable        A equal (14.194937067804-0.0)*(12.29317610584-0.0)
+variable        p equal v_pressure/160.2176565
+variable        f equal -v_p*v_A/(count(layer_4))
+
+fix             force layer_4 aveforce 0.0 0.0 $f
+
+variable        fx equal f_force[1]*1.602176565
+variable        fy equal f_force[2]*1.602176565
+variable        fz equal f_force[3]*1.602176565
+variable        sx equal f_fsbot[1]*1.602176565
+variable        sy equal f_fsbot[2]*1.602176565
+variable        sz equal f_fsbot[3]*1.602176565
+
+# Many-body potential (sw): compute group/group not supported.
+# Using bottom-layer reaction forces as lateral friction proxy.
+# If friction values look wrong, verify pot_type classification in
+# PotentialManager.is_sheet_lj() (src/core/potential_manager.py).
+variable        xfrict equal v_sx
+variable        yfrict equal v_sy
+
+run             10000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
+
+
+variable        speed_x equal cos(v_a*PI/180)
+variable        speed_y equal sin(v_a*PI/180)
+
+create_atoms    25 single $(xcm(layer_4,x)) $(xcm(layer_4,y)) $(xcm(layer_4,z)+10) units box
+group           virtual type 25
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr layer_4 spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
+fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
+
+# Three sampling tiers (spec §4). Column order is registry-driven (Task 15).
+# NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
+# exemption: it is the label itself and its cost was already paid campaign-wide.
+fix             fc_win all ave/time 1 1000 1000 v_etot v_pe_now v_ke_now v_w_lang_center v_temp_center_3d v_temp_L1_3d v_temp_Ltop_3d v_xfrict v_yfrict v_fz v_fx v_fy v_comx_top v_comy_top v_comz_top v_sx v_sy v_sz v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 v_comx_L4 v_comy_L4 v_comz_L4 file sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=hetero"
+fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/results/raw_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=hetero"
+
+
+run             500000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
+
+# End-of-point snapshot (integrity stage 3); a halted point jumps past it.
+write_data      sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2/data/final_p$(v_pressure)GPa_a$(v_a).data
+
+# A halted point (common/halt.lmp) jumps here, past the rest of its slide.
+label           slide_next
+
+
+
+

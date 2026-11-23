@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "h-MoSe2.cif",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/cif/h-MoSe2.cif",
+      "category": "cif",
+      "components": [
+        "sheet_1"
+      ],
+      "checksum": "7d87560071c1e1bf4ba93ef2bf9b2b428798e81bba8f63d8f22a8b6dcb670a0c",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "h-MoSe2.sw",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/potentials/h-MoSe2.sw",
+      "category": "potential",
+      "components": [
+        "sheet_1"
+      ],
+      "checksum": "821f25f2e5091cd03a36e28ff82fbb426d3f762f395a3605048d9f60e73762db",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "h-WSe2.cif",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/cif/h-WSe2.cif",
+      "category": "cif",
+      "components": [
+        "sheet_2"
+      ],
+      "checksum": "f4616bd478dbef37ff8270b5e77ffe5d7cff938b09b7c04de97e6234538f9ff3",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "h-WSe2.sw",
+      "original_path": "<ABS>",
+      "stored_path": "provenance/potentials/h-WSe2.sw",
+      "category": "potential",
+      "components": [
+        "sheet_2"
+      ],
+      "checksum": "31a42c65f2cac8dca082e22a5777ad403178735807658f45e68acd62bc07bd53",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

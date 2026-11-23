@@ -1,0 +1,45 @@
+mass 1*6 28.085000 #Si
+mass 7*9 95.950000 #Mo
+mass 10*12 32.060000 #S
+mass 13 1.0 #Virtual atom
+group sub_all type 1 2 3
+group sub_fix type 2
+group sub_thermo type 3
+group tip_all type 4 5 6
+group tip_fix type 5
+group tip_thermo type 6
+group 2D_all type 7 8 9 10 11 12
+group 2D_core type 7 8 9 10 11 12
+group layer_1 type 7 10
+group layer_2 type 8 11
+group layer_3 type 9 12
+group mobile union sub_thermo tip_thermo
+pair_style hybrid sw sw sw sw sw lj/cut 11.0
+# Self-interactions (intra-component)
+pair_coeff * * sw 1 afm/MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/provenance/potentials/Si.sw Si Si Si NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL # sub
+pair_coeff * * sw 2 afm/MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/provenance/potentials/Si.sw NULL NULL NULL Si Si Si NULL NULL NULL NULL NULL NULL NULL # tip
+pair_coeff * * sw 3 afm/MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw NULL NULL NULL NULL NULL NULL Mo NULL NULL S NULL NULL NULL # sheet Layer 1
+pair_coeff * * sw 4 afm/MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw NULL NULL NULL NULL NULL NULL NULL Mo NULL NULL S NULL NULL # sheet Layer 2
+pair_coeff * * sw 5 afm/MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw NULL NULL NULL NULL NULL NULL NULL NULL Mo NULL NULL S NULL # sheet Layer 3
+
+# Cross-interactions (inter-component LJ)
+pair_coeff 1*3 4*6 lj/cut 0.0174320868 4.295 # Si(sub)-Si(tip)
+pair_coeff 1*3 7*9 lj/cut 0.00650624430479018 3.6735 # Si(sub)-Mo(sheet)
+pair_coeff 1*3 10*12 lj/cut 0.0143916846634303 4.165 # Si(sub)-S(sheet)
+pair_coeff 4*6 7*9 lj/cut 0.00650624430479018 3.6735 # Si(tip)-Mo(sheet)
+pair_coeff 4*6 10*12 lj/cut 0.0143916846634303 4.165 # Si(tip)-S(sheet)
+pair_coeff 7 8 lj/cut 0.0024283504 3.052 # Mo(L1)-Mo(L2)
+pair_coeff 7 11 lj/cut 0.00537146340837286 3.5435 # Mo(L1)-S(L2)
+pair_coeff 8 10 lj/cut 0.00537146340837286 3.5435 # S(L1)-Mo(L2)
+pair_coeff 10 11 lj/cut 0.0118815716 4.035 # S(L1)-S(L2)
+pair_coeff 7 9 lj/cut 0.0024283504 3.052 # Mo(L1)-Mo(L3)
+pair_coeff 7 12 lj/cut 0.00537146340837286 3.5435 # Mo(L1)-S(L3)
+pair_coeff 9 10 lj/cut 0.00537146340837286 3.5435 # S(L1)-Mo(L3)
+pair_coeff 10 12 lj/cut 0.0118815716 4.035 # S(L1)-S(L3)
+pair_coeff 8 9 lj/cut 0.0024283504 3.052 # Mo(L2)-Mo(L3)
+pair_coeff 8 12 lj/cut 0.00537146340837286 3.5435 # Mo(L2)-S(L3)
+pair_coeff 9 11 lj/cut 0.00537146340837286 3.5435 # S(L2)-Mo(L3)
+pair_coeff 11 12 lj/cut 0.0118815716 4.035 # S(L2)-S(L3)
+
+# Virtual atom (minimal LJ)
+pair_coeff * 13 lj/cut 1e-100 1e-100

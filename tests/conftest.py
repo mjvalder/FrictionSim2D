@@ -23,6 +23,8 @@ from src.core.config import (
 def pytest_addoption(parser):
     parser.addoption("--record-lammps", action="store_true", default=False,
                      help="run real LAMMPS at build time and record its outputs")
+    parser.addoption("--update-deck-snapshot", action="store_true", default=False,
+                     help="rewrite tests/fixtures/deck_snapshot from the current renders")
 
 
 @pytest.fixture
