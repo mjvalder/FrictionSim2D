@@ -567,3 +567,13 @@ def test_build_sheet_reports_monolayer_geometry(tmp_path):
     assert info['lat_c_source'] == 'not_applicable'
     assert info['atoms_per_layer'] > 0
     assert info['layer_thickness'] > 0
+
+
+def test_tmp_path_format_and_uniqueness() -> None:
+    import re
+    first = components._tmp_path("MoS2", "unit")
+    second = components._tmp_path("MoS2", "unit")
+    assert first != second
+    assert re.fullmatch(r"MoS2_[0-9a-f]{8}_unit\.lmp", first.name)
+    assert re.fullmatch(r"sheet_2_[0-9a-f]{8}\.in\.settings",
+                        components._tmp_path("sheet_2", ext=".in.settings").name)

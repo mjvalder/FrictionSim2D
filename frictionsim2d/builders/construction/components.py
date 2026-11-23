@@ -79,6 +79,12 @@ def _create_lammps_instance():
 # Flake Geometry and Building
 # =============================================================================
 
+def _tmp_path(stem: str, tag: str = "", ext: str = ".lmp") -> Path:
+    """A unique scratch path ``<tmp>/<stem>_<hex>[_<tag>]<ext>``."""
+    suffix = f"_{tag}" if tag else ""
+    return Path(tempfile.gettempdir()) / f"{stem}_{uuid.uuid4().hex[:8]}{suffix}{ext}"
+
+
 def _require_box_dims(
     dims: Dict[str, Optional[float]],
     *,
@@ -1385,9 +1391,9 @@ def create_orthogonal_slab(
     """
     cif_path = Path(cif_path).absolute()
 
-    unit_cell = Path(tempfile.gettempdir()) / f"{cif_path.stem}_{uuid.uuid4().hex[:8]}_unit.lmp"
-    predup_cell = Path(tempfile.gettempdir()) / f"{cif_path.stem}_{uuid.uuid4().hex[:8]}_predup.lmp"
-    ortho_cell = Path(tempfile.gettempdir()) / f"{cif_path.stem}_{uuid.uuid4().hex[:8]}_ortho.lmp"
+    unit_cell = _tmp_path(cif_path.stem, "unit")
+    predup_cell = _tmp_path(cif_path.stem, "predup")
+    ortho_cell = _tmp_path(cif_path.stem, "ortho")
 
     cif_data = cifread(cif_path)
     _write_cif_as_lammps_atomic(cif_path, unit_cell, specorder=cif_data['elements'])
@@ -1443,7 +1449,7 @@ def _orthogonal_primitive_cell(cif_path: Path, out_path: Path) -> Dict[str, floa
         The cell's box dimensions (``get_model_dimensions`` keys, floats).
     """
     cif_path = Path(cif_path).absolute()
-    unit = Path(tempfile.gettempdir()) / f"{cif_path.stem}_{uuid.uuid4().hex[:8]}_unit.lmp"
+    unit = _tmp_path(cif_path.stem, "unit")
     cif_data = cifread(cif_path)
     _write_cif_as_lammps_atomic(cif_path, unit, specorder=cif_data['elements'])
     _orthogonalize_lammps_data(unit, out_path)
@@ -2040,8 +2046,7 @@ def stack_multilayer_sheet(
 
     layers_for_setup = 2 if calculate_lat_c else n_layers
     pot_file = (
-        Path(tempfile.gettempdir())
-        / f"sheet_{layers_for_setup}_{uuid.uuid4().hex[:8]}.in.settings"
+        _tmp_path(f"sheet_{layers_for_setup}", ext=".in.settings")
     )
 
     style = interlayer_style(interlayer_general)
@@ -2175,7 +2180,7 @@ def build_tip(
     """
     cif_path = get_material_path(config.cif_path)
 
-    base_lmp = Path(tempfile.gettempdir()) / f"{config.mat}_{uuid.uuid4().hex[:8]}_base.lmp"
+    base_lmp = _tmp_path(config.mat, "base")
     final_lmp = build_dir / "tip.lmp"
     radius = config.r
     box_size = radius * 2.0
@@ -2235,7 +2240,7 @@ def build_substrate(
     """
 
     cif_path = get_material_path(config.cif_path)
-    base_lmp = Path(tempfile.gettempdir()) / f"{config.mat}_{uuid.uuid4().hex[:8]}_base.lmp"
+    base_lmp = _tmp_path(config.mat, "base")
     final_lmp = build_dir / "sub.lmp"
     target_x = float(target_x) if target_x is not None else box_dims['xhi'] - box_dims['xlo']
     target_y = float(target_y) if target_y is not None else box_dims['yhi'] - box_dims['ylo']
@@ -2406,7 +2411,7 @@ def build_monolayer(
     """
     cif_path = get_material_path(config.cif_path)
     pot_path = get_material_path(config.pot_path)
-    base_path = Path(tempfile.gettempdir()) / f"{config.mat}_1_{uuid.uuid4().hex[:8]}.lmp"
+    base_path = _tmp_path(f"{config.mat}_1")
 
     cif_data = cifread(cif_path)
     cif_elements = cif_data['elements']
@@ -2424,7 +2429,7 @@ def build_monolayer(
     type_multiplier = 1 if config.pot_type in ['rebo', 'rebomos', 'airebo', 'meam', 'reaxff'] else \
         check_potential_cif_compatibility(cif_path, pot_path)
 
-    temp_unit_cell = Path(tempfile.gettempdir()) / f"{config.mat}_{uuid.uuid4().hex[:8]}_unit.lmp"
+    temp_unit_cell = _tmp_path(config.mat, "unit")
     _write_cif_as_lammps_atomic(cif_path, temp_unit_cell, specorder=cif_elements)
 
     has_sublattice_types = any(v != 1 for v in pot_counts.values())
@@ -2441,7 +2446,7 @@ def build_monolayer(
 
     # Orthogonalize. _orthogonalize_lammps_data preserves each atom's explicit
     # LAMMPS type, so sublattice types assigned above survive the tiling.
-    ortho_cell = Path(tempfile.gettempdir()) / f"{config.mat}_{uuid.uuid4().hex[:8]}_ortho.lmp"
+    ortho_cell = _tmp_path(config.mat, "ortho")
     _orthogonalize_lammps_data(temp_unit_cell, ortho_cell)
     temp_unit_cell.unlink()
 
@@ -2466,7 +2471,7 @@ def build_monolayer(
                     dup_factor_x = factor_candidate
                     dup_factor_y = factor // factor_candidate
                     break
-            dup_ortho = Path(tempfile.gettempdir()) / f"{config.mat}_{uuid.uuid4().hex[:8]}_dup.lmp"
+            dup_ortho = _tmp_path(config.mat, "dup")
             _duplicate_lammps_data(ortho_cell, dup_ortho, dup_factor_x, dup_factor_y, 1)
             ortho_cell.unlink()
             ortho_cell = dup_ortho
