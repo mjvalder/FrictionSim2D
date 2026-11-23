@@ -235,17 +235,12 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
           dispatching to ``HeteroAFMSimulation``'s override) into the same
           ``xlo``/``xhi``/``ylo``/``yhi`` shape ``cell_period`` expects.
 
-          An earlier revision used ``self._hetero_coincidence_cell`` (the whole
-          unreplicated assembled box) here on the premise that the coincidence
-          cell is the interface's periodicity. Measurement refutes that for the
-          shipped fixture: each material is tiled to the configured x/y
-          footprint *before* the match runs, so the pair matches with
-          (near-)identity matrices and the box is a 4x2 superlattice of the
-          real repeat (3.185 x 5.517 Å). Scanning the box wasted 4x2 of the
-          grid re-visiting registries it had already sampled. Unlike the sheet
-          flavour there is no energy-normalization consequence here:
-          ``afm/pes_scan.lmp`` records the total energy and the lateral force
-          on the tip, with no per-cell divisor.
+          The unreplicated assembled box is NOT the repeat: each material is
+          tiled to the configured x/y footprint before the match runs, so the
+          box is a superlattice of the real repeat and scanning it would
+          re-visit registries already sampled. ``afm/pes_scan.lmp`` records the
+          total energy and the lateral force on the tip, with no per-cell
+          divisor.
         * ``self.sheet_dims`` (the built footprint; read by ``build_sheet``'s
           sibling ``PESSheetSimulation._tile_count``, not by
           ``PESTipSimulation.write_inputs`` itself, but by

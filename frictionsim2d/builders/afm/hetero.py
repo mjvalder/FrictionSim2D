@@ -261,10 +261,8 @@ class HeteroAFMSimulation(AFMSimulation):
         # here is behaviour-neutral (nothing distinguishes "not yet built"
         # from a stored None).
         self._hetero_stack = None
-        self._hetero_coincidence_cell = None
         self._hetero_rep_path = None
         self._hetero_rep_box = None
-        self._hetero_replication = None
         self._hetero_stack_atom_top = None
         self._hetero_stack_atom_bottom = None
         #: Per-layer z-bands of hetero_rep.data (its own frame), for ILP/KC
@@ -307,14 +305,8 @@ class HeteroAFMSimulation(AFMSimulation):
         """Build the hetero stack, guard orthogonality, replicate in-plane.
 
         Sets ``self._hetero_rep_path`` (the replicated ``nocoeff`` data file),
-        ``self._hetero_rep_box`` = ``(lx, ly, z_extent)`` of the replicated cell,
-        ``self._hetero_replication`` = ``(nx, ny)``, and
-        ``self._hetero_coincidence_cell`` = ``(lx_cell, ly_cell)`` — the
-        *unreplicated* matched-interface cell both materials' surface lattices
-        were strained onto (before the in-plane tiling below). Exposed for
-        :class:`~frictionsim2d.builders.afm.pes_tip.HeteroPESTipSimulation`, whose static
-        scan must repeat over this coincidence cell, not either constituent's
-        own unit cell. Raises ``ValueError`` on a triclinic coincidence cell
+        ``self._hetero_rep_box`` = ``(lx, ly, z_extent)`` of the replicated cell.
+        Raises ``ValueError`` on a triclinic coincidence cell
         (xy tilt != 0) — an orthogonal amorphous box cannot tile it;
         twisted/triclinic pairs are D3.
         """
@@ -335,7 +327,6 @@ class HeteroAFMSimulation(AFMSimulation):
             )
 
         lx_cell, ly_cell = float(cell[0, 0]), float(cell[1, 1])
-        self._hetero_coincidence_cell = (lx_cell, ly_cell)
         nx, ny = compute_replication_factors(lx_cell, ly_cell, self.config.tip.r)
 
         rep = build_dir / "hetero_rep.data"
@@ -348,7 +339,6 @@ class HeteroAFMSimulation(AFMSimulation):
 
         self._hetero_rep_path = rep
         self._hetero_rep_box = (lx, ly, z_extent)
-        self._hetero_replication = (nx, ny)
         if interlayer_style(self.config.general) in ('ilp', 'kc'):
             # Replication keeps every z, so the stack's layer bands hold for
             # the replicated file too (compute_layer_zbands checks every atom).
@@ -783,24 +773,15 @@ class FiniteHeteroAFMSimulation(HeteroAFMSimulation):
         # region split B3's finite build_hetero_structure applies to the data file,
         # kept single-sourced through register_sheet_block so they cannot diverge.
         self._sheet_regions = [None, 'edge']
-        self._finite = True
-        # Recorded by _generate_potentials() during build() -- see its
-        # docstring. Nothing reads this before build() runs, so a None
-        # default here is behaviour-neutral.
-        self._pm = None
 
     def _generate_potentials(self, n_sheet_layers):
-        """D2 sub/tip/sheet_1/sheet_2 registration, exposing the single PM.
+        """D2 registration plus the per-material and combined ``2D_edge`` groups.
 
-        Delegates to :meth:`HeteroAFMSimulation._generate_potentials` (which,
-        because ``self._sheet_regions == [None, 'edge']``, splits the sheet block
-        into core/edge types matching the edge-typed ``hetero_rep.data`` and runs
-        the element-wise layout guard), and records ``self._pm`` so the finite
-        layout-guard test can assert the unified PM's sheet block against the data
-        file directly.
+        The base registration splits the sheet block into core/edge types
+        matching the edge-typed ``hetero_rep.data`` (``_sheet_regions``) and runs
+        the element-wise layout guard.
         """
         pm = super()._generate_potentials(n_sheet_layers)
-        self._pm = pm
         self._emit_edge_groups(pm, n_sheet_layers)
         return pm
 

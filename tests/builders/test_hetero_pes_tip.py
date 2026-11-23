@@ -228,6 +228,8 @@ def test_hetero_pes_tip_build_scan_period_is_interface_repeat(tmp_path):
     # scan must NOT step over the whole assembled box. The box is an exact 4x2
     # multiple of the repeat, so stepping it would re-visit each registry 8
     # times and resolve only grid_n/4 distinct x-registries.
-    box_x, box_y = sim._hetero_coincidence_cell
+    from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
+    dims = get_model_dimensions(sim._hetero_stack.data_path)
+    box_x, box_y = dims["xhi"] - dims["xlo"], dims["yhi"] - dims["ylo"]
     assert box_x / period_x_emitted == pytest.approx(4.0, rel=1e-9)
     assert box_y / period_y_emitted == pytest.approx(2.0, rel=1e-9)

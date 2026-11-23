@@ -487,10 +487,10 @@ def test_finite_hetero_layout_guard_covers_the_region_split(tmp_path):
     cfg.settings.hpc.modules = ["lammps"]
     sim = FiniteHeteroAFMSimulation(cfg, str(tmp_path))
     sim.build()                                        # build passes the guard -> no divergence
-    offset = (len(sim._pm.types.ids_by_component('sub'))
-              + len(sim._pm.types.ids_by_component('tip')))
+    offset = (len(sim.pm[1].types.ids_by_component('sub'))
+              + len(sim.pm[1].types.ids_by_component('tip')))
     # POSITIVE: unified PM's sheet block == hetero_rep.data's block, element-wise.
-    assert_sheet_block_matches_data(sim._pm, sim._hetero_rep_path, offset=offset)
+    assert_sheet_block_matches_data(sim.pm[1], sim._hetero_rep_path, offset=offset)
 
 
 def test_layout_guard_trips_on_equal_count_region_permutation(tmp_path):
@@ -664,8 +664,8 @@ def test_finite_hetero_afm_runs_with_edge_tether(tmp_path):
     dump = next((run_dir / "L1" / "visuals").glob("slide_*.lammpstrj"))
     frames = _read(str(dump), format="lammps-dump-text", index=":")
     assert len(frames) >= 2, f"need >=2 slide frames for the drift check, got {len(frames)}"
-    sheet_ids = (sim._pm.types.ids_by_component("sheet_1")
-                 + sim._pm.types.ids_by_component("sheet_2"))
+    sheet_ids = (sim.pm[1].types.ids_by_component("sheet_1")
+                 + sim.pm[1].types.ids_by_component("sheet_2"))
 
     def _sheet_xy_com(atoms):
         mask = np.isin(atoms.numbers, sheet_ids)   # ase maps lammps type -> numbers
