@@ -58,7 +58,6 @@ from ...core.utils.structures import cifread
 from ...potentials.utils import (
     check_potential_cif_compatibility, get_potential_element_order
 )
-from ...interfaces.atomsk import AtomskWrapper
 from ...interfaces.jinja import PackageLoader
 from ...interfaces.lammps import run_lammps_commands
 # No cycle: builders/utils/interlayer imports only frictionsim2d.potentials.interlayer.
@@ -1377,7 +1376,6 @@ def create_orthogonal_slab(
     target_x: float,
     target_y: float,
     target_z: Optional[float] = None,
-    atomsk: Optional[AtomskWrapper] = None
 ) -> Tuple[Path, Dict[str, float], List[int]]:
     """Create orthogonalized slab from CIF file sized to target dimensions.
     
@@ -1387,13 +1385,10 @@ def create_orthogonal_slab(
         target_x: Target X dimension (Angstroms).
         target_y: Target Y dimension (Angstroms).
         target_z: Target Z dimension (Angstroms), or None for single layer.
-        atomsk: Retained for API compatibility (unused).
         
     Returns:
         Tuple of (output_path, box_dimensions, duplication_factors).
     """
-    # Keep `atomsk` in signature for backward compatibility with existing callers.
-    _ = atomsk
     cif_path = Path(cif_path).absolute()
 
     unit_cell = Path(tempfile.gettempdir()) / f"{cif_path.stem}_{uuid.uuid4().hex[:8]}_unit.lmp"

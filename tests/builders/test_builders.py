@@ -267,7 +267,6 @@ def test_create_orthogonal_slab_avoids_atomsk_cli(tmp_path: Path) -> None:
     """create_orthogonal_slab builds a real orthogonal Si slab without going
     through the Atomsk CLI at all."""
     out_path = tmp_path / "out.lmp"
-    atomsk = MagicMock()
 
     with patch("frictionsim2d.builders.components._write_cif_as_lammps_atomic",
                wraps=components._write_cif_as_lammps_atomic) as mock_convert, \
@@ -286,7 +285,6 @@ def test_create_orthogonal_slab_avoids_atomsk_cli(tmp_path: Path) -> None:
             target_x=12.0,
             target_y=12.0,
             target_z=None,
-            atomsk=atomsk,
         )
 
     assert out_path.exists()
@@ -296,8 +294,6 @@ def test_create_orthogonal_slab_avoids_atomsk_cli(tmp_path: Path) -> None:
     mock_convert.assert_called_once()
     mock_ortho.assert_called_once()
     assert mock_dup.call_count == 1
-    atomsk.create_slab.assert_not_called()
-    atomsk.duplicate.assert_not_called()
 
 
 def test_build_monolayer_splits_edge_types_when_enabled(tmp_path: Path) -> None:
