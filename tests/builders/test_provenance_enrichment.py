@@ -6,7 +6,7 @@ provenance.parse_log_extras", but nothing in ``frictionsim2d/`` ever called it -
 whose settle loop never converges (see ``afm/system_init.lmp``'s capped
 ``ramp_iter`` loop) produced no signal anywhere a user would see, only a
 buried ``# RAMP_STATUS converged=0 ...`` log line nothing read back.
-The module-level ``base.enrich_provenance_post_run`` is the reusable home for
+The module-level ``post_run.enrich_provenance_post_run`` is the reusable home for
 that call: it reads the provenance.json a build already wrote, merges
 ``parse_log_extras(log_path)``'s fields into it, and rewrites it in place. It
 takes no ``self`` because its real caller is a shell line in the generated HPC
@@ -23,7 +23,7 @@ import logging
 from pathlib import Path
 
 from frictionsim2d.builders.afm import AFMSimulation
-from frictionsim2d.builders.afm.base import enrich_provenance_post_run
+from frictionsim2d.builders.utils.post_run import enrich_provenance_post_run
 from frictionsim2d.data.provenance import PROVENANCE_SCHEMA_VERSION
 from tests.helpers.afm import _make_afm_config, _seed_builder_state
 

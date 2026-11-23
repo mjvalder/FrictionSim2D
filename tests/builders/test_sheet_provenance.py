@@ -376,7 +376,7 @@ def test_a_sheet_run_is_enriched_after_the_run_instead_of_skipped(tmp_path):
     every real LAMMPS log opens with a version banner, and recording which
     LAMMPS produced a result is the point of the field.
     """
-    from frictionsim2d.builders.afm.base import enrich_provenance_post_run
+    from frictionsim2d.builders.utils.post_run import enrich_provenance_post_run
     from frictionsim2d.cli import _enrich_one_run
 
     run_dir, _slide, _b = _build_homogeneous(tmp_path)
@@ -394,7 +394,7 @@ def test_a_sheet_run_is_enriched_after_the_run_instead_of_skipped(tmp_path):
 def test_a_sheet_run_with_no_log_is_reported_not_crashed(tmp_path):
     """The sweep must never report a completed simulation as failed over a
     provenance nicety."""
-    from frictionsim2d.builders.afm.base import enrich_provenance_post_run
+    from frictionsim2d.builders.utils.post_run import enrich_provenance_post_run
     from frictionsim2d.cli import _enrich_one_run
 
     run_dir, _slide, _b = _build_homogeneous(tmp_path)

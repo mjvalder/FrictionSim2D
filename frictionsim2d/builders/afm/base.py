@@ -5,7 +5,6 @@ simulation. It coordinates the construction of the Tip, Substrate, and Sheet,
 generates the necessary potentials, and writes the LAMMPS input scripts.
 """
 
-import json
 import logging
 from itertools import product
 from pathlib import Path
@@ -34,125 +33,6 @@ logger = logging.getLogger(__name__)
 # tip-sheet element pairs, recorded in provenance with its source.
 K_CONTACT = 1.5
 _CONTACT_CUTOFF_FALLBACK = 5.0  # Angstrom; used only when the CIF is unreadable
-
-
-def _configured_loads(output_root: Path) -> Optional[list]:
-    """``general.force`` from the run's ``provenance/config.json``, as a list."""
-    for base in (output_root, output_root.parent):
-        cfg_path = base / 'provenance' / 'config.json'
-        if not cfg_path.is_file():
-            continue
-        try:
-            force = json.loads(cfg_path.read_text(encoding='utf-8'))['general']['force']
-        except (ValueError, OSError, KeyError, TypeError) as exc:
-            logger.warning("Could not read loads from %s (%s).", cfg_path, exc)
-            return None
-        if force is None:
-            return None
-        return [float(x) for x in (force if isinstance(force, list) else [force])]
-    return None
-
-
-def enrich_provenance_post_run(output_root: Path,
-                               log_path: Path) -> Optional[Path]:
-    """Enrich a build-time provenance.json with post-run log fields.
-
-    The build-time counterpart is :meth:`AFMSimulation._write_provenance`
-    below, whose docstring has always promised that
-    ``RAMP_STATUS``/``UNLOADED_REF``/``lammps_version`` are "enriched post-run
-    via provenance.parse_log_extras". This is where that happens: it parses
-    ``log_path`` (the system.in log -- the source of the
-    ``RAMP_STATUS``/``UNLOADED_REF`` lines the settle-loop template already
-    emits, see ``templates/afm/system_init.lmp``) via
-    ``provenance.parse_log_extras`` and merges the result into the
-    ``provenance.json`` that ``_write_provenance`` wrote at build time,
-    updating ``ramp_converged``/``ramp_r``/``ramp_iterations``,
-    ``unloaded_reference_z`` and ``lammps_version`` in place.
-
-    A build always runs before LAMMPS does, so no builder can see the log
-    itself; the caller is therefore whatever runs *after* the job, and it
-    reaches this through the shell entry point ``FrictionSim2D hpc
-    enrich-provenance`` (see ``cli.hpc_enrich_provenance``). Today that is the
-    local post-transfer sweep -- ``hpc enrich-provenance -r <tree>`` over the
-    results rsynced back from the cluster, since FrictionSim2D is not installed
-    there. The generated job scripts
-    (``templates/hpc/{pbs,slurm}_{array,combined}.j2``) also carry the call,
-    guarded by ``command -v``, so a cluster-side install would start enriching
-    in-job with no workflow change. Either way the caller is a shell line,
-    which is why this is a module-level function rather than a method: its body
-    never needed ``self``, and a shell caller would otherwise have to rebuild a
-    whole ``AFMSimulationConfig`` (re-parsing the .ini and settings.yaml) just
-    to reach it.
-
-    Calling this repeatedly, with different logs from the same run, is safe:
-    the merge is a ``model_copy(update=...)``, so a log only ever sets the keys
-    it actually supplied and no earlier field is dropped. That matters because
-    a slide-phase log is *not* inert -- every real LAMMPS run opens with a
-    ``LAMMPS (<version>)`` banner, so passing one still rewrites the record
-    with a ``lammps_version``; what it cannot do is disturb the ramp fields the
-    system phase wrote. One known consequence: when the two phases ran against
-    different LAMMPS builds, the last log passed wins the ``lammps_version``
-    field. That is accepted -- both phases belong to the same run, and a single
-    version string cannot describe a mixed pair anyway.
-
-    Returns the provenance.json path, or ``None`` if the record or the log is
-    missing, or the record on disk is unreadable (logged, not raised: a run's
-    real output must never be hidden behind a failed enrichment).
-    """
-    # pylint: disable-next=import-outside-toplevel
-    from ...data.provenance import (
-        parse_hold_files, parse_log_extras, read_provenance, write_provenance)
-
-    output_root = Path(output_root)
-    log_path = Path(log_path)
-    prov_path = output_root / 'provenance.json'
-    if not prov_path.is_file():
-        logger.warning("No provenance.json in %s to enrich.", output_root)
-        return None
-    if not log_path.is_file():
-        logger.warning("No log at %s to enrich provenance from.", log_path)
-        return None
-
-    try:
-        record = read_provenance(prov_path)
-    # ValidationError (a ValueError subclass) covers both a truncated/invalid
-    # JSON body and a well-formed document missing required fields; OSError
-    # covers an unreadable/undecodable file. A killed job leaving a half-written
-    # provenance.json is exactly the case this function exists to report on, so
-    # it must not be the one case that raises.
-    except (ValueError, OSError) as exc:
-        logger.warning(
-            "Could not read provenance.json at %s (%s); leaving it "
-            "unenriched.", prov_path, exc)
-        return None
-
-    loads = _configured_loads(output_root)
-    updates = parse_log_extras(log_path, loads)
-    achieved = parse_hold_files(output_root / 'data')
-    if achieved:
-        updates['load_achieved_by_load'] = achieved
-        # The last configured load when known, else the largest held load:
-        # `achieved` is in filename order, where hold_5N sorts after hold_10N.
-        last = f'{float(loads[-1]):g}' if loads else None
-        updates['load_achieved'] = achieved.get(
-            last, achieved[max(achieved, key=float)])
-    if not updates:
-        logger.warning(
-            "No RAMP_STATUS/UNLOADED_REF/LAMMPS-version lines found in "
-            "%s; provenance.json left unenriched.", log_path)
-        return prov_path
-
-    record = record.model_copy(update=updates)
-    if record.ramp_converged is False:
-        logger.warning(
-            "Settle loop did not converge for %s (r=%s after %s "
-            "iterations) -- tip z was still oscillating past the "
-            "iteration budget when it hit ramp_max_iterations. See "
-            "provenance.json's ramp_r/ramp_iterations.",
-            output_root, record.ramp_r, record.ramp_iterations)
-
-    write_provenance(output_root, record)
-    return prov_path
 
 
 class AFMSimulation(SimulationBase):
@@ -1113,13 +993,11 @@ class AFMSimulation(SimulationBase):
 
     def _write_provenance(self, n_layers: int, context: Dict,
                           output_root: Path) -> None:
-        """Emit provenance.json for this layer configuration (spec §5 F5).
+        """Emit provenance.json for this layer configuration.
 
-        Build-time fields only; RAMP_STATUS/UNLOADED_REF/lammps_version are
-        enriched post-run via provenance.parse_log_extras — see the
-        module-level :func:`enrich_provenance_post_run` above, which the
-        generated HPC job scripts call once LAMMPS has finished. A failure
-        here fails the build — provenance is not optional.
+        Build-time fields only; the ramp fields and ``lammps_version`` are added
+        post-run by ``builders.utils.post_run.enrich_provenance_post_run``.
+        A failure here fails the build: provenance is not optional.
         """
         # lazy: pydantic model construction ~20 ms
         # pylint: disable-next=import-outside-toplevel

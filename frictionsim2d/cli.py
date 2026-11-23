@@ -567,7 +567,7 @@ def hpc_enrich_provenance(sim_dir: Path, log_path: Optional[Path],
     """
     # Lazy, like every other subcommand's imports here: keeps `--help` and the
     # unrelated groups off this module's (ASE-bearing) import path.
-    from .builders.afm.base import enrich_provenance_post_run
+    from .builders.utils.post_run import enrich_provenance_post_run
 
     if recursive and log_path is not None:
         raise click.UsageError(
