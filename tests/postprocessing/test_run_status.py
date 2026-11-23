@@ -13,7 +13,8 @@ from pathlib import Path
 
 from frictionsim2d.postprocessing.read_data import DataReader
 from frictionsim2d.postprocessing.run_status import (classify, expected_chains,
-                                           halt_detail, mark_not_reached,
+                                           halt_detail, is_truncated,
+                                           mark_not_reached,
                                            point_key)
 from tests.helpers.results_tree import make_family_run, slide_config
 from tests.helpers.synthetic_results import write_results
@@ -403,3 +404,9 @@ def test_a_system_ramp_halt_keeps_the_loads_before_it(tmp_path):
     reader = DataReader(results_dir=str(tmp_path))
     assert _statuses(reader) == ['complete', 'complete', 'halted',
                                  'not_reached', 'not_reached']
+
+
+def test_one_row_of_truncation_slack():
+    assert not is_truncated(99, 100) and not is_truncated(100, 100)
+    assert is_truncated(98, 100)
+    assert not is_truncated(3, None)

@@ -4,7 +4,7 @@ import re
 import pytest
 
 from frictionsim2d.builders.afm import AFMSimulation
-from frictionsim2d.core.observables import expected_columns
+from frictionsim2d.core.observables import channels_for
 from tests.helpers.afm import (
     _make_afm_config,
     _prepare_builder_for_slide_write,
@@ -49,8 +49,8 @@ def test_window_columns_match_registry_monolayer(slide_text):
     # layer_channels(1), so expected = window set - L2 triplet.
     m = [m for m in FIX_RE.finditer(slide_text) if m.group(1) == 'fc_win'][0]
     vars_in_fix = m.group(5).split()
-    expected = [c for c in expected_columns('afm', 'window')
-                if not c.endswith('_L2')]
+    expected = [o.name for o in channels_for('afm', 'window')
+                if not o.name.endswith('_L2')]
     assert len(vars_in_fix) == len(expected)
 
 

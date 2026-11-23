@@ -35,9 +35,11 @@ import json
 import logging
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from frictionsim2d.core.observables import is_truncated
-
 logger = logging.getLogger(__name__)
+
+#: A trace may be one row short: `fix ave/time` may or may not write a row at
+#: the step the fix was defined.
+TRUNCATION_SLACK_ROWS: int = 1
 
 STATUSES = ('complete', 'truncated', 'no_output', 'unreadable', 'halted',
             'failed_integrity', 'quarantined', 'not_reached')
@@ -142,6 +144,11 @@ def expected_chains(config: Optional[Mapping],
         split = None if index is None else round((speed, load, angle)[index], 6)
         chains.setdefault(split, []).append(point_key(kind, load, angle, speed))
     return list(chains.values())
+
+
+def is_truncated(n_rows: int, expected: Optional[int]) -> bool:
+    """True when a trace is short by more than `TRUNCATION_SLACK_ROWS`."""
+    return expected is not None and n_rows < expected - TRUNCATION_SLACK_ROWS
 
 
 def classify(n_rows: Dict[str, int], expected: Dict[str, int]) -> Tuple[str, str]:

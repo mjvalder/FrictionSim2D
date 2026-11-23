@@ -3,22 +3,23 @@ import pytest
 
 from frictionsim2d.core.observables import (
     REGISTRY, TIERS, STREAMS,
-    channels_for, expected_columns, rename_map, layer_channels,
-    validate_registry, expected_tier_rows, expected_window_rows,
-    is_truncated, tier_frequencies,
+    channels_for, rename_map, layer_channels,
+    validate_registry, expected_tier_rows, tier_frequencies,
 )
+
+
+def expected_columns(sim_type, tier):
+    return [ob.name for ob in channels_for(sim_type, tier)]
 
 
 def test_registry_validates():
     validate_registry()  # raises on any malformed entry
 
 
-def test_every_channel_has_tier_stream_group():
+def test_every_channel_has_tier_and_stream():
     for name, ob in REGISTRY.items():
         assert ob.tier in TIERS, name
         assert ob.stream in STREAMS, name
-        # no bare 'tip' group anywhere: it is not a LAMMPS group in these scripts
-        assert ob.group != 'tip', name
 
 
 def test_eint_is_peratom_tier():
@@ -141,11 +142,11 @@ def test_afm_and_sheet_both_have_lfx_under_their_own_key():
 
 def test_registry_key_defaults_to_name():
     from frictionsim2d.core.observables import Observable
-    ob = Observable(name='foo', sim_types=('afm',), group='2D_all',
+    ob = Observable(name='foo', sim_types=('afm',),
                     tier='window', stream='results', units='A')
     assert ob.registry_key == 'foo'
     assert Observable(name='foo', key='foo@sheet', sim_types=('sheetonsheet',),
-                      group='layer_1', tier='window', stream='results',
+                      tier='window', stream='results',
                       units='A').registry_key == 'foo@sheet'
 
 
@@ -164,7 +165,7 @@ def test_shared_name_requires_disjoint_sim_types():
         # set so the disjoint-name check under test is what fires, not the
         # unrelated Task 6 role_key requirement.
         _add(Observable(name='lfx', key='lfx@bogus', sim_types=('afm',),
-                        group='tip_fix', tier='window', stream='results',
+                        tier='window', stream='results',
                         units='nN', role_key='lateral_force_x'))
 
 
@@ -204,7 +205,7 @@ def test_add_rejects_a_results_channel_with_no_role():
     import pytest
     from frictionsim2d.core.observables import Observable, _add
     with pytest.raises(ValueError, match='role_key'):
-        _add(Observable(name='rolelesss', sim_types=('afm',), group='2D_all',
+        _add(Observable(name='rolelesss', sim_types=('afm',),
                         tier='window', stream='results', units='A'))
 
 
@@ -215,8 +216,8 @@ def test_channel_by_role_finds_the_family_specific_channel():
 
 
 def test_role_parity_between_families():
-    from frictionsim2d.core.observables import (
-        PARITY_PAIRS, PARITY_EXEMPT, channel_by_role)
+    from frictionsim2d.core.observables import channel_by_role
+    from tests.core.parity_tables import PARITY_PAIRS, PARITY_EXEMPT
     for source, target in PARITY_PAIRS:
         for ob in REGISTRY.values():
             if source not in ob.sim_types or ob.stream != 'results':
@@ -233,7 +234,7 @@ def test_role_parity_between_families():
 
 
 def test_every_parity_exemption_carries_a_reason():
-    from frictionsim2d.core.observables import PARITY_EXEMPT
+    from tests.core.parity_tables import PARITY_EXEMPT
     for (sim_type, role), reason in PARITY_EXEMPT.items():
         assert reason.strip(), (sim_type, role)
         assert len(reason.split()) >= 4, f"{sim_type}/{role}: not prose"
@@ -242,7 +243,7 @@ def test_every_parity_exemption_carries_a_reason():
 def test_every_parity_exemption_names_a_live_role():
     """An exemption must die with the role it excused. A stale entry whose
     role no longer exists anywhere is noise that outlives its subject."""
-    from frictionsim2d.core.observables import PARITY_EXEMPT
+    from tests.core.parity_tables import PARITY_EXEMPT
     live = {ob.role_key for ob in REGISTRY.values() if ob.role_key}
     for (sim_type, role) in PARITY_EXEMPT:
         assert role in live, (
@@ -264,7 +265,7 @@ from frictionsim2d.core import observables as obs
 
 
 def _ob(**kw):
-    base = dict(name='t_x', sim_types=('afm',), group='sheet', tier='window', stream='results',
+    base = dict(name='t_x', sim_types=('afm',), tier='window', stream='results',
                 role_key='rk', key='t_x')
     base.update(kw)
     return obs.Observable(**base)
@@ -281,14 +282,6 @@ def test_add_rejects_a_duplicate_key(monkeypatch):
     existing = next(iter(obs.REGISTRY))
     with pytest.raises(ValueError, match='duplicate observable key'):
         obs._add(_ob(key=existing, name=existing))
-
-
-def test_validate_registry_rejects_a_bare_tip_group(monkeypatch):
-    reg = dict(obs.REGISTRY)
-    reg['t_tip'] = _ob(name='t_tip', key='t_tip', group='tip')
-    monkeypatch.setattr(obs, 'REGISTRY', reg)
-    with pytest.raises(ValueError, match="bare 'tip' group"):
-        obs.validate_registry()
 
 
 def test_validate_registry_rejects_group_group_at_window_tier(monkeypatch):
@@ -349,7 +342,6 @@ def test_disabled_channels_have_no_expectation():
 @pytest.mark.parametrize('family', ['indent', 'pes_tip', 'pes_sheet'])
 def test_non_slide_families_expect_nothing(family):
     assert expected_tier_rows(CFG, family) == {}
-    assert expected_window_rows(CFG, family) is None
 
 
 @pytest.mark.parametrize('cfg', [{}, {'settings': {}}, {'general': {'temp': 300}},
@@ -359,11 +351,37 @@ def test_missing_or_bad_settings_expect_nothing(cfg):
     assert expected_tier_rows(cfg, 'afm') == {}
 
 
-def test_one_row_of_slack():
-    assert not is_truncated(99, 100) and not is_truncated(100, 100)
-    assert is_truncated(98, 100)
-    assert not is_truncated(3, None)
-
-
 def test_tier_frequencies_come_from_tier_args():
     assert tier_frequencies(CFG) == {'window': 1000, 'raw': 100, 'peratom': 1000}
+
+
+def test_per_layer_channels_render_the_pinned_statements():
+    """The shared per-layer builders keep the exact LAMMPS strings decks depend on."""
+    by_name = {ob.name: ob for ob in layer_channels(3)}
+    comz = by_name['comz_L3']
+    assert comz.lammps_compute == 'compute COM_L3 layer_3 com'
+    assert comz.lammps_variable == 'variable comz_L3 equal c_COM_L3[3]'
+    assert comz.rename_to == 'v_comz_L3' and comz.role_key == 'layer_com_z_L3'
+    assert comz is not REGISTRY['comz_L2']
+    assert REGISTRY['comz_L2'] == by_name['comz_L2']
+    sxx, syy = by_name['sigma_xx_2d_L2'], by_name['sigma_yy_2d_L2']
+    assert sxx.lammps_compute == ('compute satom_L2 layer_2 stress/atom NULL\n'
+                                  'compute sxx_L2 layer_2 reduce sum c_satom_L2[1]')
+    assert syy.lammps_compute == ('compute satom_L2 layer_2 stress/atom NULL\n'
+                                  'compute syy_L2 layer_2 reduce sum c_satom_L2[2]')
+    assert sxx.lammps_variable == 'variable sigma_xx_2d_L2 equal c_sxx_L2'
+    assert syy.lammps_variable == 'variable sigma_yy_2d_L2 equal c_syy_L2'
+    assert syy.role_key == 'membrane_stress_yy_L2' and sxx.opt_in and syy.opt_in
+    assert REGISTRY['sigma_yy_2d_L1'] == by_name['sigma_yy_2d_L1']
+
+
+def test_raw_afm_channels_keep_their_natives_and_order():
+    raw = channels_for('afm', 'raw')
+    assert [(o.name, o.rename_to, o.units, o.role_key) for o in raw] == [
+        ('raw_lfx', 'v_fx_spr', 'nN', 'raw_lateral_force_x'),
+        ('raw_lfy', 'v_fy_spr', 'nN', 'raw_lateral_force_y'),
+        ('raw_nf', 'v_fz_tip', 'nN', 'raw_normal_load'),
+        ('raw_tipx', 'v_comx_tip', 'A', 'raw_driven_com_x'),
+        ('raw_tipy', 'v_comy_tip', 'A', 'raw_driven_com_y'),
+        ('raw_tipz', 'v_comz_tip', 'A', 'raw_driven_com_z'),
+    ]
