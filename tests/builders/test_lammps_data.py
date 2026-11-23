@@ -438,3 +438,22 @@ def test_restore_masses_section_without_types_leaves_the_file(tmp_path):
     path.write_text(_DECK_WITH_MASSES)
     restore_masses_section(path, {})
     assert path.read_text() == _DECK_WITH_MASSES
+
+
+def test_atoms_section_start_reports_first_atom_line_and_style():
+    from frictionsim2d.builders.utils.lammps_data import atoms_section_start
+    lines = ["t", "", "Masses", "", "1 1.0", "", "Atoms # charge", "", "1 1 0.0 0 0 0"]
+    assert atoms_section_start(lines) == (8, "charge")
+    assert atoms_section_start(["Atoms", "", "1 1 0 0 0"]) == (2, "atomic")
+    assert atoms_section_start(["Masses", "", "1 1.0"]) is None
+
+
+def test_snap_small_tilts_drops_only_negligible_tilts(tmp_path):
+    from frictionsim2d.builders.utils.lammps_data import snap_small_tilts
+    small, large = tmp_path / "s.lmp", tmp_path / "l.lmp"
+    small.write_text("0 5 xlo xhi\n0.004 0.0 -0.002 xy xz yz\n")
+    large.write_text("0 5 xlo xhi\n1.2 0.0 0.0 xy xz yz\n")
+    snap_small_tilts(small)
+    snap_small_tilts(large)
+    assert "xy xz yz" not in small.read_text()
+    assert "xy xz yz" in large.read_text()

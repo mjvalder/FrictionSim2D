@@ -30,8 +30,9 @@ from ...core.config import (
 from ...core.mlip import is_mlip
 from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import (
-    atom_count_and_z_extent, atomic2charge, charge2atom, get_model_dimensions,
-    get_num_atom_types, restore_masses_section, shift_atoms_to_z_zero,
+    atoms_section_start, atom_count_and_z_extent, atomic2charge, charge2atom, get_model_dimensions,
+    get_num_atom_types, parse_cell_atoms_masses, parse_lmp_atoms, restore_masses_section,
+    shift_atoms_to_z_zero, snap_small_tilts, write_typed_atomic,
 )
 from ...core.utils.paths import get_material_path
 from ...core.utils.structures import cifread
@@ -76,61 +77,6 @@ def _require_box_dims(
     if missing:
         raise ValueError(f"Could not parse box dimensions ({missing}) from {context}")
     return {key: float(cast(float, dims[key])) for key in keys}
-
-
-def _parse_lmp_atoms(
-    lmp_path: Path,
-) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
-    """Parse atom types and Cartesian positions from a LAMMPS data file.
-
-    Supports both 'atomic' and 'charge' atom styles (auto-detected from the
-    ``Atoms`` header comment).
-
-    Returns:
-        Tuple of (types, xs, ys, zs) numpy arrays, or None if no atoms found.
-    """
-    lines = lmp_path.read_text(encoding='utf-8').splitlines()
-
-    atom_style = 'atomic'
-    atoms_start: Optional[int] = None
-    for i, line in enumerate(lines):
-        if re.match(r'^\s*Atoms\s*(#|$)', line):
-            if 'charge' in line.lower():
-                atom_style = 'charge'
-            atoms_start = i + 2
-            break
-    if atoms_start is None:
-        return None
-
-    types: List[int] = []
-    xs: List[float] = []
-    ys: List[float] = []
-    zs: List[float] = []
-
-    for line in lines[atoms_start:]:
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            if types:
-                break
-            continue
-        parts = stripped.split()
-        try:
-            if atom_style == 'charge':
-                t = int(parts[1])
-                x, y, z = float(parts[3]), float(parts[4]), float(parts[5])
-            else:
-                t = int(parts[1])
-                x, y, z = float(parts[2]), float(parts[3]), float(parts[4])
-            types.append(t)
-            xs.append(x)
-            ys.append(y)
-            zs.append(z)
-        except (ValueError, IndexError):
-            break
-
-    if not types:
-        return None
-    return np.array(types), np.array(xs), np.array(ys), np.array(zs)
 
 
 def _to_shape_frame(
@@ -266,7 +212,7 @@ def build_flake(
     else:
         cx, cy = center_xy
 
-    parsed = _parse_lmp_atoms(base_lmp_path)
+    parsed = parse_lmp_atoms(base_lmp_path)
     if parsed is None or len(parsed[0]) == 0:
         raise ValueError(f"No atoms found in {base_lmp_path}")
 
@@ -290,16 +236,10 @@ def build_flake(
     selected_indices = np.where(mask)[0]
     lines = base_lmp_path.read_text(encoding="utf-8").splitlines()
 
-    atom_style = "atomic"
-    atoms_start: Optional[int] = None
-    for i, line in enumerate(lines):
-        if re.match(r"^\s*Atoms\s*(#|$)", line):
-            if "charge" in line.lower():
-                atom_style = "charge"
-            atoms_start = i + 2
-            break
-    if atoms_start is None:
+    section = atoms_section_start(lines)
+    if section is None:
         raise ValueError(f"Could not find Atoms section in {base_lmp_path}")
+    atoms_start, atom_style = section
 
     atom_lines: List[str] = []
     new_id = 1
@@ -453,7 +393,7 @@ def apply_flake_corner_types(
         )
     n_vertices = _SHAPE_N_VERTICES[shape_lower]
 
-    parsed = _parse_lmp_atoms(flake_path)
+    parsed = parse_lmp_atoms(flake_path)
     if parsed is None or len(parsed[0]) == 0:
         raise ValueError(f"No atoms found in {flake_path}")
     types, xs, ys, _zs = parsed
@@ -468,17 +408,14 @@ def apply_flake_corner_types(
 
     lines = flake_path.read_text(encoding="utf-8").splitlines()
 
-    # Locate sections.
-    atoms_start: Optional[int] = None
-    masses_start: Optional[int] = None
-    for i, line in enumerate(lines):
-        if line.strip() == "Masses":
-            masses_start = i
-        if re.match(r"^\s*Atoms\s*(#|$)", line):
-            atoms_start = i + 2
-            break
-    if atoms_start is None:
+    section = atoms_section_start(lines)
+    if section is None:
         raise ValueError(f"Could not find Atoms section in {flake_path}")
+    atoms_start = section[0]
+    masses_start: Optional[int] = None
+    for i in range(atoms_start - 2):
+        if lines[i].strip() == "Masses":
+            masses_start = i
 
     num_types = int(np.max(types))
 
@@ -540,7 +477,7 @@ def flake_atom_span(flake_path: Path) -> Tuple[float, float]:
     into the flake file unchanged, so the box says nothing about how wide the
     carved shape is.
     """
-    parsed = _parse_lmp_atoms(flake_path)
+    parsed = parse_lmp_atoms(flake_path)
     if parsed is None or len(parsed[0]) == 0:
         raise ValueError(f"No atoms found in {flake_path}")
     _types, xs, ys, _zs = parsed
@@ -768,7 +705,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
     from ase import Atoms as _Atoms  # pylint: disable=import-outside-toplevel
     from ase.data import chemical_symbols as _csym  # pylint: disable=import-outside-toplevel
 
-    cell, atom_rows, masses = _parse_lammps_cell_atoms_masses(content)
+    cell, atom_rows, masses = parse_cell_atoms_masses(content)
     types = [t for (t, *_r) in atom_rows]
     positions = [(x, y, z) for (_t, x, y, z) in atom_rows]
     n_types = max(masses) if masses else (max(types) if types else 1)
@@ -786,7 +723,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
     # Restore the real Masses section (ASE writes placeholder masses / omits it).
     real_masses = {t: masses.get(t, (1.0, 'X')) for t in range(1, n_types + 1)}
     restore_masses_section(output_path, real_masses)
-    _snap_small_tilts(output_path)
+    snap_small_tilts(output_path)
 
 
 def _find_ortho_transform(cell) -> "np.ndarray":
@@ -838,110 +775,6 @@ def _find_ortho_transform(cell) -> "np.ndarray":
 
 
 
-def _parse_lammps_cell_atoms_masses(content: str):
-    """Parse a LAMMPS ``atomic``-style data file string.
-
-    Returns:
-        Tuple of (cell 3x3 list, atoms [(type, x, y, z)], masses {type: (mass, element)}).
-        Atoms are returned in file order; the cell includes any xy/xz/yz tilt.
-    """
-    bounds = {}
-    tilt = {'xy': 0.0, 'xz': 0.0, 'yz': 0.0}
-    masses: Dict[int, tuple] = {}
-    atoms = []
-    section = None
-    for raw in content.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        low = line.split('#', 1)[0].strip()
-        if low.endswith(('xlo xhi', 'ylo yhi', 'zlo zhi')):
-            parts = low.split()
-            key = parts[2][0]  # 'x' | 'y' | 'z'
-            bounds[f'{key}lo'] = float(parts[0])
-            bounds[f'{key}hi'] = float(parts[1])
-            continue
-        if low.endswith('xy xz yz'):
-            parts = low.split()
-            tilt['xy'], tilt['xz'], tilt['yz'] = (float(parts[0]), float(parts[1]), float(parts[2]))
-            continue
-        if line in ('Masses', 'Atoms') or line.startswith('Atoms'):
-            section = 'Masses' if line == 'Masses' else 'Atoms'
-            continue
-        if line in ('Velocities', 'Bonds', 'Angles'):
-            section = None
-            continue
-        if section == 'Masses':
-            parts = line.split()
-            if parts[0].lstrip('-').isdigit():
-                elem = line.split('#')[-1].strip().split()[0] if '#' in line else 'X'
-                masses[int(parts[0])] = (float(parts[1]), elem)
-        elif section == 'Atoms':
-            parts = low.split()
-            if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
-                atoms.append((int(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])))
-
-    lx = bounds['xhi'] - bounds['xlo']
-    ly = bounds['yhi'] - bounds['ylo']
-    lz = bounds['zhi'] - bounds['zlo']
-    cell = [[lx, 0.0, 0.0], [tilt['xy'], ly, 0.0], [tilt['xz'], tilt['yz'], lz]]
-    return cell, atoms, masses
-
-
-def _write_lammps_typed(output_path: Path, cell, positions, types,
-                        masses: Dict[int, tuple]) -> None:
-    """Write a LAMMPS ``atomic`` data file preserving explicit per-atom types.
-
-    Args:
-        output_path: Destination path.
-        cell: 3x3 lower-triangular cell (rows are a, b, c vectors).
-        positions: Nx3 atom coordinates.
-        types: length-N per-atom integer type ids.
-        masses: mapping type-id -> (mass, element) for the Masses section.
-    """
-    n_types = max(masses) if masses else max(types)
-    lx, ly, lz = cell[0][0], cell[1][1], cell[2][2]
-    xy, xz, yz = cell[1][0], cell[2][0], cell[2][1]
-    lines = [
-        "LAMMPS data file via FrictionSim2D (type-preserving orthogonalization)\n\n",
-        f"{len(positions)} atoms\n",
-        f"{n_types} atom types\n\n",
-        f"0.0 {lx:.12f} xlo xhi\n",
-        f"0.0 {ly:.12f} ylo yhi\n",
-        f"0.0 {lz:.12f} zlo zhi\n",
-    ]
-    if any(abs(v) > 1e-10 for v in (xy, xz, yz)):
-        lines.append(f"{xy:.12f} {xz:.12f} {yz:.12f} xy xz yz\n")
-    lines.append("\nMasses\n\n")
-    for t in range(1, n_types + 1):
-        mass, elem = masses.get(t, (1.0, 'X'))
-        lines.append(f"{t} {mass:.6f}  # {elem}\n")
-    lines.append("\nAtoms # atomic\n\n")
-    for i, (pos, t) in enumerate(zip(positions, types), start=1):
-        lines.append(f"{i} {int(t)} {pos[0]:.12f} {pos[1]:.12f} {pos[2]:.12f}\n")
-    output_path.write_text(''.join(lines), encoding='utf-8')
-
-
-def _snap_small_tilts(path: Path, tol: float = 0.05) -> None:
-    """Drop a negligible xy/xz/yz tilt line so the box is treated as orthogonal.
-
-    Near-hexagonal cells orthogonalize to a box with a sub-0.01 Å residual tilt
-    (float non-commensurability). LAMMPS then refuses to stack such a box onto an
-    orthogonal one ("cannot switch to restricted triclinic"), so we snap tiny
-    tilts to zero (atom displacement over the box is far below tol).
-    """
-    lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
-    out = []
-    for line in lines:
-        low = line.split('#', 1)[0].strip()
-        if low.endswith('xy xz yz'):
-            parts = low.split()
-            if all(abs(float(parts[i])) < tol for i in range(3)):
-                continue  # drop the tilt line -> orthogonal box
-        out.append(line)
-    path.write_text(''.join(out), encoding='utf-8')
-
-
 def _assign_pot_types_by_order(path: Path, order: List[str],
                                counts: Dict[str, int]) -> None:
     """Assign potential sublattice types to a primitive cell, in-place.
@@ -962,7 +795,7 @@ def _assign_pot_types_by_order(path: Path, order: List[str],
     # deferred so this module stays cheap to import.
     from ase.data import atomic_masses as _am, atomic_numbers as _an  # pylint: disable=import-outside-toplevel
 
-    cell, atoms, masses = _parse_lammps_cell_atoms_masses(path.read_text(encoding='utf-8'))
+    cell, atoms, masses = parse_cell_atoms_masses(path.read_text(encoding='utf-8'))
 
     # Map each current type-id to an element. Prefer the Masses ``# element``
     # comment, but fall back to the nearest atomic mass among the potential's
@@ -1006,7 +839,7 @@ def _assign_pot_types_by_order(path: Path, order: List[str],
         for el, ids in elem_type_ids.items() for tid in ids
     }
     positions = [(x, y, z) for (_t, x, y, z) in atoms]
-    _write_lammps_typed(path, cell, positions, new_types, new_masses)
+    write_typed_atomic(path, cell, positions, new_types, new_masses)
 
 
 def split_chalcogen_sublayers(path: Path, elements: List[str],
@@ -1036,7 +869,7 @@ def split_chalcogen_sublayers(path: Path, elements: List[str],
     from ase.data import atomic_masses as _am, atomic_numbers as _an  # pylint: disable=import-outside-toplevel
 
     text = path.read_text(encoding='utf-8')
-    _cell, atoms, masses = _parse_lammps_cell_atoms_masses(text)
+    _cell, atoms, masses = parse_cell_atoms_masses(text)
     el_mass = {el: float(_am[_an[el]]) for el in elements}
 
     def _element(t: int) -> str:
@@ -2285,7 +2118,7 @@ def build_monolayer(
         # that element's block of type ids). Counting atoms via a manual parse
         # avoids ase.io.read's StopIteration on LAMMPS write_data output
         # (Velocities section + image flags).
-        num_atoms = len(_parse_lammps_cell_atoms_masses(ortho_cell.read_text(encoding='utf-8'))[1])
+        num_atoms = len(parse_cell_atoms_masses(ortho_cell.read_text(encoding='utf-8'))[1])
         if num_atoms and total_pot_types % num_atoms == 0:
             factor = total_pot_types // num_atoms
             dup_factor_x, dup_factor_y = 1, 1

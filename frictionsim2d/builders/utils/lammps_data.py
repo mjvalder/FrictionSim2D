@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
+import numpy as np
+
 from ...core.utils.tokens import is_int_token
 from ...interfaces.ase import element_mass
 
@@ -339,3 +341,167 @@ def restore_masses_section(
 
     text = re.sub(r'(^|\n)(Atoms)', r'\1' + block + r'\2', ''.join(kept), count=1)
     path.write_text(text, encoding='utf-8')
+
+
+def atoms_section_start(lines: List[str]) -> Optional[Tuple[int, str]]:
+    """``(index of the first atom line, atom style)`` of a data file, or None without Atoms.
+
+    The style is ``'charge'`` when the ``Atoms`` header comment says so, else ``'atomic'``.
+    """
+    for i, line in enumerate(lines):
+        if re.match(r'^\s*Atoms\s*(#|$)', line):
+            return i + 2, 'charge' if 'charge' in line.lower() else 'atomic'
+    return None
+
+
+def parse_lmp_atoms(
+    lmp_path: Path,
+) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """Parse atom types and Cartesian positions from a LAMMPS data file.
+
+    Supports both 'atomic' and 'charge' atom styles (auto-detected from the
+    ``Atoms`` header comment).
+
+    Returns:
+        Tuple of (types, xs, ys, zs) numpy arrays, or None if no atoms found.
+    """
+    lines = lmp_path.read_text(encoding='utf-8').splitlines()
+
+    section = atoms_section_start(lines)
+    if section is None:
+        return None
+    atoms_start, atom_style = section
+
+    types: List[int] = []
+    xs: List[float] = []
+    ys: List[float] = []
+    zs: List[float] = []
+
+    for line in lines[atoms_start:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            if types:
+                break
+            continue
+        parts = stripped.split()
+        try:
+            if atom_style == 'charge':
+                t = int(parts[1])
+                x, y, z = float(parts[3]), float(parts[4]), float(parts[5])
+            else:
+                t = int(parts[1])
+                x, y, z = float(parts[2]), float(parts[3]), float(parts[4])
+            types.append(t)
+            xs.append(x)
+            ys.append(y)
+            zs.append(z)
+        except (ValueError, IndexError):
+            break
+
+    if not types:
+        return None
+    return np.array(types), np.array(xs), np.array(ys), np.array(zs)
+
+
+def parse_cell_atoms_masses(content: str):
+    """Parse a LAMMPS ``atomic``-style data file string.
+
+    Returns:
+        Tuple of (cell 3x3 list, atoms [(type, x, y, z)], masses {type: (mass, element)}).
+        Atoms are returned in file order; the cell includes any xy/xz/yz tilt.
+    """
+    bounds = {}
+    tilt = {'xy': 0.0, 'xz': 0.0, 'yz': 0.0}
+    masses: Dict[int, tuple] = {}
+    atoms = []
+    section = None
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        low = line.split('#', 1)[0].strip()
+        if low.endswith(('xlo xhi', 'ylo yhi', 'zlo zhi')):
+            parts = low.split()
+            key = parts[2][0]  # 'x' | 'y' | 'z'
+            bounds[f'{key}lo'] = float(parts[0])
+            bounds[f'{key}hi'] = float(parts[1])
+            continue
+        if low.endswith('xy xz yz'):
+            parts = low.split()
+            tilt['xy'], tilt['xz'], tilt['yz'] = (float(parts[0]), float(parts[1]), float(parts[2]))
+            continue
+        if line in ('Masses', 'Atoms') or line.startswith('Atoms'):
+            section = 'Masses' if line == 'Masses' else 'Atoms'
+            continue
+        if line in ('Velocities', 'Bonds', 'Angles'):
+            section = None
+            continue
+        if section == 'Masses':
+            parts = line.split()
+            if parts[0].lstrip('-').isdigit():
+                elem = line.split('#')[-1].strip().split()[0] if '#' in line else 'X'
+                masses[int(parts[0])] = (float(parts[1]), elem)
+        elif section == 'Atoms':
+            parts = low.split()
+            if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
+                atoms.append((int(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])))
+
+    lx = bounds['xhi'] - bounds['xlo']
+    ly = bounds['yhi'] - bounds['ylo']
+    lz = bounds['zhi'] - bounds['zlo']
+    cell = [[lx, 0.0, 0.0], [tilt['xy'], ly, 0.0], [tilt['xz'], tilt['yz'], lz]]
+    return cell, atoms, masses
+
+
+def write_typed_atomic(output_path: Path, cell, positions, types,
+                        masses: Dict[int, tuple]) -> None:
+    """Write a LAMMPS ``atomic`` data file preserving explicit per-atom types.
+
+    Args:
+        output_path: Destination path.
+        cell: 3x3 lower-triangular cell (rows are a, b, c vectors).
+        positions: Nx3 atom coordinates.
+        types: length-N per-atom integer type ids.
+        masses: mapping type-id -> (mass, element) for the Masses section.
+    """
+    n_types = max(masses) if masses else max(types)
+    lx, ly, lz = cell[0][0], cell[1][1], cell[2][2]
+    xy, xz, yz = cell[1][0], cell[2][0], cell[2][1]
+    lines = [
+        "LAMMPS data file via FrictionSim2D (type-preserving orthogonalization)\n\n",
+        f"{len(positions)} atoms\n",
+        f"{n_types} atom types\n\n",
+        f"0.0 {lx:.12f} xlo xhi\n",
+        f"0.0 {ly:.12f} ylo yhi\n",
+        f"0.0 {lz:.12f} zlo zhi\n",
+    ]
+    if any(abs(v) > 1e-10 for v in (xy, xz, yz)):
+        lines.append(f"{xy:.12f} {xz:.12f} {yz:.12f} xy xz yz\n")
+    lines.append("\nMasses\n\n")
+    for t in range(1, n_types + 1):
+        mass, elem = masses.get(t, (1.0, 'X'))
+        lines.append(f"{t} {mass:.6f}  # {elem}\n")
+    lines.append("\nAtoms # atomic\n\n")
+    for i, (pos, t) in enumerate(zip(positions, types), start=1):
+        lines.append(f"{i} {int(t)} {pos[0]:.12f} {pos[1]:.12f} {pos[2]:.12f}\n")
+    output_path.write_text(''.join(lines), encoding='utf-8')
+
+
+def snap_small_tilts(path: Path, tol: float = 0.05) -> None:
+    """Drop a negligible xy/xz/yz tilt line so the box is treated as orthogonal.
+
+    Near-hexagonal cells orthogonalize to a box with a sub-0.01 Å residual tilt
+    (float non-commensurability). LAMMPS then refuses to stack such a box onto an
+    orthogonal one ("cannot switch to restricted triclinic"), so we snap tiny
+    tilts to zero (atom displacement over the box is far below tol).
+    """
+    lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+    out = []
+    for line in lines:
+        low = line.split('#', 1)[0].strip()
+        if low.endswith('xy xz yz'):
+            parts = low.split()
+            if all(abs(float(parts[i])) < tol for i in range(3)):
+                continue  # drop the tilt line -> orthogonal box
+        out.append(line)
+    path.write_text(''.join(out), encoding='utf-8')

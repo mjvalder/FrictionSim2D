@@ -13,6 +13,7 @@ import pytest
 
 from frictionsim2d.builders import components
 from frictionsim2d.builders.afm import AFMSimulation
+from frictionsim2d.builders.utils.lammps_data import parse_lmp_atoms
 from frictionsim2d.core.config import AFMSimulationConfig, FlakeConfig, load_settings
 
 
@@ -137,7 +138,7 @@ def test_build_flake_triangle_honours_rotation_deg(tmp_path: Path):
         out = tmp_path / f"tri_{rot}.data"
         components.build_flake(src, out, shape="triangle", edge_length=30.0,
                                rotation_deg=rot)
-        _t, xs, ys, _z = components._parse_lmp_atoms(out)
+        _t, xs, ys, _z = parse_lmp_atoms(out)
         carved[rot] = (float(ys.max() - 30.0), float(ys.min() - 30.0))
     h = 30.0 * math.sqrt(3) / 2
     # Rotation 0: apex up at +2h/3, base at -h/3; 60 deg flips it.
@@ -189,7 +190,7 @@ def test_build_flake_cuts_shape(tmp_path: Path, shape: str, expected_vertices: i
     out = tmp_path / f"flake_{shape}.data"
     components.build_flake(src, out, shape=shape, edge_length=20.0)
 
-    types, xs, ys, _zs = components._parse_lmp_atoms(out)
+    types, xs, ys, _zs = parse_lmp_atoms(out)
     # The cut keeps a strict subset of atoms and at least a handful.
     assert 0 < len(types) < n_full
     assert int(types.max()) == 1
@@ -203,7 +204,7 @@ def test_apply_flake_corner_types_interleaves(tmp_path: Path, shape: str):
     components.build_flake(src, out, shape=shape, edge_length=24.0)
 
     components.apply_flake_corner_types(out, shape=shape, corner_radius=5.0)
-    types, _xs, _ys, _zs = components._parse_lmp_atoms(out)
+    types, _xs, _ys, _zs = parse_lmp_atoms(out)
 
     # One base type -> interleaved core(1)/corner(2); corner atoms are the even type.
     assert int(types.max()) == 2
@@ -221,9 +222,9 @@ def test_detect_corner_atoms_free_in_z_unchanged(tmp_path: Path):
     _write_supercell(src)
     out = tmp_path / "flake.data"
     components.build_flake(src, out, shape="square", edge_length=24.0)
-    before = components._parse_lmp_atoms(out)
+    before = parse_lmp_atoms(out)
     components.apply_flake_corner_types(out, shape="square", corner_radius=5.0)
-    after = components._parse_lmp_atoms(out)
+    after = parse_lmp_atoms(out)
     # Same atom count and identical coordinates (only the type column changed).
     assert len(before[0]) == len(after[0])
     assert (before[1] == after[1]).all()  # x
