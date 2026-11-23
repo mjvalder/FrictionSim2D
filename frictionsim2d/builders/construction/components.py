@@ -2451,10 +2451,9 @@ def build_monolayer(
     cif_data = cifread(cif_path)
     cif_elements = cif_data['elements']
 
-    pot_element_order, pot_element_counts = get_potential_element_order(
+    pot_element_order, pot_counts = get_potential_element_order(
         pot_path, config.pot_type, cif_elements
     )
-    pot_counts = pot_element_counts
     total_pot_types = sum(pot_counts.values())
 
     logger.debug(
@@ -2490,8 +2489,6 @@ def build_monolayer(
     # on the duplicated potential cell (type_multiplier > 1, below), so the
     # orthogonalized element-typed cell needs no post-ortho renumber here.
 
-    dims = get_model_dimensions(ortho_cell)
-
     if type_multiplier != 1:
         # The potential defines `total_pot_types` types for a k× supercell of the
         # primitive (e.g. p-SnS: 8 types on a 2× cell; h-MoS2: 12 on a 2×2 cell).
@@ -2514,15 +2511,12 @@ def build_monolayer(
             ortho_cell.unlink()
             ortho_cell = dup_ortho
             _assign_pot_types_by_order(ortho_cell, pot_element_order, pot_counts)
-            dims = get_model_dimensions(ortho_cell)
 
-    dims_calc = get_model_dimensions(ortho_cell)
-    dims_calc_typed: Dict[str, float] = {k: cast(float, v) for k, v in dims_calc.items()}
+    supercell_dims: Dict[str, float] = {
+        k: cast(float, v) for k, v in get_model_dimensions(ortho_cell).items()}
 
-    supercell_dims = dims_calc_typed.copy()
-
-    unit_x = cast(float, dims_calc_typed['xhi']) - cast(float, dims_calc_typed['xlo'])
-    unit_y = cast(float, dims_calc_typed['yhi']) - cast(float, dims_calc_typed['ylo'])
+    unit_x = supercell_dims['xhi'] - supercell_dims['xlo']
+    unit_y = supercell_dims['yhi'] - supercell_dims['ylo']
 
     target_x = config.x[0] if isinstance(config.x, list) else config.x
     target_y = config.y[0] if isinstance(config.y, list) else config.y
@@ -2534,8 +2528,6 @@ def build_monolayer(
     else:
         _duplicate_lammps_data(ortho_cell, base_path, dup_x, dup_y, 1)
     ortho_cell.unlink()
-
-    dims = get_model_dimensions(base_path)
 
     shift_atoms_to_z_zero(base_path)
     dims = get_model_dimensions(base_path)
