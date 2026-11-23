@@ -32,10 +32,6 @@ __all__ = [
     "get_material_path",
     "get_potential_path",
     "read_config",
-    "get_model_dimensions",
-    "get_num_atom_types",
-    "charge2atom",
-    "atomic2molecular",
     "get_potential_element_order",
     "check_potential_cif_compatibility",
     "expand_config_sweeps",
@@ -69,10 +65,6 @@ _EXPORT_MAP = {
     "get_material_path": (".utils.paths", "get_material_path"),
     "get_potential_path": (".utils.paths", "get_potential_path"),
     "read_config": (".config", "read_config"),
-    "get_model_dimensions": ("..builders.utils.lammps_data", "get_model_dimensions"),
-    "get_num_atom_types": ("..builders.utils.lammps_data", "get_num_atom_types"),
-    "charge2atom": ("..builders.utils.lammps_data", "charge2atom"),
-    "atomic2molecular": ("..builders.utils.lammps_data", "atomic2molecular"),
     "get_potential_element_order": ("..potentials.utils", "get_potential_element_order"),
     "check_potential_cif_compatibility": (
         "..potentials.utils", "check_potential_cif_compatibility"
