@@ -20,6 +20,18 @@ from src.core.config import (
 )
 
 
+def pytest_addoption(parser):
+    parser.addoption("--record-lammps", action="store_true", default=False,
+                     help="run real LAMMPS at build time and record its outputs")
+
+
+@pytest.fixture
+def lammps_replay(monkeypatch, request):
+    """Serve recorded LAMMPS outputs for the build-time call sites."""
+    from tests.helpers import lammps_replay as _lr
+    _lr.install(monkeypatch, record=request.config.getoption("--record-lammps"))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def isolated_xdg_config_home(tmp_path_factory):
     """Point ``$XDG_CONFIG_HOME`` at a session temp dir.
