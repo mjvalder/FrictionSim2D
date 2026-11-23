@@ -17,11 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from ..core.mlip import MLIP_REGISTRY, is_mlip
-from ..core.utils.structures import (  # noqa: PLC2701
-    _normalize_element_symbol, cifread, count_atomtypes,
-    SINGLE_TYPE_EXTENSIONS, SINGLE_TYPE_POTENTIALS,
+from ..core.mlip import MLIP_MODEL_EXTENSIONS, MLIP_REGISTRY, is_mlip
+from ..core.utils.structures import (
+    cifread, count_atomtypes, SINGLE_TYPE_EXTENSIONS, SINGLE_TYPE_POTENTIALS,
 )
+from ..core.utils.tokens import normalize_element_symbol
 
 from ..interfaces import lammps as _lammps
 from . import uff as lj
@@ -47,8 +47,8 @@ def lj_params(atom_type_1: str, atom_type_2: str) -> Tuple[float, float]:
         KeyError: If atom type is not found in LJ parameters database.
     """
     # Normalize to canonical symbol case so two-letter elements map correctly
-    key1 = _normalize_element_symbol(atom_type_1)
-    key2 = _normalize_element_symbol(atom_type_2)
+    key1 = normalize_element_symbol(atom_type_1)
+    key2 = normalize_element_symbol(atom_type_2)
 
     try:
         e1 = lj.lj_params[key1][1]
@@ -227,8 +227,7 @@ EXTENSION_MAP = {
 #: older NequIP/Allegro deployment and '.json' could become another code's
 #: format, so a guess could pick the wrong framework; an MLIP needs an explicit
 #: pot_type. Used only to trim the extension from the pot_ directory token.
-MLIP_FILE_EXTENSIONS = frozenset(
-    ext for spec in MLIP_REGISTRY.values() for ext in spec.file_extensions)
+MLIP_FILE_EXTENSIONS = frozenset(MLIP_MODEL_EXTENSIONS)
 
 
 class PotentialTypeError(ValueError):

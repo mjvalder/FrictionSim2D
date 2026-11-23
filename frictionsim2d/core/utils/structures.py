@@ -4,23 +4,16 @@ The only module here that reaches ASE, through
 :mod:`frictionsim2d.interfaces.ase`. Keep it that way: ``paths``, ``tokens`` and
 ``lammps_data`` are imported by code that must stay cheap.
 """
-import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from ...interfaces.ase import read_structure
-from ..mlip import MLIP_REGISTRY
+from ..mlip import MLIP_MODEL_EXTENSIONS, MLIP_REGISTRY
 
-logger = logging.getLogger(__name__)
-
-#: Model-file extensions of every registered MLIP framework ('.json' symmetrix
-#: MACE, '.pb'/'.pth' DeePMD), plus the legacy ACEsuit '.pt'. These files are
-#: serialised tensors (or a symmetrix JSON), never a classical potential file.
-MLIP_MODEL_EXTENSIONS = tuple(sorted(
-    {ext.lower() for spec in MLIP_REGISTRY.values() for ext in spec.file_extensions}
-    | {'.pt'}
-))
+#: MLIP model extensions plus the legacy ACEsuit '.pt': serialised tensors (or a
+#: symmetrix JSON), never a classical potential file.
+_BINARY_MODEL_EXTENSIONS = MLIP_MODEL_EXTENSIONS + ('.pt',)
 
 #: Potentials that take exactly one LAMMPS atom type per element. Their files
 #: are never parsed for per-element multiplicity -- for an MLIP that would
@@ -31,7 +24,7 @@ SINGLE_TYPE_POTENTIALS = frozenset(
 #: Extension fallback for callers that pass no ``pot_type`` (e.g.
 #: check_potential_cif_compatibility): the extension is then the only guard.
 SINGLE_TYPE_EXTENSIONS = (
-    ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff') + MLIP_MODEL_EXTENSIONS)
+    ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff') + _BINARY_MODEL_EXTENSIONS)
 
 def cifread(cif_path: Union[str, Path]) -> Dict[str, Any]:
     """Read a CIF file and extract crystal structure information using ASE.
@@ -112,11 +105,3 @@ def count_atomtypes(
                 if element_name in elem_type:
                     elem_type[element_name] = max(elem_type[element_name], element_number)
     return elem_type
-
-
-def _normalize_element_symbol(value: str) -> str:
-    """Normalize element-like tokens to canonical symbol case."""
-    token = value.strip()
-    if not token:
-        return token
-    return token[0].upper() + token[1:].lower()

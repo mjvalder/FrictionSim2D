@@ -123,7 +123,7 @@ def real_key(value: float, rtol: float = DEFAULT_RTOL) -> float:
     return float(f'{value:.{digits}g}')
 
 
-def _is_float(value: Any) -> bool:
+def _is_real_float(value: Any) -> bool:
     """A real that is not an integer type (bools and ints, numpy's included,
     are exact)."""
     return isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral)
@@ -139,7 +139,7 @@ def canonical(value: Any, rtol: float = DEFAULT_RTOL) -> Any:
     when the float's key is that integer: ``10000000 == 1e7``, but
     ``12345678 != 12345678.0`` (the float rounds to ``12345700.0``).
     """
-    if _is_float(value):
+    if _is_real_float(value):
         return real_key(value, rtol)
     if isinstance(value, numbers.Integral) and not isinstance(value, bool):
         return int(value)
@@ -179,7 +179,7 @@ def _close(a: Any, b: Any, rtol: float, atol: float = DEFAULT_ATOL) -> bool:
     with one :func:`real_key`."""
     if _is_number(a) and _is_number(b):
         return (abs(a - b) <= max(atol, rtol * max(abs(a), abs(b)))
-                or (_is_float(a) and _is_float(b)
+                or (_is_real_float(a) and _is_real_float(b)
                     and real_key(a, rtol) == real_key(b, rtol)))
     return a == b
 

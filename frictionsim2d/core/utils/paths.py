@@ -4,11 +4,8 @@ Config files reference potentials and structures by relative path; these
 helpers find them. No structure parsing happens here -- see
 :mod:`frictionsim2d.core.utils.structures` for that, and note it is far heavier.
 """
-import logging
 from pathlib import Path
 from typing import List, Optional, Union
-
-logger = logging.getLogger(__name__)
 
 #: How far above ``base_dir`` to look for a config-relative file. Configs in
 #: ``examples/`` name ``examples/materials/...``, i.e. paths relative to the

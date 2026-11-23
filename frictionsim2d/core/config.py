@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_va
 
 from .mlip import get_mlip, is_mlip
 from .utils.paths import get_material_path, get_potential_path
-from .utils.tokens import _is_float
+from .utils.tokens import is_float
 
 logger = logging.getLogger(__name__)
 
@@ -1616,14 +1616,14 @@ def read_config(filepath: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
                     for item in items:
                         if item.isdigit():
                             parsed_items.append(int(item))
-                        elif _is_float(item):
+                        elif is_float(item):
                             parsed_items.append(float(item))
                         else:
                             parsed_items.append(item)
                     params[section][key] = parsed_items
             elif value.isdigit():
                 params[section][key] = int(value)
-            elif _is_float(value):
+            elif is_float(value):
                 params[section][key] = float(value)
             else:
                 params[section][key] = value

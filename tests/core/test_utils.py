@@ -10,39 +10,39 @@ import tempfile
 from pathlib import Path
 
 from frictionsim2d.core.config import read_config
-from frictionsim2d.core.utils.tokens import _is_float  # noqa: PLC2701
+from frictionsim2d.core.utils.tokens import is_float
 
 
 class TestIsFloat:
-    """Test cases for _is_float helper function."""
+    """Test cases for is_float helper function."""
     
-    def test_is_float_integer(self):
+    def testis_float_integer(self):
         """Test integer string parsing."""
-        assert _is_float("42") is True
-        assert _is_float("0") is True
-        assert _is_float("-100") is True
+        assert is_float("42") is True
+        assert is_float("0") is True
+        assert is_float("-100") is True
     
-    def test_is_float_decimal(self):
+    def testis_float_decimal(self):
         """Test decimal float parsing."""
-        assert _is_float("3.14") is True
-        assert _is_float("0.5") is True
-        assert _is_float("-2.7") is True
-        assert _is_float(".5") is True
+        assert is_float("3.14") is True
+        assert is_float("0.5") is True
+        assert is_float("-2.7") is True
+        assert is_float(".5") is True
     
-    def test_is_float_scientific_notation(self):
+    def testis_float_scientific_notation(self):
         """Test scientific notation parsing."""
-        assert _is_float("1e-5") is True
-        assert _is_float("3.2e+4") is True
-        assert _is_float("-1.5e-3") is True
-        assert _is_float("1E5") is True
-        assert _is_float("2.0E-10") is True
+        assert is_float("1e-5") is True
+        assert is_float("3.2e+4") is True
+        assert is_float("-1.5e-3") is True
+        assert is_float("1E5") is True
+        assert is_float("2.0E-10") is True
     
-    def test_is_float_invalid(self):
+    def testis_float_invalid(self):
         """Test invalid float strings."""
-        assert _is_float("abc") is False
-        assert _is_float("1.2.3") is False
-        assert _is_float("") is False
-        assert _is_float("e5") is False
+        assert is_float("abc") is False
+        assert is_float("1.2.3") is False
+        assert is_float("") is False
+        assert is_float("e5") is False
 
 
 class TestReadConfig:
@@ -107,12 +107,12 @@ mixed_array = [0.1, 1e-5, text_value]
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
     
-    def test_is_float_edge_cases(self):
+    def testis_float_edge_cases(self):
         """Test edge case float strings."""
-        assert _is_float("0.0") is True
-        assert _is_float("-0") is True
-        assert _is_float("+5.5") is True
-        assert _is_float("1.23456789e-10") is True
+        assert is_float("0.0") is True
+        assert is_float("-0") is True
+        assert is_float("+5.5") is True
+        assert is_float("1.23456789e-10") is True
     
     @pytest.fixture
     def config_with_comments(self):

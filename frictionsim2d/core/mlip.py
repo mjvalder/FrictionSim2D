@@ -22,6 +22,7 @@ __all__ = [
     'LauncherSpec',
     'MLIPSpec',
     'MLIP_REGISTRY',
+    'MLIP_MODEL_EXTENSIONS',
     'is_mlip',
     'get_mlip',
     'd3_style_token',
@@ -159,6 +160,13 @@ MLIP_REGISTRY: Dict[str, MLIPSpec] = {
         binds_interlayer=True,
     ),
 }
+
+
+#: Model-file extensions of every registered framework, so a new one needs no
+#: edit at the call sites.
+MLIP_MODEL_EXTENSIONS = tuple(sorted(
+    {ext.lower() for spec in MLIP_REGISTRY.values() for ext in spec.file_extensions}
+))
 
 
 def is_mlip(pot_type: str) -> bool:

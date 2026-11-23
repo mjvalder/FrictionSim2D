@@ -1,6 +1,6 @@
 import pytest
 
-from frictionsim2d.core.utils.tokens import (_is_float, _is_int_token, format_dimension_token,
+from frictionsim2d.core.utils.tokens import (is_float, is_int_token, format_dimension_token,
                                    format_numeric_token)
 
 
@@ -25,10 +25,18 @@ def test_format_dimension_token_returns_non_numeric_input_unchanged(value):
 
 
 @pytest.mark.parametrize('s, ok', [('1', True), ('-3.2e+4', True), ('', False), ('nan', True), ('1,5', False)])
-def test_is_float(s, ok):
-    assert _is_float(s) is ok
+def testis_float(s, ok):
+    assert is_float(s) is ok
 
 
 @pytest.mark.parametrize('s, ok', [('7', True), ('+7', True), ('-0', True), ('7.0', False), ('', False)])
-def test_is_int_token(s, ok):
-    assert _is_int_token(s) is ok
+def testis_int_token(s, ok):
+    assert is_int_token(s) is ok
+
+
+
+def test_normalize_element_symbol_is_shared_with_the_potential_manager():
+    from frictionsim2d.core.utils.tokens import normalize_element_symbol
+    from frictionsim2d.potentials.manager import PotentialManager
+    assert normalize_element_symbol(" mO ") == "Mo" and normalize_element_symbol("") == ""
+    assert PotentialManager._parse_override_pair("mo-S") == ("Mo", "S")

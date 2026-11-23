@@ -1,16 +1,7 @@
-"""Core modules for FrictionSim2D.
+"""Shared contracts and vocabulary: config models, observables, comparison, utils.
 
-Exports are resolved lazily to keep import-time side effects low and to avoid
-builder/run/hpc circular imports: ``SimulationBase`` now lives in
-``frictionsim2d.builders.simulation_base``, and resolving it eagerly here would pull the builders --
-and through them ``frictionsim2d.hpc`` -- into every ``import frictionsim2d.core``.
-
-This package holds the shared contracts and vocabulary that everything else
-imports:
-    - Configuration models (Pydantic) and the .ini read/write pair
-    - ``observables``: what the LAMMPS templates are expected to emit
-    - ``utils/``: path resolution, token formatting, LAMMPS data-file surgery,
-      structure reading -- split by import weight, see tests/repo/test_import_weight.py
+Exports resolve lazily so ``import frictionsim2d.core`` does not pull in the
+builders and, through them, ``frictionsim2d.hpc``.
 """
 
 from importlib import import_module

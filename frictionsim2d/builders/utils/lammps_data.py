@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from ...core.utils.tokens import _is_int_token  # noqa: PLC2701
+from ...core.utils.tokens import is_int_token
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def atomic2charge(filepath: Union[str, Path]) -> None:
         filepath: Path to the LAMMPS data file to be modified.
     """
     def _to_charge(parts: List[str]) -> Optional[str]:
-        if len(parts) < 5 or not _is_int_token(parts[0]) or not _is_int_token(parts[1]):
+        if len(parts) < 5 or not is_int_token(parts[0]) or not is_int_token(parts[1]):
             return None
         return ' '.join([parts[0], parts[1], '0.0'] + parts[2:])
 
@@ -112,7 +112,7 @@ def charge2atom(filepath: Union[str, Path]) -> None:
         filepath: Path to the LAMMPS data file to be modified.
     """
     def _to_atomic(parts: List[str]) -> Optional[str]:
-        if len(parts) < 6 or not _is_int_token(parts[0]) or not _is_int_token(parts[1]):
+        if len(parts) < 6 or not is_int_token(parts[0]) or not is_int_token(parts[1]):
             return None
         return ' '.join([parts[0], parts[1]] + parts[3:])
 
@@ -130,7 +130,7 @@ def atomic2molecular(filepath: Union[str, Path]) -> None:
         filepath: Path to the LAMMPS data file to be modified.
     """
     def _to_molecular(parts: List[str]) -> Optional[str]:
-        if len(parts) < 5 or not _is_int_token(parts[0]) or not _is_int_token(parts[1]):
+        if len(parts) < 5 or not is_int_token(parts[0]) or not is_int_token(parts[1]):
             return None
         # Preserve image flags (nx, ny, nz) and any trailing atom metadata.
         return ' '.join([parts[0], '0', parts[1]] + parts[2:])

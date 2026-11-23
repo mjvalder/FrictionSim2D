@@ -396,3 +396,15 @@ class TestAmorphousMLIPComponentsRefused:
         tip = TipConfig(mat='Si', pot_type='sw', pot_path=str(sw),
                         cif_path=str(cif), r=20.0, dspring=0.1, amorph='a')
         validate_mlip_cell(sheet, components=[('tip', tip)])
+
+
+def test_model_extensions_come_from_the_registry_and_feed_every_consumer():
+    from frictionsim2d.core.mlip import MLIP_MODEL_EXTENSIONS
+    from frictionsim2d.core.utils.structures import SINGLE_TYPE_EXTENSIONS
+    from frictionsim2d.potentials.manager import is_mlip_model_file
+    from frictionsim2d.potentials.utils import MLIP_FILE_EXTENSIONS
+    assert set(MLIP_MODEL_EXTENSIONS) == {".json", ".pb", ".pth"}
+    assert set(MLIP_FILE_EXTENSIONS) == set(MLIP_MODEL_EXTENSIONS)
+    assert is_mlip_model_file("m.PTH") and is_mlip_model_file("m.json")
+    assert not is_mlip_model_file("m.pt") and not is_mlip_model_file("m.sw")
+    assert set(MLIP_MODEL_EXTENSIONS) | {".pt"} <= set(SINGLE_TYPE_EXTENSIONS)

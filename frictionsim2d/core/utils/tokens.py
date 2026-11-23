@@ -5,17 +5,8 @@ Pure string/number work -- no filesystem, no external libraries.
 import re
 from typing import Any
 
-def _is_float(value: str) -> bool:
-    """Check if a string represents a valid float, including scientific notation.
-    
-    Handles integer floats, decimal floats, and scientific notation (e.g., 1e-5, -3.2e+4).
-    
-    Args:
-        value: String to check.
-    
-    Returns:
-        True if value can be parsed as a float, False otherwise.
-    """
+def is_float(value: str) -> bool:
+    """True if ``value`` parses as a float, scientific notation included."""
     try:
         float(value)
         return True
@@ -23,9 +14,17 @@ def _is_float(value: str) -> bool:
         return False
 
 
-def _is_int_token(value: str) -> bool:
+def is_int_token(value: str) -> bool:
     """Return True if token represents an integer (optional sign allowed)."""
     return bool(re.fullmatch(r'[+-]?\d+', value))
+
+
+def normalize_element_symbol(value: str) -> str:
+    """Canonical symbol case for an element-like token (``mO`` -> ``Mo``)."""
+    token = value.strip()
+    if not token:
+        return token
+    return token[0].upper() + token[1:].lower()
 
 
 def format_numeric_token(value: float) -> str:

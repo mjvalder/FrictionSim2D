@@ -1,13 +1,11 @@
 """Descriptors such as 'low load' turned into load bands for the current tip.
 
-AFM-family bands are kept as a nominal pressure, F/R^2, calibrated so the
-reference tip (R = 25 A) reproduces the reference load bands of the example
-campaign; a different tip radius rescales the
-load by (R/25)^2. This is not a contact model and not measured regimes: each
-band's ``source`` says what its numbers are, and stiffness, sheet size and the
-contact itself are ignored (a sensitivity study is in future-works). Other
-differences from the reference setup (temperature, driving spring) keep the
-numbers and add a warning.
+AFM-family bands are a nominal pressure F/R^2, calibrated so the reference tip
+(R = 25 A) reproduces the example campaign's load bands; another tip radius
+rescales the load by (R/25)^2. This is not a contact model and
+not measured regimes: stiffness, sheet size and the contact itself are ignored.
+Other differences from the reference setup (temperature, driving spring) keep
+the numbers and warn.
 
 Stdlib only, and nothing from ``run``/``agent``/``gui``: the GUI assistant
 imports this at startup.
@@ -83,9 +81,8 @@ def _nominal(load_nn: float) -> float:
 #: so `scale` returns None for them.
 REGIMES = (
     Regime(_AFM_FAMILY, 'load', 'low', 'GPa', _nominal(10.0), _nominal(20.0),
-           'baseline loads chosen for good contact (user ruling 2026-10-16: 2-5 nN '
-           'give poor contact) -- the baseline '
-           'loads are 10, 20 and 30 nN; this band takes their lower part '
+           'baseline loads chosen for good contact (2-5 nN give poor contact): the '
+           'baseline loads are 10, 20 and 30 nN; this band takes their lower part '
            '(10-20 nN at R = 25 A)'),
     Regime(_AFM_FAMILY, 'load', 'mid', 'GPa', _nominal(20.0), _nominal(50.0),
            'the mid-load core window the reference trends are fitted on '
@@ -126,6 +123,7 @@ def _values(value: Value) -> Tuple[float, ...]:
 
 
 def _reference_warnings(context: ScaleContext) -> Tuple[str, ...]:
+    """Warnings for context values that differ from the reference setup."""
     warnings = []
     for field_name, reference, tolerance, unit, label in REFERENCE_VALUES:
         differs = [v for v in _values(getattr(context, field_name))

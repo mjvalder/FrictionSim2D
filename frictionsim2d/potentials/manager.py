@@ -23,9 +23,10 @@ import os
 import shutil
 
 from ..core.config import ComponentConfig, GlobalSettings
-from ..core.mlip import (MLIP_REGISTRY, d3_coeff_line, d3_style_token, get_mlip,
-                         is_mlip, mlip_by_style, model_elements)
+from ..core.mlip import (MLIP_MODEL_EXTENSIONS, d3_coeff_line, d3_style_token,
+                         get_mlip, is_mlip, mlip_by_style, model_elements)
 from ..core.utils.structures import cifread, count_atomtypes
+from ..core.utils.tokens import normalize_element_symbol
 from .utils import (
     POTENTIALS_REQUIRING_LJ,
     POTENTIALS_WITH_INTERNAL_LJ,
@@ -55,13 +56,6 @@ logger = logging.getLogger(__name__)
 #: :meth:`PotentialManager.write_surrogate_file`). It only has to be a legal
 #: cutoff — the style computes nothing, so the value cannot affect any geometry.
 ZERO_SURROGATE_CUTOFF = 10.0
-
-# Serialized-model extensions, derived from the registry so a new framework
-# needs no edit here. Used to route model files to the shared potentials dir.
-MLIP_MODEL_EXTENSIONS = tuple(sorted(
-    {ext.lower() for spec in MLIP_REGISTRY.values() for ext in spec.file_extensions}
-))
-
 
 def is_mlip_model_file(path: Union[str, Path]) -> bool:
     """True if ``path`` names a serialized MLIP model file (by extension)."""
@@ -460,14 +454,6 @@ class PotentialManager:
         return self.settings.potential.lj_cutoff
 
     @staticmethod
-    def _normalize_element_symbol(value: str) -> str:
-        """Normalize element-like tokens to canonical symbol case."""
-        token = value.strip()
-        if not token:
-            return token
-        return token[0].upper() + token[1:].lower()
-
-    @staticmethod
     def _normalize_potential_type(value: str) -> str:
         """Normalize potential style names to lowercase keys."""
         return value.strip().lower()
@@ -475,8 +461,8 @@ class PotentialManager:
     @classmethod
     def _pair_key(cls, el1: str, el2: str) -> Tuple[str, str]:
         """Build an order-independent key for an element pair."""
-        a = cls._normalize_element_symbol(el1)
-        b = cls._normalize_element_symbol(el2)
+        a = normalize_element_symbol(el1)
+        b = normalize_element_symbol(el2)
         sorted_pair = sorted((a, b))
         return (sorted_pair[0], sorted_pair[1])
 
@@ -489,7 +475,7 @@ class PotentialManager:
                 f"Invalid LJ override pair '{pair_key}'. "
                 "Expected two element symbols (e.g., 'Mo-S')."
             )
-        return cls._normalize_element_symbol(tokens[0]), cls._normalize_element_symbol(tokens[1])
+        return normalize_element_symbol(tokens[0]), normalize_element_symbol(tokens[1])
 
     @staticmethod
     def _parse_override_values(pair_key: str, values: Any) -> Tuple[float, float]:
@@ -541,8 +527,8 @@ class PotentialManager:
 
     def _get_lj_params(self, el1: str, el2: str) -> Tuple[float, float]:
         """Return LJ parameters, preferring user overrides when present."""
-        norm_el1 = self._normalize_element_symbol(el1)
-        norm_el2 = self._normalize_element_symbol(el2)
+        norm_el1 = normalize_element_symbol(el1)
+        norm_el2 = normalize_element_symbol(el2)
         override = self.lj_overrides.get(self._pair_key(norm_el1, norm_el2))
         if override is not None:
             return override

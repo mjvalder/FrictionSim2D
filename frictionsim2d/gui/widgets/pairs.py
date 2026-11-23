@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..style import CAPTION_SMALL, WARNING
-from ...core.utils.structures import _normalize_element_symbol  # noqa: PLC2701
+from ...core.utils.tokens import normalize_element_symbol
 
 __all__ = ['PairOverrideEditor']
 
@@ -284,8 +284,8 @@ class PairOverrideEditor(QWidget):
                 notes: List[str] = []
 
                 if el1 and el2:
-                    key = tuple(sorted((_normalize_element_symbol(el1),
-                                        _normalize_element_symbol(el2))))
+                    key = tuple(sorted((normalize_element_symbol(el1),
+                                        normalize_element_symbol(el2))))
                     if key in seen:
                         notes.append(f"duplicate of row {seen[key] + 1}")
                     else:
