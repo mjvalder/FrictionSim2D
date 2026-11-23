@@ -127,13 +127,13 @@ def test_mace_sheet_beside_sw_tip_and_sub_is_rejected(tmp_path):
         settings_text(config, tmp_path)
 
 
-def test_the_rejection_names_the_spec_and_the_lammps_errors(tmp_path):
+def test_the_rejection_names_the_doc_and_the_lammps_errors(tmp_path):
     """A user hitting this must be able to see it is measured, not a policy."""
     config = make_config(tmp_path, _deepmd_sheet(tmp_path))
     with pytest.raises(ValueError) as exc:
         settings_text(config, tmp_path)
     message = str(exc.value)
-    assert '2026-08-11-mlip-post-m0-design.md' in message
+    assert 'documentation/mlip.md' in message
     assert 'Pair hybrid sub-style deepmd is not used' in message
     assert 'pair_deepmd.cpp:816' in message
     assert '#1314' in message
@@ -243,7 +243,7 @@ def test_amorphous_substrate_is_refused_under_an_mlip(tmp_path):
     message = str(exc.value)
     assert "amorph = 'a'" in message
     assert 'sub' in message
-    assert '2026-09-03-mlip-multicomponent-fullcell-design.md' in message
+    assert 'documentation/mlip.md' in message
 
 
 @pytest.mark.parametrize('mode', ['atom_bonds', 'com_spring'])

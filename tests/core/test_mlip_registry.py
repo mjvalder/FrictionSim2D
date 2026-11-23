@@ -8,6 +8,7 @@ from frictionsim2d.core.mlip import (
     d3_style_token,
     get_mlip,
     is_mlip,
+    mlip_by_style,
 )
 from frictionsim2d.core.utils.structures import count_atomtypes
 
@@ -57,17 +58,19 @@ def test_coeff_line_deepmd_places_index():
     assert line == "pair_coeff * * deepmd 2 NULL Mo S"
 
 
+def test_mlip_by_style_resolves_emitted_tokens_back_to_the_spec():
+    assert mlip_by_style("symmetrix/mace").name == "mace"
+    assert mlip_by_style(" deepmd ").name == "deepmd"
+    assert mlip_by_style("lj/cut") is None
+    assert mlip_by_style("") is None and mlip_by_style(None) is None
+
+
 def test_registry_capability_flags():
     deepmd = get_mlip("deepmd")
     mace = get_mlip("mace")
 
     assert deepmd.model_in_style_line is True
     assert mace.model_in_style_line is False
-    # v4 spec §1 E2/E3: pair_deepmd rejects NULL maps and type-range coeffs.
-    assert deepmd.supports_null is False
-    assert mace.supports_null is False          # ACEsuit #1314 -> full-cell only
-    assert deepmd.supports_overlay is True
-    assert mace.supports_overlay is True
 
     assert ".pth" in deepmd.file_extensions and ".pb" in deepmd.file_extensions
     # symmetrix consumes a .json extracted from the torch .model.
@@ -99,32 +102,10 @@ def test_registry_capability_flags():
     # campaign_mace/symmetrix-mace_types-overflow.patch, but the fix is NOT
     # upstream, so we cannot assume it here. CUDA is a per-campaign opt-in
     # gated on the patch plus a reference-energy check; the host backend is
-    # correct either way. See MLIPSpec.notes.
+    # correct either way (documentation/mlip.md).
     assert " g " not in mace.launcher.lmp_flags
     assert "-k on t " in mace.launcher.lmp_flags
     assert any("OMP_NUM_THREADS" in line for line in mace.launcher.env_lines)
-
-    # The registry documents the framework traps so callers cannot rediscover them.
-    assert "model-deviation" in deepmd.notes or "model deviation" in deepmd.notes
-    assert "NULL" in mace.notes
-
-
-def test_deepmd_notes_record_the_executed_null_evidence():
-    """The NULL refusal is measured, not inferred -- v4 spec §1, E2/E3/E7.
-
-    Anyone tempted to restore partial-cell DeePMD has to read past this: the
-    source line that raises, the exact hybrid error, and the silent-wrong-answer
-    trap that makes the "just drop the element list" workaround worse than a
-    crash.
-    """
-    notes = get_mlip("deepmd").notes
-
-    # E3: the guard clause that refuses a type-range pair_coeff.
-    assert "pair_deepmd.cpp:816" in notes
-    # E2: the exact LAMMPS error a NULL-padded map produces.
-    assert "Pair hybrid sub-style deepmd is not used" in notes
-    # E7: omitting the element list does NOT error -- it silently mis-maps.
-    assert "-61.89" in notes and "-256.90" in notes
 
 
 def test_deepmd_env_line_covers_both_plugin_layouts():
