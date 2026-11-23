@@ -1,0 +1,91 @@
+{
+  "schema_version": "2.2.0",
+  "run_uuid": "<UUID>",
+  "family": "afm",
+  "model": "afm",
+  "materials": [
+    {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "examples/potentials/sw/MoS2_wen.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d12d20b09969e7624c7dd6d0844b2e59802282fb3eac876ef18d4dc7e47883"
+    },
+    {
+      "name": "h-WS2",
+      "role": "sheet",
+      "pot_path": "examples/potentials/sw/sw_lammps/h-WS2.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "6eed376809a87ff93c9ce5095f0e656480c6ce92cd7e4a80e290ecb2fba666ca"
+    },
+    {
+      "name": "Si",
+      "role": "tip",
+      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
+    },
+    {
+      "name": "Si",
+      "role": "substrate",
+      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
+    }
+  ],
+  "twist_angle": null,
+  "seed_thermal_tip": 12011594,
+  "seed_thermal_sub": 319798551,
+  "seed_velocity": 48014721,
+  "seed_sheet_center": null,
+  "substrate_realization_id": "dc7fad06d33d3601e435e1ee3a5dda27c24c74438d93c82fe9c44fc23b9d1e57",
+  "damping_ratio": null,
+  "damp_ev": 0.00009999999999999999,
+  "git_commit": "<GITHASH>",
+  "git_dirty": <GITDIRTY>,
+  "config_hash": "ef5b32fcadb26dcc09c9465c8ed5c782cc023c2548408c0418756b2b4d1c5d24",
+  "lammps_version": null,
+  "layer_type_map": {},
+  "unloaded_reference_z": null,
+  "contact_cutoff": 6.2475,
+  "cutoff_source": "uff_sigma_k1.5",
+  "thermostat_scheme": "langevin_y_tip_sub_nve_sheet",
+  "tip_group_sizes": null,
+  "run_role": "label",
+  "load_requested": null,
+  "load_achieved": null,
+  "pressure_requested": null,
+  "pressure_achieved": null,
+  "ramp_converged": null,
+  "ramp_r": null,
+  "ramp_iterations": null,
+  "drive_k": 3.12075467163009,
+  "drive_rest_length": 15.0,
+  "geometry": {
+    "lat_c": null,
+    "lat_c_source": "not_applicable",
+    "unit_cell": null,
+    "cell_a": null,
+    "cell_b": null,
+    "sheet_dims": {
+      "xlo": 0.0,
+      "xhi": 50.96009931476874,
+      "ylo": 0.0,
+      "yhi": 49.649333159213676,
+      "zlo": -2.5,
+      "zhi": 28.457131
+    },
+    "atoms_per_layer": null,
+    "layer_thickness": null,
+    "tip_r": 10.0
+  },
+  "ramp_by_load": null,
+  "load_achieved_by_load": null,
+  "wall_time_s": null,
+  "n_procs": null,
+  "atoms_per_proc": null
+}

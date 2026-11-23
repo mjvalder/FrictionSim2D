@@ -1,0 +1,17 @@
+mass 1 95.950000 #Mo
+mass 2*3 32.060000 #S
+mass 8*15 32.060000 #S
+mass 4*7 183.840000 #W
+mass 16 1.0 #Virtual atom
+group sheet_1_all type 1 2 3
+group sheet_2_all type 4 5 6 7 8 9 10 11 12 13 14 15
+pair_style hybrid/overlay sw sw lj/cut 11.0 ilp/tmd 16.0 1
+# Self-interactions (intra-component)
+pair_coeff * * sw 1 sheetonsheet/h-MoS2+h-WS2/24x_24y/K300/pot_sw_MoS2_wen/il-ilp/provenance/potentials/MoS2_wen.sw Mo S S NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL # sheet_1
+pair_coeff * * sw 2 sheetonsheet/h-MoS2+h-WS2/24x_24y/K300/pot_sw_MoS2_wen/il-ilp/provenance/potentials/h-WS2.sw NULL NULL NULL W1 W2 W3 W4 S1 S2 S3 S4 S5 S6 S7 S8 NULL # sheet_2
+
+# Interlayer (ilp)
+pair_coeff * * ilp/tmd sheetonsheet/h-MoS2+h-WS2/24x_24y/K300/pot_sw_MoS2_wen/il-ilp/provenance/potentials/TMD.ILP Mo S S W W W W S S S S S S S S NULL # sheet_1 sheet_2
+
+# Virtual atom (minimal LJ)
+pair_coeff * 16 lj/cut 1e-100 1e-100

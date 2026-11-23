@@ -1,0 +1,23 @@
+mass 1*2 95.950000 #Mo
+mass 3*4 32.060000 #S
+mass 13*28 32.060000 #S
+mass 5*12 183.840000 #W
+group sheet_1_all type 1 2 3 4
+group sheet_2_all type 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28
+pair_style hybrid sw sw lj/cut 11.0
+# Self-interactions (intra-component)
+pair_coeff * * sw 1 provenance/potentials/MoS2_wen.sw Mo Mo S S NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL # sheet_1
+pair_coeff * * sw 2 provenance/potentials/h-WS2.sw NULL NULL NULL NULL W1 W1 W2 W2 W3 W3 W4 W4 S1 S1 S2 S2 S3 S3 S4 S4 S5 S5 S6 S6 S7 S7 S8 S8 # sheet_2
+
+# Cross-interactions (inter-component LJ)
+pair_coeff 1*2 5*12 lj/cut 0.00265616311477084 3.0605 # Mo(sheet_1)-W(sheet_2)
+pair_coeff 1*2 13*28 lj/cut 0.00537146340837286 3.5435 # Mo(sheet_1)-S(sheet_2)
+pair_coeff 3*4 5*12 lj/cut 0.00587538066074041 3.552 # S(sheet_1)-W(sheet_2)
+pair_coeff 3*4 13*28 lj/cut 0.0118815716 4.035 # S(sheet_1)-S(sheet_2)
+
+
+# Finite-sheet edge groups (per-material + combined 2D)
+group sheet_1_edge type 2 4
+group sheet_2_edge type 6 8 10 12 14 16 18 20 22 24 26 28
+group 2D_edge union sheet_1_edge sheet_2_edge
+group 2D union sheet_1_all sheet_2_all

@@ -55,8 +55,6 @@ def normalise_deck(text: str) -> str:
 # ---------------------------------------------------------------- rendering
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT_DIR = _REPO_ROOT / "tests" / "fixtures" / "deck_snapshot"
-#: Task 20: append scenario-matrix configs here (``RenderCase(name, run_type, ini)``).
-EXTRA_CASES: List["RenderCase"] = []
 _BIG_FILE = 200_000
 HASH_BIG = False  # flip if the snapshot outgrows 15 MB
 _FIXED_NOW = _dt.datetime(2026, 1, 1, 12, 0, 0)
@@ -67,6 +65,22 @@ class RenderCase:
     name: str
     run_type: str
     ini: Path
+
+
+_CASE_DIR = _REPO_ROOT / "tests" / "fixtures" / "deck_cases"
+#: Builder paths no shipped example reaches, one small config each.
+EXTRA_CASES: List[RenderCase] = [
+    RenderCase(n, m, _CASE_DIR / f"{n}.ini") for n, m in [
+        ("afm_crystalline_sub", "afm"),
+        ("afm_hetero_matched_sub", "afm"),
+        ("afm_hetero_finite", "afm"),
+        ("sheet_five_layers", "sheetonsheet"),
+        ("sheet_hetero_alternating", "sheetonsheet"),
+        ("sheet_hetero_twist", "sheetonsheet"),
+        ("sheet_hetero_ilp", "sheetonsheet"),
+        ("flake_slide_hetero_flake", "sheetonsheet"),
+    ]
+]
 
 
 def render_set() -> List[RenderCase]:

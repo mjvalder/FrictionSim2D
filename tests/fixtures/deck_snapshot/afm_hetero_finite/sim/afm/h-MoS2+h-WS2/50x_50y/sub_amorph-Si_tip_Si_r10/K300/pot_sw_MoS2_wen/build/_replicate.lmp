@@ -1,0 +1,6 @@
+units metal
+atom_style atomic
+boundary p p p
+read_data hetero.data
+replicate 1 1 1
+write_data hetero_rep.data nocoeff

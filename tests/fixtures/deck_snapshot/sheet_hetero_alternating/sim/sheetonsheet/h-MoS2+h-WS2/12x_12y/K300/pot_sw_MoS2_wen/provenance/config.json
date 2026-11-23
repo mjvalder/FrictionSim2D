@@ -1,0 +1,226 @@
+{
+  "general": {
+    "temp": 300.0,
+    "force": null,
+    "pressure": 0.1,
+    "scan_angle": 0.0,
+    "scan_angle_force": null,
+    "scan_speed": 1.0,
+    "outer_loop": null,
+    "bond_spring": 80.0,
+    "driving_spring": 50.0,
+    "finite_sheet": false,
+    "hetero_stacking": "alternating",
+    "interlayer_style": "lj",
+    "interlayer_file": null,
+    "interlayer_comparison": false,
+    "twist_angle": null,
+    "twist_angle_tol": 2.0,
+    "twist_strain_tol": 0.02,
+    "twist_max_supercell": 12
+  },
+  "sheet": {
+    "mat": "h-MoS2",
+    "pot_type": "sw",
+    "pot_path": "examples/potentials/sw/MoS2_wen.sw",
+    "cif_path": "examples/materials/h-MoS2.cif",
+    "x": 12.0,
+    "y": 12.0,
+    "layers": [
+      2
+    ],
+    "stack_type": "AB",
+    "lat_c": 6.15,
+    "interlayer_g": null,
+    "materials_list": null,
+    "dispersion": "none",
+    "allow_unbound": false
+  },
+  "sheets": [
+    {
+      "mat": "h-MoS2",
+      "pot_type": "sw",
+      "pot_path": "examples/potentials/sw/MoS2_wen.sw",
+      "cif_path": "examples/materials/h-MoS2.cif",
+      "x": 12.0,
+      "y": 12.0,
+      "layers": [
+        2
+      ],
+      "stack_type": "AB",
+      "lat_c": 6.15,
+      "interlayer_g": null,
+      "materials_list": null,
+      "dispersion": "none",
+      "allow_unbound": false
+    },
+    {
+      "mat": "h-WS2",
+      "pot_type": "sw",
+      "pot_path": "examples/potentials/sw/sw_lammps/h-WS2.sw",
+      "cif_path": "examples/materials/h-WS2.cif",
+      "x": 12.0,
+      "y": 12.0,
+      "layers": [
+        2
+      ],
+      "stack_type": "AB",
+      "lat_c": 6.2,
+      "interlayer_g": null,
+      "materials_list": null,
+      "dispersion": "none",
+      "allow_unbound": false
+    }
+  ],
+  "flake": null,
+  "flake_sheets": [],
+  "pes": null,
+  "lattice_match": null,
+  "lj_override": {},
+  "settings": {
+    "geometry": {
+      "tip_reduction_factor": 2.25,
+      "rigid_tip": false,
+      "tip_start_clearance": 20.0,
+      "lat_c_default": 6.0,
+      "finite_sheet_edge_width": 4.0,
+      "finite_sheet_afm_edge_mode": "none",
+      "finite_sheet_edge_spring_k": 10.0,
+      "finite_sheet_sheetonsheet_edge_mode": "none",
+      "z_vacuum_margin": 8.0
+    },
+    "thermostat": {
+      "type": "langevin",
+      "time_integration": "nve",
+      "langevin_boundaries": {
+        "tip": {
+          "fix": [
+            3.0,
+            0.0
+          ],
+          "thermo": [
+            6.0,
+            3.0
+          ]
+        },
+        "sub": {
+          "fix": [
+            0.0,
+            0.3
+          ],
+          "thermo": [
+            0.3,
+            0.6
+          ]
+        }
+      }
+    },
+    "simulation": {
+      "timestep": 0.001,
+      "thermo": 100000,
+      "min_style": "cg",
+      "minimization_command": "minimize 1e-4 1e-8 1000000 1000000",
+      "neighbor_list": 0.3,
+      "neigh_modify_command": "neigh_modify every 1 delay 0 check yes",
+      "slide_run_steps": 500000,
+      "drive_method": "virtual_atom",
+      "constraint_mode": "none",
+      "sheet_hold_steps": 20000,
+      "halt_temperature_factor": 10.0,
+      "ramp_max_iterations": 40
+    },
+    "quench": {
+      "run_local": true,
+      "n_procs": 16,
+      "quench_slab_dims": [
+        200,
+        200,
+        50
+      ],
+      "quench_rate": 1000000000000.0,
+      "melt_temp": 2500.0,
+      "quench_temp": 300.0,
+      "timestep": 0.002,
+      "melt_steps": 50000,
+      "equilibrate_steps": 20000,
+      "allow_generate": false
+    },
+    "output": {
+      "dump": {
+        "system_init": true,
+        "slide": true
+      },
+      "dump_frequency": {
+        "system_init": 1000,
+        "slide": 10000
+      },
+      "results_frequency": 1000,
+      "channels": {
+        "window": true,
+        "raw": true,
+        "peratom": true
+      },
+      "optional_channels": []
+    },
+    "potential": {
+      "lj_cutoff": 11.0,
+      "lj_type": "LJ_base",
+      "reaxff_safezone": 1.2,
+      "reaxff_mincap": 50,
+      "d3_functional": "pbe",
+      "d3_damping": "bj",
+      "d3_cutoff": 16.0,
+      "d3_cn_cutoff": 8.0
+    },
+    "hpc": {
+      "scheduler_type": "pbs",
+      "queue": null,
+      "partition": null,
+      "account": "",
+      "hpc_host": null,
+      "hpc_home": null,
+      "log_dir": null,
+      "scratch_dir": "$TMPDIR",
+      "num_nodes": 1,
+      "num_cpus": 32,
+      "memory_gb": 62,
+      "walltime_hours": 20,
+      "max_array_size": 300,
+      "modules": null,
+      "conda_env": null,
+      "mpi_command": "mpirun",
+      "use_tmpdir": true,
+      "preflight": false,
+      "lammps_scripts": [
+        "slide.in"
+      ],
+      "env_lines": [],
+      "gpu": null,
+      "frameworks": {},
+      "lmp_binary": null
+    },
+    "aiida": {
+      "profile": null,
+      "computer_label": "localhost",
+      "max_stored_file_mb": 20,
+      "skip_fraction": 0.2,
+      "machine": null
+    },
+    "integrity": {
+      "hole_bonds": 1.5,
+      "isolated_radius_bonds": 1.5,
+      "isolated_atoms": 2,
+      "ejected_atoms": 2,
+      "ejected_bonds": 8.0,
+      "heating_sigma": 8.0,
+      "gap_rise": 0.05,
+      "collapse": true,
+      "frozen_std": 1e-6,
+      "gap_start_samples": 25,
+      "sheet_heating_skip_samples": 5,
+      "sheet_gap_end_samples": 50,
+      "margins": {},
+      "version": "1.0.0"
+    }
+  }
+}
