@@ -1379,22 +1379,21 @@ def _warn_dropped_settings_keys(path: Path, data: Mapping[str, Any]) -> None:
                        "are being ignored: %s", path, "; ".join(dropped))
 
 
-def _first_settings_file(
-    settings_file: Optional[Union[str, Path]] = None,
-) -> Optional[tuple]:
-    """``(path, data)`` of the first readable, non-empty settings file, or ``None``."""
+def _settings_candidates(settings_file: Optional[Union[str, Path]] = None):
+    """Yield ``(path, data)`` for each existing settings file, highest precedence first.
+
+    ``data`` is the parsed mapping (``{}`` for an empty file), or ``None`` when
+    the file cannot be read; that failure is logged here.
+    """
     for path in _settings_paths_in_precedence_order(settings_file=settings_file):
         try:
             if not path.is_file():
                 continue
             with path.open('r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or {}
+                yield path, yaml.safe_load(f) or {}
         except (FileNotFoundError, OSError, yaml.YAMLError) as exc:
             logger.warning("skipping settings file %s: %s", path, exc)
-            continue
-        if data:
-            return path, data
-    return None
+            yield path, None
 
 
 def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSettings:
@@ -1403,18 +1402,23 @@ def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSet
     Candidates come from :func:`_settings_paths_in_precedence_order`; with none
     of them present, :class:`GlobalSettings` defaults are returned unchanged.
     """
-    found = _first_settings_file(settings_file)
-    if found is None:
-        return cast(GlobalSettings, GlobalSettings())
-    path, data = found
-    _warn_dropped_settings_keys(path, data)
-    return cast(GlobalSettings, GlobalSettings.model_validate(data))
+    for path, data in _settings_candidates(settings_file):
+        if data:
+            _warn_dropped_settings_keys(path, data)
+            return cast(GlobalSettings, GlobalSettings.model_validate(data))
+    return cast(GlobalSettings, GlobalSettings())
 
 
 def settings_origin(settings_file: Optional[Union[str, Path]] = None) -> Optional[Path]:
-    """The file ``load_settings`` would use, or ``None`` (for ``settings show --origin``)."""
-    found = _first_settings_file(settings_file)
-    return found[0] if found else None
+    """The file ``load_settings`` would use, or ``None`` (for ``settings show --origin``).
+
+    An unreadable file is still reported, so callers can diagnose it; an empty
+    one is skipped, as ``load_settings`` skips it.
+    """
+    for path, data in _settings_candidates(settings_file):
+        if data is None or data:
+            return path
+    return None
 
 
 def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
