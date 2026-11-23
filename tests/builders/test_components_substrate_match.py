@@ -51,3 +51,34 @@ def test_matched_crystalline_substrate_equals_hetero_box(tmp_path):
     assert abs(cell[0, 0] - 33.0) < 1e-4 and abs(cell[1, 1] - 43.0) < 1e-4   # box == hetero box
     zspan = atoms.get_positions()[:, 2].ptp()
     assert 8.0 <= zspan <= 16.0                                             # ~12 A thickness
+
+
+def _fake_match(matrix):
+    return lambda *_a, **_k: type(
+        "M", (), {"supercell_matrix": np.array(matrix), "residual_strain": 0.0})()
+
+
+def test_matched_substrate_refuses_a_sheared_supercell(tmp_path, monkeypatch):
+    from frictionsim2d.builders.construction.components import build_matched_crystalline_substrate
+    monkeypatch.setattr("frictionsim2d.lattice.matching.match_to_fixed_box",
+                        _fake_match([[2, 1], [0, 2]]))
+    with pytest.raises(ValueError, match="sheared supercell"):
+        build_matched_crystalline_substrate(
+            np.array([[22.0, 0.0], [0.0, 22.0]]), _si_sub(), thickness=12.0, build_dir=tmp_path)
+
+
+def test_matched_substrate_single_cell_is_copied_not_replicated(tmp_path, monkeypatch):
+    from frictionsim2d.builders.construction import components
+    monkeypatch.setattr("frictionsim2d.lattice.matching.match_to_fixed_box",
+                        _fake_match([[1, 0], [0, 1]]))
+    strained = {}
+    monkeypatch.setattr(
+        "frictionsim2d.lattice.apply.strain_monolayer_to_cell",
+        lambda src, dst, box: (shutil.copy(src, dst), strained.update(src=src)))
+    monkeypatch.setattr(components, "_duplicate_lammps_data",
+                        lambda *a, **k: pytest.fail("a 1x1x1 request must not replicate"))
+    # thickness below one z-repeat rounds to dup_z == 1
+    out = components.build_matched_crystalline_substrate(
+        np.array([[5.44, 0.0], [0.0, 5.44]]), _si_sub(), thickness=1.0, build_dir=tmp_path)
+    assert out.name == "sub.lmp" and out.exists()
+    assert strained["src"].endswith("_crystal_rep.lmp")
