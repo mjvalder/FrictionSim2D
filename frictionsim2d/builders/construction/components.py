@@ -690,18 +690,11 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
             lmp.close()
         return
 
-    # Triclinic box: build a minimum orthogonal supercell with ASE, preserving
-    # each atom's explicit LAMMPS type so that sublattice types that share a
-    # chemical element (e.g. Se1/Se2, Al1/Al2) survive the supercell tiling.
-    # (Mapping types->elements, as ASE does by default, would collapse them.)
-    # Each type is carried through make_supercell/write as a *distinct placeholder
-    # element*; the real masses/elements are restored afterward. Writing via
-    # ase_io.write keeps the box in LAMMPS restricted-triclinic orientation.
-    # The non-tilt LAMMPS change_box path above already preserves types.
-    # Lazy: this same function already imported ase.io/ase.build at its
-    # top (unconditionally, before the orthogonal/triclinic branch), which
-    # pays the ase package-init cost; Atoms/chemical_symbols add nothing
-    # further here.
+    # Triclinic box: tile a minimum orthogonal supercell with ASE. Each LAMMPS
+    # type travels as a distinct placeholder element, so sublattice types that
+    # share a chemical element (Se1/Se2) are not collapsed; the real masses are
+    # restored afterwards. ase_io.write keeps the box in LAMMPS
+    # restricted-triclinic orientation.
     from ase import Atoms as _Atoms  # pylint: disable=import-outside-toplevel
     from ase.data import chemical_symbols as _csym  # pylint: disable=import-outside-toplevel
 
@@ -1186,13 +1179,10 @@ def build_matched_crystalline_substrate(
     strain exceeds ``2 * match_strain_tol``) -> apply the supercell matrix in-plane
     -> strain onto the hetero box -> a proper full-thickness crystalline block.
 
-    **Thickness note:** the plan's "replicate the single surface layer in z" is not
-    physically viable — a lone atomic layer stacked at the intra-cell spacing puts
-    atoms ~1.4 Å apart (Si bond ~2.35 Å) and blows up under Stillinger-Weber. The
-    z-thickness is therefore built from the true z-periodic crystalline repeat via
-    :func:`create_orthogonal_slab` (``target_z = thickness``), which is the physical
-    realisation of "replicate in z to thickness". The in-plane result is identical:
-    the substrate lands on the hetero box exactly.
+    **Thickness note:** replicating the single surface layer in z is not viable: a
+    lone atomic layer stacked at the intra-cell spacing puts atoms ~1.4 Å apart (Si
+    bond ~2.35 Å) and blows up under Stillinger-Weber. The thickness is built by
+    replicating the true z-periodic primitive cell instead.
 
     Args:
         hetero_box: 2×2 fixed in-plane hetero box (row vectors, Å, LAMMPS-canonical
@@ -1237,11 +1227,7 @@ def build_matched_crystalline_substrate(
     nx, ny = int(matrix[0, 0]), int(matrix[1, 1])
 
     # 3) Build the crystalline block from the SAME primitive cell the match used
-    #    (so `matrix` tiles it consistently): replicate the primitive orthogonal
-    #    unit cell nx*ny in-plane and dup_z in z to reach `thickness`. z-replicating
-    #    the true z-periodic primitive is the physical form of "replicate in z to
-    #    thickness" — a lone surface layer stacked at the intra-cell spacing would
-    #    put atoms ~1.4 A apart and blow up under Stillinger-Weber.
+    #    (so `matrix` tiles it consistently); dup_z reaches `thickness`.
     cif_path = get_material_path(sub_config.cif_path)
     prim = build_dir / f"{sub_config.mat}_prim.lmp"
     pdims = _orthogonal_primitive_cell(cif_path, prim)
@@ -1991,16 +1977,7 @@ def apply_langevin_regions(
     else:
         raise ValueError(f"Unknown component name: {component_name}")
 
-    # No potential is built here on purpose. `apply_langevin_regions.lmp` only
-    # relabels atom types by region and writes the data file back -- it never
-    # integrates, minimizes, or references a pair style, and it assigns
-    # temporary unit masses so `write_data` works without one. The
-    # `get_single_component_commands` call that used to sit here fed a
-    # `potential_commands` context key the template does not reference, so its
-    # result was discarded; for an MLIP it also raised, blocking the whole
-    # AFM-like build for a value nobody read. `make_amorphous.lmp` DOES use
-    # those commands, which is why the call survives there (and why an MLIP is
-    # still refused on that path -- v6 §5).
+    # No potential is needed: the template only relabels types.
 
     context = {
         'component_name': component_name,
