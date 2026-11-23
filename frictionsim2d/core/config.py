@@ -17,7 +17,7 @@ from .utils.tokens import _is_float
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_WRITE_FORMATS = ('.ini', '.yaml', '.yml', '.json')
+SUPPORTED_FORMATS = ('.ini', '.yaml', '.yml', '.json')
 
 # --- Internal Settings ---
 
@@ -74,10 +74,10 @@ class ThermostatSettings(BaseModel):
 class SimulationSettings(BaseModel):
     """Simulation run parameters."""
     timestep: float = Field(default=0.001, description="Timestep in picoseconds")
-    thermo: int = 100000
+    thermo: int = Field(default=100000, description="Steps between thermo output lines.")
     min_style: str = 'cg'
     minimization_command: str = 'minimize 1e-4 1e-8 1000000 1000000'
-    neighbor_list: float = 0.3
+    neighbor_list: float = Field(default=0.3, description="Neighbor-list skin distance (Å).")
     neigh_modify_command: str = 'neigh_modify every 1 delay 0 check yes'
     slide_run_steps: int = 500000
     drive_method: Literal['smd', 'fix_move', 'virtual_atom'] = 'virtual_atom'
@@ -172,8 +172,6 @@ class OutputSettings(BaseModel):
             if not v.strip():
                 return []
             return [tok for tok in (t.strip() for t in v.replace(',', ' ').split()) if tok]
-        if isinstance(v, (list, tuple)):
-            return v
         return v
 
 class PotentialSettings(BaseModel):
@@ -195,10 +193,8 @@ class PotentialSettings(BaseModel):
     d3_damping: Literal['original', 'bj', 'zerom', 'bjm'] = Field(
         default='bj',
         description=(
-            "Canonical D3 damping name. The MLIP registry translates it into the "
-            "token the target LAMMPS build accepts (the ACEsuit MACE fork ships an "
-            "older dispersion/d3 than pinned mainline). Emitted syntax is assembled "
-            "in frictionsim2d/core/mlip.py::d3_style_token."
+            "D3 damping name, emitted verbatim by "
+            "frictionsim2d/core/mlip.py::d3_style_token; 'original' is zero-damping."
         )
     )
     d3_cutoff: float = Field(
@@ -416,18 +412,8 @@ class GlobalSettings(BaseModel):
     aiida: AiidaSettings = Field(default_factory=AiidaSettings)
     integrity: IntegritySettings = Field(default_factory=IntegritySettings)
 
-#: Mapping-key names that always name a credential, matched case-
-#: insensitively, WHEREVER they occur in a settings/config document -- not
-#: only under `database`. Audited against every field name in
-#: `GlobalSettings`, `AFMSimulationConfig` and `SheetOnSheetSimulationConfig`
-#: (2026-09-22): none is legitimately named any of these. `run/naming.py`'s
-#: `pot_token`/`RunTokens` vocabulary uses "token" for an unrelated concept
-#: (a directory-name fragment), but that value is never a key in a settings/
-#: config document -- it is a CalcJob extra (`friction2d_tokens`), which
-#: this function never touches.
-#: If a genuinely non-secret field is ever added under one of these names,
-#: it must be renamed, or carved out here explicitly with a comment saying
-#: why -- never worked around at a call site.
+#: Credential-named keys, matched case-insensitively at any depth; rename a field
+#: rather than carve it out.
 _SECRET_KEY_NAMES = frozenset({
     'password', 'passwd', 'api_key', 'apikey', 'secret', 'token',
 })
@@ -447,24 +433,8 @@ def is_secret_key(key: Any) -> bool:
 def redact_secrets_mapping(data: Any) -> Any:
     """A copy of a raw settings/config structure with every credential blanked.
 
-    Recurses into every mapping and sequence found anywhere in `data` --
-    not just a known `database`/`settings` path -- and blanks the value of
-    any mapping key that is :func:`is_secret_key`, to `''`, regardless of
-    where it sits or how it got there. This is what catches, among others:
-    a YAML anchor/alias (`base: &b {password: X}` then `database: *b`) --
-    already fully expanded into an ordinary nested dict by `yaml.safe_load`
-    before this ever runs, so every place the aliased mapping is referenced
-    is walked and blanked independently, not just the first; `database.
-    extra.password` or `general.settings.database.password` at any nesting
-    depth inside a `config.json` document; a stray `hpc.api_key`; and a bare
-    top-level `password`. `database`/`settings`-path-only redaction (this
-    function's original 2026-09-22 shape) missed exactly these -- a
-    2026-09-22 review round's probe got a credential through every one of
-    them.
-
-    Non-dict, non-list input passes through unchanged. Every dict and list
-    encountered is copied (the input is never mutated); key order is
-    preserved throughout.
+    Copies every mapping and sequence, blanks the value of any key that
+    :func:`is_secret_key` at any depth, and never mutates the input.
     """
     if isinstance(data, dict):
         return {key: ('' if is_secret_key(key) else redact_secrets_mapping(value))
@@ -475,17 +445,7 @@ def redact_secrets_mapping(data: Any) -> Any:
 
 
 def redact_secrets(settings: GlobalSettings) -> GlobalSettings:
-    """A copy of `settings` with every credential blanked.
-
-    Built on :func:`redact_secrets_mapping` -- the exact same function the
-    storage-time sanitiser (`frictionsim2d.aiida.data.redact`) uses on a raw `settings.
-    yaml`/`config.json` document -- via a `model_dump`/`model_validate` round
-    trip, so write-time and store-time redaction can never drift apart into
-    two different notions of "credential". Every other field is kept.
-    `settings` itself is not mutated. (`GlobalSettings` itself carries no
-    credential field since the central database settings went; this guards
-    any that are added later.)
-    """
+    """A copy of `settings` with every credential blanked; `settings` is not mutated."""
     redacted = redact_secrets_mapping(settings.model_dump())
     return cast(GlobalSettings, GlobalSettings.model_validate(redacted))
 
@@ -510,20 +470,8 @@ class ComponentConfig(BaseModel):
     def check_pot_type(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
         """Refuse a pair style LAMMPS will not recognise.
 
-        `None` passes through unchanged, matching the sibling `resolve_path`
-        validator below: `ComponentConfig` declares `pot_type: str` (always
-        required), but `FlakeConfig` overrides it to `Optional[str] = None`
-        (a flake with no material of its own, carved from the sheet's). Left
-        unguarded, an unset flake `pot_type` validates fine when the field is
-        OMITTED from the input (Pydantic skips `mode='after'` validators for
-        an unused default), but `model_dump_json()` serializes it as an
-        explicit `"pot_type": null` -- reloading that dump then passes `None`
-        as an EXPLICIT value, which this validator must accept too, or
-        `aiida rebuild` (spec §4.2) crashes on the ordinary single-material
-        flake case instead of a config-level `TypeError`/`ValueError`.
-
-        Deferred import: `potentials -> core` is the one-way direction, so
-        `core` may not import `potentials` at module level.
+        ``None`` passes (a flake without its own pot_type). The import is deferred
+        to keep ``core -> potentials`` one-way.
         """
         if v is None:
             return v
@@ -586,7 +534,17 @@ class ComponentConfig(BaseModel):
         return self
 
 
-class TipConfig(ComponentConfig):
+class _EmptyAmorphDefault(BaseModel):
+    """Mixin: an empty ``amorph`` reads as the default ``'c'``."""
+
+    @field_validator('amorph', mode='before', check_fields=False)
+    @classmethod
+    def handle_empty_amorph(cls, v):
+        """Convert None to default 'c' value."""
+        return 'c' if v is None else v
+
+
+class TipConfig(_EmptyAmorphDefault, ComponentConfig):
     """Tip configuration parameters."""
     r: float = Field(..., description="Tip radius in Angstroms")
     amorph: Literal['c', 'a'] = Field('c', description="'c' for crystalline, 'a' for amorphous")
@@ -624,13 +582,7 @@ class TipConfig(ComponentConfig):
         description="AFM tip y-offset from center applied only when tip_y is not explicitly set.",
     )
 
-    @field_validator('amorph', mode='before')
-    @classmethod
-    def handle_empty_amorph(cls, v):
-        """Convert None to default 'c' value."""
-        return 'c' if v is None else v
-
-class SubstrateConfig(ComponentConfig):
+class SubstrateConfig(_EmptyAmorphDefault, ComponentConfig):
     """Substrate configuration parameters."""
     thickness: float
     x: Optional[float] = Field(
@@ -656,12 +608,6 @@ class SubstrateConfig(ComponentConfig):
             "bound is 2× this, and residual strain beyond it fails loud."
         ),
     )
-    @field_validator('amorph', mode='before')
-    @classmethod
-    def handle_empty_amorph(cls, v):
-        """Convert None to default 'c' value."""
-        return 'c' if v is None else v
-
 #: Config keys struck by the v4 MLIP redesign. Pydantic *ignores* unknown keys
 #: by default, which for these would silently change a run's physics, so
 #: :meth:`SheetConfig.reject_removed_mlip_keys` rejects them by name with a
@@ -770,27 +716,10 @@ class SheetConfig(ComponentConfig):
                 f"the value from scripts/mlip_bilayer_benchmark.py."
             )
 
-        # The 'mace => native' and 'd3 => native' rules that used to live here
-        # are gone with mlip_interlayer: full-cell is the only topology, so both
-        # are vacuous. What they were really guarding -- an MLIP or D3 sharing a
-        # cell with classical components -- is a whole-cell question and is
-        # enforced by mlip.validate_mlip_cell (v4 §3/§6).
-
-        # A MULTILAYER MLIP stack without D3 is physically unbound. This is a
-        # measured result, not a stylistic preference: the bilayer benchmark
-        # (2026-08-11, DPA-3.1-3M/Alex2D) found the bare foundation model has
-        # NO interlayer binding -- its binding curve falls monotonically to the
-        # edge of the scan, 5.7e-7 J/m^2, no minimum -- because the model is
-        # PBE-trained and PBE carries no dispersion. With D3 it gives a real
-        # minimum at 6.112 A (experiment 6.15) and 0.265 J/m^2 (literature
-        # 0.25-0.30). So `dispersion = none` here produces layers that drift
-        # apart and interlayer numbers that mean nothing. Fail now, loudly,
-        # rather than let a whole campaign render and run.
-        # Framework-aware: MACE-MPA-0 DOES bind a bare bilayer (6.717 A,
-        # 0.068 J/m^2), so `dispersion = none` is a real control for it, not a
-        # broken run. Only frameworks whose bare model has no minimum at all
-        # (DPA-3) are blocked -- and even then `allow_unbound = true` lets a
-        # deliberate control through.
+        # A multilayer stack of a bare DPA-3 has no interlayer minimum (PBE carries
+        # no dispersion), so with D3 absent the layers drift apart; D3 gives
+        # 6.112 A. MACE-MPA-0 does bind a bare bilayer, so only frameworks without
+        # binding are blocked, and allow_unbound lets a deliberate control through.
         spec = get_mlip(self.pot_type) if is_mlip(self.pot_type) else None
         if (spec is not None and self.dispersion == 'none'
                 and not spec.binds_interlayer and not self.allow_unbound):
@@ -824,10 +753,8 @@ class FlakeConfig(ComponentConfig):
     not read ``corner_hold`` and is unaffected by it. A sheet-on-sheet flake
     slide (``FlakeSlideSimulation``) reads ``corner_hold`` to decide whether the
     same tether applies while the flake is driven; default off, since holding
-    every corner in place stops the flake translating at all (see
-    ``docs/superpowers/sdd/2026-09-22-aiida-followups/task-C-debug-report.md``
-    §4). Turn it on only for static/indent-like studies that need the flake
-    kept rigid in-plane.
+    every corner in place stops the flake translating at all. Turn it on only
+    for static/indent-like studies that need the flake kept rigid in-plane.
 
     Attributes:
         shape: Flake outline ('triangle', 'square', 'hexagon').
@@ -1069,8 +996,7 @@ class IndentConfig(BaseModel):
 
     After the usual AFM build and indentation ramp to each load in
     ``[general] force``, an indent run does one hold+retract per load (see
-    :mod:`frictionsim2d.builders.afm.indent`, and ``ML analysis/docs/POKE_SIM_RECIPE.md``
-    outside this repo):
+    :mod:`frictionsim2d.builders.afm.indent`):
 
         1. a short *damped* finite-T hold of the rigid, laterally-fixed tip at
            the target load. Its thermally-averaged penetration depth
@@ -1126,24 +1052,45 @@ class LatticeMatchConfig(BaseModel):
     area_tol: float = Field(default=0.10, ge=0.0, le=1.0)
 
 
-def _fold_flake_sheet_sections(folded: Dict[str, Any]) -> Dict[str, Any]:
-    """Fold [Flake-1], [Flake-2], ... into ``flake_sheets``, in numeric order.
-
-    These carry the two dedicated hetero-flake materials, mirroring the ``2D-N``
-    sheet folding. With no ``[Flake-N]`` present the key is left alone (an empty
-    list), leaving the single-material path — a lone ``[Flake]`` shape spec —
-    unchanged.
-    """
-    flake_keys = sorted(
-        (k for k in folded if isinstance(k, str) and k.startswith('Flake-')),
+def _numbered_keys(folded: Dict[str, Any], prefix: str) -> List[str]:
+    """Keys ``<prefix>N`` of ``folded``, in numeric order of N."""
+    return sorted(
+        (k for k in folded if isinstance(k, str) and k.startswith(prefix)),
         key=lambda key: (
             int(key.split('-', maxsplit=1)[1])
             if key.split('-', maxsplit=1)[1].isdigit() else 10**9
         ),
     )
+
+
+def _fold_sheet_sections(data: Any) -> Any:
+    """Fold [2D-1], [2D-2], ... into ``sheets`` and [Flake-N] into ``flake_sheets``.
+
+    A lone ``[2D]`` is wrapped as a one-element list, keeping the single-material
+    path intact. ``2D`` stays required either way: given only numbered sections,
+    the first is mirrored onto it. With no ``[Flake-N]`` the ``flake_sheets`` key
+    is left alone.
+    """
+    if not isinstance(data, dict):
+        return data
+
+    folded = dict(data)
+    two_d_keys = _numbered_keys(folded, '2D-')
+    if two_d_keys:
+        folded['sheets'] = [folded[k] for k in two_d_keys]
+        folded.setdefault('2D', folded[two_d_keys[0]])
+    elif '2D' in folded:
+        folded['sheets'] = [folded['2D']]
+
+    flake_keys = _numbered_keys(folded, 'Flake-')
     if flake_keys:
         folded['flake_sheets'] = [folded[k] for k in flake_keys]
     return folded
+
+
+def _first(value: Any) -> float:
+    """A sheet ``x``/``y`` as a float; a list (a sweep) contributes its first entry."""
+    return float(value[0] if isinstance(value, list) else value)
 
 
 def _check_mlip_interlayer_choice(config: Any) -> None:
@@ -1180,7 +1127,20 @@ def _check_mlip_interlayer_choice(config: Any) -> None:
         "and dispersion = d3 for the vdW term (documentation/mlip.md).")
 
 
-class AFMSimulationConfig(BaseModel):
+class _InterlayerChecked(BaseModel):
+    """Mixin: reject interlayer settings that cannot produce a valid run."""
+
+    @model_validator(mode='after')
+    def _check_interlayer(self, info: ValidationInfo):
+        """Refuse a non-lj interlayer style under an MLIP, then check the style itself."""
+        from ..potentials.interlayer import check_interlayer_choice  # pylint: disable=import-outside-toplevel,cyclic-import
+        _check_mlip_interlayer_choice(self)
+        base_dir = info.context.get('base_dir') if isinstance(info.context, dict) else None
+        check_interlayer_choice(self, base_dir)
+        return self
+
+
+class AFMSimulationConfig(_InterlayerChecked):
     """Master configuration object for an AFM simulation run."""
     general: GeneralConfig
     tip: TipConfig
@@ -1212,32 +1172,8 @@ class AFMSimulationConfig(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def _fold_sheet_sections(cls, data: Any) -> Any:
-        """Fold [2D-1], [2D-2], ... into ``sheets``, in numeric order.
-
-        A lone ``[2D]`` is wrapped as a one-element list instead, keeping the
-        single-material path intact. ``2D``/``sheet`` stays required either way:
-        given only numbered sections, the first is mirrored onto ``2D`` so
-        single-sheet code paths keep working.
-        """
-        if not isinstance(data, dict):
-            return data
-
-        folded = dict(data)
-        two_d_keys = sorted(
-            (k for k in folded if isinstance(k, str) and k.startswith('2D-')),
-            key=lambda key: (
-                int(key.split('-', maxsplit=1)[1])
-                if key.split('-', maxsplit=1)[1].isdigit() else 10**9
-            ),
-        )
-
-        if two_d_keys:
-            folded['sheets'] = [folded[k] for k in two_d_keys]
-            folded.setdefault('2D', folded[two_d_keys[0]])
-        elif '2D' in folded:
-            folded['sheets'] = [folded['2D']]
-
-        return _fold_flake_sheet_sections(folded)
+        """Fold numbered ``[2D-N]``/``[Flake-N]`` sections into lists."""
+        return _fold_sheet_sections(data)
 
     @model_validator(mode='after')
     def validate_flake_material(self) -> 'AFMSimulationConfig':
@@ -1304,10 +1240,8 @@ class AFMSimulationConfig(BaseModel):
                 "Finite-sheet AFM requires substrate x and y to be set in the [sub] section."
             )
 
-        sheet_x_raw = self.sheet.x  # pylint: disable=no-member  # pydantic FieldInfo FP
-        sheet_y_raw = self.sheet.y  # pylint: disable=no-member  # pydantic FieldInfo FP
-        sheet_x = float(sheet_x_raw[0] if isinstance(sheet_x_raw, list) else sheet_x_raw)
-        sheet_y = float(sheet_y_raw[0] if isinstance(sheet_y_raw, list) else sheet_y_raw)
+        sheet_x = _first(self.sheet.x)  # pylint: disable=no-member  # pydantic FieldInfo FP
+        sheet_y = _first(self.sheet.y)  # pylint: disable=no-member  # pydantic FieldInfo FP
         sub_x = float(sub.x)  # pylint: disable=no-member  # pydantic FieldInfo FP
         sub_y = float(sub.y)  # pylint: disable=no-member  # pydantic FieldInfo FP
 
@@ -1340,35 +1274,17 @@ class AFMSimulationConfig(BaseModel):
     def validate_tip_sheet_footprint(self) -> 'AFMSimulationConfig':
         """Reject a periodic AFM sheet too small for the tip diameter.
 
-        The periodic in-plane footprint must be >= 2x the tip diameter
-        (``4 * tip.r``) in each direction, else the tip interacts with its own
-        periodic image and the recorded forces are corrupted (the
-        afm-tip-box-sizing rule; same ``4 * tip_r`` requirement
-        :func:`~frictionsim2d.builders.afm.hetero.compute_replication_factors` enforces
-        by replicating the coincidence cell). Three exemptions: a hetero stack
-        (two or more ``[2D-N]`` materials) replicates instead of building at
-        its native size, so it is checked there, not here; a PES scan
-        (``[pes]`` present) moves the tip only within one surface unit cell
-        and already carries its own scan-aware footprint warning
-        (``_warn_if_footprint_too_small``); an indent run (``[indent]``
-        present) only presses the tip down rather than sliding it across the
-        sheet, so the swept-path argument for 2x does not apply -- it gets a
-        looser 1.5x-diameter margin (``3 * tip.r``) instead. ``self.indent``
-        is a proxy for "this is an indent run", not a first-class model tag
-        (the CLI's model string never reaches this config object) -- same
-        precedent as the ``self.pes is not None`` PES exemption above. It
-        under-covers an indent run that omits ``[indent]`` entirely (falling
-        back to the builder's own defaults), which would still be held to the
-        stricter 2x margin.
+        The footprint must be >= 2x the tip diameter (``4 * tip.r``), else the tip
+        meets its own periodic image. Exempt: a hetero stack (checked by
+        ``compute_replication_factors``), a PES scan, and an indent run, which
+        only presses down and gets a 1.5x margin (``3 * tip.r``).
         """
         if len(self.sheets) >= 2 or self.pes is not None:
             return self
 
         tip_r = float(self.tip.r)  # pylint: disable=no-member  # pydantic FieldInfo FP
-        sheet_x_raw = self.sheet.x  # pylint: disable=no-member  # pydantic FieldInfo FP
-        sheet_y_raw = self.sheet.y  # pylint: disable=no-member  # pydantic FieldInfo FP
-        sheet_x = float(sheet_x_raw[0] if isinstance(sheet_x_raw, list) else sheet_x_raw)
-        sheet_y = float(sheet_y_raw[0] if isinstance(sheet_y_raw, list) else sheet_y_raw)
+        sheet_x = _first(self.sheet.x)  # pylint: disable=no-member  # pydantic FieldInfo FP
+        sheet_y = _first(self.sheet.y)  # pylint: disable=no-member  # pydantic FieldInfo FP
         is_indent = self.indent is not None
         margin_factor = 3.0 if is_indent else 4.0
         min_footprint = margin_factor * tip_r
@@ -1384,21 +1300,8 @@ class AFMSimulationConfig(BaseModel):
             )
         return self
 
-    @model_validator(mode='after')
-    def _check_mlip_interlayer_choice(self):
-        """Refuse a non-lj interlayer style / comparison under an MLIP."""
-        _check_mlip_interlayer_choice(self)
-        return self
 
-    @model_validator(mode='after')
-    def _check_interlayer_choice(self, info: ValidationInfo):
-        """Reject interlayer settings that cannot produce a valid run."""
-        from ..potentials.interlayer import check_interlayer_choice  # pylint: disable=import-outside-toplevel,cyclic-import
-        base_dir = info.context.get('base_dir') if isinstance(info.context, dict) else None
-        check_interlayer_choice(self, base_dir)
-        return self
-
-class SheetOnSheetSimulationConfig(BaseModel):
+class SheetOnSheetSimulationConfig(_InterlayerChecked):
     """Master configuration object for a Sheet-on-Sheet simulation run."""
     general: GeneralConfig
     sheet: SheetConfig = Field(..., alias='2D')
@@ -1426,45 +1329,9 @@ class SheetOnSheetSimulationConfig(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def _fold_sheet_sections(cls, data: Any) -> Any:
-        """Fold [2D-1], [2D-2], ... into ``sheets``, in numeric order.
+        """Fold numbered ``[2D-N]``/``[Flake-N]`` sections into lists."""
+        return _fold_sheet_sections(data)
 
-        Mirrors :meth:`AFMSimulationConfig._fold_sheet_sections`: a lone ``[2D]``
-        is wrapped as a one-element list, and given only numbered sections the
-        first is mirrored back onto the still-required ``2D`` field.
-        """
-        if not isinstance(data, dict):
-            return data
-
-        folded = dict(data)
-        two_d_keys = sorted(
-            (k for k in folded if isinstance(k, str) and k.startswith('2D-')),
-            key=lambda key: (
-                int(key.split('-', maxsplit=1)[1])
-                if key.split('-', maxsplit=1)[1].isdigit() else 10**9
-            ),
-        )
-
-        if two_d_keys:
-            folded['sheets'] = [folded[k] for k in two_d_keys]
-            folded.setdefault('2D', folded[two_d_keys[0]])
-        elif '2D' in folded:
-            folded['sheets'] = [folded['2D']]
-
-        return _fold_flake_sheet_sections(folded)
-
-    @model_validator(mode='after')
-    def _check_mlip_interlayer_choice(self):
-        """Refuse a non-lj interlayer style / comparison under an MLIP."""
-        _check_mlip_interlayer_choice(self)
-        return self
-
-    @model_validator(mode='after')
-    def _check_interlayer_choice(self, info: ValidationInfo):
-        """Reject interlayer settings that cannot produce a valid run."""
-        from ..potentials.interlayer import check_interlayer_choice  # pylint: disable=import-outside-toplevel,cyclic-import
-        base_dir = info.context.get('base_dir') if isinstance(info.context, dict) else None
-        check_interlayer_choice(self, base_dir)
-        return self
 
 # --- Helper Functions ---
 
@@ -1512,34 +1379,42 @@ def _warn_dropped_settings_keys(path: Path, data: Mapping[str, Any]) -> None:
                        "are being ignored: %s", path, "; ".join(dropped))
 
 
-def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSettings:
-    """Load the first readable settings file onto the hardcoded defaults.
-
-    Candidates come from :func:`_settings_paths_in_precedence_order`; with none
-    of them present, :class:`GlobalSettings` defaults are returned unchanged.
-    """
+def _first_settings_file(
+    settings_file: Optional[Union[str, Path]] = None,
+) -> Optional[tuple]:
+    """``(path, data)`` of the first readable, non-empty settings file, or ``None``."""
     for path in _settings_paths_in_precedence_order(settings_file=settings_file):
         try:
             if not path.is_file():
                 continue
             with path.open('r', encoding='utf-8') as f:
                 data = yaml.safe_load(f) or {}
-            if data:
-                _warn_dropped_settings_keys(path, data)
-                return cast(GlobalSettings, GlobalSettings.model_validate(data))
         except (FileNotFoundError, OSError, yaml.YAMLError) as exc:
             logger.warning("skipping settings file %s: %s", path, exc)
             continue
+        if data:
+            return path, data
+    return None
 
-    return cast(GlobalSettings, GlobalSettings())
+
+def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSettings:
+    """Load the first readable settings file onto the hardcoded defaults.
+
+    Candidates come from :func:`_settings_paths_in_precedence_order`; with none
+    of them present, :class:`GlobalSettings` defaults are returned unchanged.
+    """
+    found = _first_settings_file(settings_file)
+    if found is None:
+        return cast(GlobalSettings, GlobalSettings())
+    path, data = found
+    _warn_dropped_settings_keys(path, data)
+    return cast(GlobalSettings, GlobalSettings.model_validate(data))
 
 
 def settings_origin(settings_file: Optional[Union[str, Path]] = None) -> Optional[Path]:
-    """The settings file currently in effect, or ``None`` (for ``settings show --origin``)."""
-    for path in _settings_paths_in_precedence_order(settings_file=settings_file):
-        if path.is_file():
-            return path
-    return None
+    """The file ``load_settings`` would use, or ``None`` (for ``settings show --origin``)."""
+    found = _first_settings_file(settings_file)
+    return found[0] if found else None
 
 
 def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
@@ -1570,7 +1445,7 @@ def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, A
         else:
             raise ValueError(
                 f"Unsupported configuration file format: {ext}. "
-                "Supported formats: .ini, .yaml, .yml, .json"
+                f"Supported formats: {', '.join(SUPPORTED_FORMATS)}"
             )
 
     elif isinstance(config_source, dict):
@@ -1673,7 +1548,7 @@ def write_config(config: Mapping[str, Any],
     else:
         raise ValueError(
             f"Unsupported configuration file format: {ext}. "
-            f"Supported formats: {', '.join(SUPPORTED_WRITE_FORMATS)}"
+            f"Supported formats: {', '.join(SUPPORTED_FORMATS)}"
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)

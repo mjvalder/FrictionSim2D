@@ -1165,3 +1165,87 @@ class TestMultilayerMLIPRequiresD3:
         cfg = SheetConfig(**self._kwargs(tmp_path, pot_type='sw',
                                          pot_path=str(sw), lat_c=None))
         assert cfg.pot_type == 'sw'
+
+
+# ---------------------------------------------------------------------------
+# core cleanup: shared validators and settings lookup
+# ---------------------------------------------------------------------------
+
+def test_settings_origin_matches_the_file_load_settings_uses(tmp_path, monkeypatch):
+    """An empty explicit file is skipped by both, so origin names the file actually used."""
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    global_path = tmp_path / 'FrictionSim2D' / 'settings.yaml'
+    _write_settings(global_path, timestep=0.005)
+    empty = tmp_path / 'empty.yaml'
+    empty.write_text('', encoding='utf-8')
+
+    assert settings_origin(settings_file=empty) == global_path
+    assert load_settings(settings_file=empty).simulation.timestep == 0.005
+
+
+def test_classical_pot_type_rejects_d3_dispersion(sheet_kwargs, tmp_path):
+    from frictionsim2d.core.config import SheetConfig
+    pot = tmp_path / 'MoS2.sw'
+    pot.write_text('#', encoding='utf-8')
+    kwargs = {**sheet_kwargs, 'pot_type': 'sw', 'pot_path': str(pot)}
+    assert SheetConfig(**kwargs).dispersion == 'none'
+    with pytest.raises(ValidationError, match='requires an MLIP pot_type'):
+        SheetConfig(**{**kwargs, 'dispersion': 'd3'})
+
+
+def _master_kwargs(tmp_path, family):
+    """Kwargs for a master config of `family`, with `flake_sheets` holding an MLIP sheet."""
+    cif = tmp_path / 'dummy.cif'
+    cif.write_text('#', encoding='utf-8')
+    pot = tmp_path / 'dummy.sw'
+    pot.write_text('#', encoding='utf-8')
+    model = tmp_path / 'm.pth'
+    model.write_bytes(b'\x00')
+    sheet = dict(mat='h-MoS2', pot_type='sw', pot_path=str(pot), cif_path=str(cif),
+                 x=90.0, y=90.0, layers=[1])
+    mlip_sheet = {**sheet, 'pot_type': 'deepmd', 'pot_path': str(model), 'lat_c': 6.1}
+    kwargs = {'general': {'temp': 300.0, 'force': 10.0, 'scan_speed': 2.0},
+              '2D': sheet, 'flake_sheets': [mlip_sheet],
+              'settings': load_settings().model_dump()}
+    if family == 'afm':
+        kwargs['tip'] = dict(mat='Si', pot_type='sw', pot_path=str(pot),
+                             cif_path=str(cif), r=20.0, dspring=0.1, s=1.0)
+    return kwargs
+
+
+@pytest.mark.parametrize('family', ['afm', 'sheetonsheet'])
+def test_master_config_rejects_mlip_flake_sheet_with_non_lj_interlayer(tmp_path, family):
+    from frictionsim2d.core.config import AFMSimulationConfig
+    cls = AFMSimulationConfig if family == 'afm' else SheetOnSheetSimulationConfig
+    kwargs = _master_kwargs(tmp_path, family)
+    kwargs['general']['interlayer_style'] = 'ilp'
+    with pytest.raises(ValidationError, match='cannot be combined with an MLIP'):
+        cls(**kwargs)
+
+
+@pytest.mark.parametrize('family', ['afm', 'sheetonsheet'])
+def test_master_config_folds_numbered_sections_in_numeric_order(tmp_path, family):
+    from frictionsim2d.core.config import AFMSimulationConfig
+    cls = AFMSimulationConfig if family == 'afm' else SheetOnSheetSimulationConfig
+    kwargs = _master_kwargs(tmp_path, family)
+    base = kwargs.pop('2D')
+    kwargs.pop('flake_sheets')
+    for n in (10, 2, 1):
+        kwargs[f'2D-{n}'] = {**base, 'mat': f'm{n}'}
+    for n in (2, 1):
+        kwargs[f'Flake-{n}'] = {**base, 'mat': f'f{n}'}
+    config = cls(**kwargs)
+    assert [s.mat for s in config.sheets] == ['m1', 'm2', 'm10']
+    assert config.sheet.mat == 'm1'
+    assert [s.mat for s in config.flake_sheets] == ['f1', 'f2']
+
+
+def test_empty_amorph_reads_as_crystalline_on_tip_and_substrate(tmp_path):
+    from frictionsim2d.core.config import SubstrateConfig, TipConfig
+    cif = tmp_path / 'a.cif'
+    cif.write_text('#', encoding='utf-8')
+    pot = tmp_path / 'a.sw'
+    pot.write_text('#', encoding='utf-8')
+    common = dict(mat='Si', pot_type='sw', pot_path=str(pot), cif_path=str(cif), amorph=None)
+    assert TipConfig(**common, r=10.0).amorph == 'c'
+    assert SubstrateConfig(**common, thickness=10.0).amorph == 'c'
