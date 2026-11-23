@@ -46,7 +46,7 @@ def _flake_sheets(settings):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_flake_carries_both_materials_types(tmp_path):
     from frictionsim2d.core.config import load_settings, FlakeConfig
-    from frictionsim2d.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.builders.construction.hetero_stack import build_hetero_flake_component
     from ase.io import read
     settings = load_settings()
     flake_cfg = FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0)
@@ -64,7 +64,7 @@ def test_hetero_flake_carries_both_materials_types(tmp_path):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_corner_types_double_every_bilayer_type_and_find_vertices(tmp_path):
     from frictionsim2d.core.config import load_settings, FlakeConfig
-    from frictionsim2d.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.builders.construction.hetero_stack import build_hetero_flake_component
     settings = load_settings()
     path, _ = build_hetero_flake_component(_flake_sheets(settings), settings,
                                            FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0), tmp_path)
@@ -102,7 +102,7 @@ def test_register_hetero_flake_potentials_corner_groups(tmp_path):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_flake_run0_smoke(tmp_path):
     from frictionsim2d.core.config import load_settings, FlakeConfig
-    from frictionsim2d.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.builders.construction.hetero_stack import build_hetero_flake_component
     from frictionsim2d.builders.construction.hetero_stack import register_hetero_flake_potentials
     settings = load_settings()
     path, _ = build_hetero_flake_component(_flake_sheets(settings), settings,
@@ -133,7 +133,7 @@ def test_hetero_flake_ilp_splits_chalcogens_like_its_components(tmp_path):
     exactly the block flake_1/flake_2 register (both files label S once)."""
     from types import SimpleNamespace
     from frictionsim2d.core.config import GlobalSettings, FlakeConfig
-    from frictionsim2d.builders.construction.components import build_hetero_flake_component
+    from frictionsim2d.builders.construction.hetero_stack import build_hetero_flake_component
     from frictionsim2d.potentials.manager import PotentialManager
     settings = GlobalSettings()
     general = SimpleNamespace(interlayer_style="ilp", interlayer_file=None)

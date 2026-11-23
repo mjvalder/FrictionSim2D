@@ -60,6 +60,7 @@ now says so where a reader looks first.
 """
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -69,7 +70,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from jinja2 import Environment
 
-from ...core.config import GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig
+from ...core.config import (
+    FlakeConfig, GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig)
 from ...lattice.apply import rotate_layer_to_angle
 from ...lattice.matching import (
     MatchResult,
@@ -82,7 +84,8 @@ from ...lattice.matching import (
 from ...core.mlip import is_mlip, validate_mlip_cell
 from ...potentials.manager import PotentialManager
 from ...interfaces.jinja import PackageLoader
-from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
+from .components import (
+    apply_sheet_edge_types, build_monolayer, calculate_layer_shifts, carve_flake)
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 from ...interfaces.ase import element_mass, read_lammps_data
 
@@ -90,6 +93,8 @@ if TYPE_CHECKING:                      # ase.io costs ~270 ms; annotations only
     from ase import Atoms
 
 PathLike = Union[str, Path]
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class MatchedStack:
@@ -1695,6 +1700,67 @@ def assemble_hetero_stack(
         total_types=total_types,
         material_offsets={m: material_anchor[m] for m in range(n_mats)},
     )
+
+
+def build_hetero_flake_component(
+    flake_sheets: List[SheetConfig],
+    settings: GlobalSettings,
+    flake_cfg: FlakeConfig,
+    workdir: Path,
+    hetero_stacking: str = "grouped",
+    interlayer_general: Any = None,
+) -> Tuple[Path, dict]:
+    """Build a shaped flake carved from a matched hetero bilayer.
+
+    The bilayer is assembled as :func:`build_hetero_structure` does, then
+    outlined by :func:`carve_flake`. The flake carries both materials' types,
+    both layers sharing the same xy corners; under ilp/tmd the chalcogen
+    sub-layer split follows ``interlayer_general``, while the assembly keeps
+    the ``lj`` interactions.
+
+    Returns:
+        Tuple of (flake_path, flake_box_dims).
+
+    Raises:
+        ValueError: If ``flake_sheets`` does not hold exactly two materials.
+    """
+    if len(flake_sheets) != 2:
+        raise ValueError(
+            f"build_hetero_flake_component builds a flake from exactly two "
+            f"materials (a bilayer); got {len(flake_sheets)}."
+        )
+
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Monolayer per flake material (build_monolayer returns the path first).
+    style = interlayer_style(interlayer_general)
+    mono_paths = [Path(build_monolayer(sheet, interlayer=style)[0])
+                  for sheet in flake_sheets]
+
+    # 2. Match -> two supercells sharing one in-plane box.
+    matched = build_matched_supercells(mono_paths[0], mono_paths[1], workdir)
+
+    # 3. Register the flake materials' potential/type spine (geometry-independent).
+    hetero_potentials = register_hetero_potentials(
+        flake_sheets, settings, workdir,
+        interlayer_general=interlayer_general, interlayer_terms=False)
+
+    # 4. Assemble the two matched supercells into one stacked bilayer hetero.data
+    #    (interface z-spacing by real minimization; types aligned to the spine).
+    stack = assemble_hetero_stack(
+        matched, flake_sheets, hetero_potentials, hetero_stacking, settings, workdir,
+    )
+
+    # 5. Carve the requested shape from the assembled bilayer. build_flake keeps
+    #    every type and both layers (they share xy), removing only out-of-shape
+    #    atoms via the boundary mask.
+    # 6. Corner-type ALL bilayer types (core 2t-1 / corner 2t, across both
+    #    materials) -> matches register_component(..., regions=[None, 'corner']).
+    flake_path = workdir / f"hetero_flake_{flake_cfg.shape}.data"
+    flake_dims = carve_flake(stack.data_path, flake_path, flake_cfg)
+    logger.info("Built hetero flake component: %s", flake_path.name)
+    return flake_path, flake_dims
 
 
 # =============================================================================

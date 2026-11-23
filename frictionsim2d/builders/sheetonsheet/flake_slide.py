@@ -33,7 +33,8 @@ from ..construction import components
 from ..utils.interlayer import (check_interlayer_box_from_data, interlayer_style,
                                 interlayer_template_context, set_interlayer_from_config)
 from ..utils.z_vacuum import VIRTUAL_ATOM_ROOM, ZBox
-from ..construction.hetero_stack import _box_region_cmd, _detect_atom_style, _run_lammps
+from ..construction.hetero_stack import (
+    build_hetero_flake_component, _box_region_cmd, _detect_atom_style, _run_lammps)
 from ...interfaces.ase import read_lammps_data
 
 logger = logging.getLogger(__name__)
@@ -157,13 +158,13 @@ class FlakeSlideSimulation(SimulationBase):
 
     def _provenance_components(self):
         """The substrate sheet plus the flake material(s)."""
-        components = [("sheet", self.config.sheet)]
+        parts = [("sheet", self.config.sheet)]
         if self.config.flake_sheets:
-            components += [(f"flake_{i + 1}", fs)
-                           for i, fs in enumerate(self.config.flake_sheets)]
+            parts += [(f"flake_{i + 1}", fs)
+                      for i, fs in enumerate(self.config.flake_sheets)]
         elif self.config.flake is not None:
-            components.append(("flake", self.config.flake))
-        return components
+            parts.append(("flake", self.config.flake))
+        return parts
 
     def _filled_flake_config(self):
         """Return the [Flake] config with its material fields ensured.
@@ -299,7 +300,7 @@ class FlakeSlideSimulation(SimulationBase):
         # 2. Flake (single-material reuses [2D]; hetero flake from [Flake-1/2]).
         hetero_flake = len(self.config.flake_sheets) == 2
         if hetero_flake:
-            flake_path, _flake_dims = components.build_hetero_flake_component(
+            flake_path, _flake_dims = build_hetero_flake_component(
                 self.config.flake_sheets, settings, self.config.flake, build_dir,
                 hetero_stacking=getattr(self.config.general, "hetero_stacking", "grouped"),
                 interlayer_general=self.config.general,

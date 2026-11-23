@@ -4,29 +4,9 @@ This module contains the logic to construct the physical components of the simul
 the AFM tip, the substrate, and the 2D material sheet. It handles the calculation
 of duplication factors based on requested dimensions and unit cell properties.
 
-Function Organization:
-1. Low-level utilities (run_lammps_commands, calculate_layer_shifts)
-2. Slab creation (create_orthogonal_slab)
-3. Amorphous material helpers (get_amorphous_path, make_amorphous)
-4. Sheet stacking helpers (stack_multilayer_sheet)
-5. Main builders (build_tip, build_substrate, build_sheet)
+Sections: flake carving, data-file helpers and orthogonalization, layer
+stacking, then the monolayer, sheet, tip and substrate builders.
 """
-# pylint: disable=cyclic-import
-# The lazy import of frictionsim2d.builders.construction.hetero_stack below (in
-# build_hetero_flake_component) closes a real import cycle: hetero_stack
-# imports this module at module scope for apply_sheet_edge_types /
-# build_monolayer / calculate_layer_shifts, and this module needs its
-# matched-supercell assembly for a hetero flake. The cycle is broken at
-# runtime -- that one import is deferred into the function body -- so it never
-# actually hangs; pylint's cyclic-import check reports the import GRAPH and
-# cannot see the deferral, which makes the message a false positive here.
-# Same treatment and same reasoning as frictionsim2d/lattice/apply.py:6 and
-# frictionsim2d/run/expand.py:7, which closed three of the four R0401 recorded in
-# docs/superpowers/reviews/findings.md.
-#
-# CAVEAT (carried from checkpoints.md L-4): this disable is MODULE-scoped, not
-# line-scoped, so pylint can no longer catch a NEW cycle introduced by a future
-# import added to this file. Any import added here needs a manual cycle check.
 
 import json
 import random
@@ -674,103 +654,6 @@ def build_flake_component(
     flake_dims = carve_flake(base_path, flake_path, config)
     base_path.unlink(missing_ok=True)
     logger.info("Built flake component: %s", flake_path.name)
-    return flake_path, flake_dims
-
-
-def build_hetero_flake_component(
-    flake_sheets: List[SheetConfig],
-    settings: GlobalSettings,
-    flake_cfg: FlakeConfig,
-    workdir: Path,
-    hetero_stacking: str = "grouped",
-    interlayer_general: Any = None,
-) -> Tuple[Path, dict]:
-    """Build a shaped flake carved from a matched hetero *bilayer*.
-
-    The single-material :func:`build_flake_component` sources its flake from one
-    monolayer; this hetero variant instead assembles the two ``flake_sheets``
-    materials into a stacked bilayer (the SAME proven Phase-B pipeline
-    :func:`~frictionsim2d.builders.construction.hetero_stack.build_hetero_structure` uses —
-    :func:`~frictionsim2d.builders.construction.hetero_stack.build_matched_supercells` +
-    :func:`~frictionsim2d.builders.construction.hetero_stack.assemble_hetero_stack`), then reuses
-    the existing
-    :func:`build_flake` to carve the outline and :func:`apply_flake_corner_types`
-    to split every bilayer type into interleaved core ``2t-1`` / corner ``2t``
-    types. The carved flake therefore carries **both** materials' types
-    (in-shape atoms only; out-of-shape atoms removed by the mask), both layers
-    sharing the same xy corners.
-
-    Args:
-        flake_sheets: Exactly two :class:`SheetConfig`s (the flake's bilayer
-            materials, from the ``[Flake-1]`` / ``[Flake-2]`` sections).
-        settings: Global simulation settings (threaded to the match / assemble
-            steps, which run real LAMMPS interface minimization).
-        flake_cfg: Shape spec (``shape``, ``edge_length``, ``rotation_deg``,
-            ``corner_radius``, optional ``center_x`` / ``center_y``).
-        workdir: Directory for the per-material supercells, ``hetero.data``,
-            ``system.in.settings``, staged potentials, and the carved flake.
-        hetero_stacking: Layer ordering for the bilayer (``'grouped'`` default —
-            a one-layer-each bilayer is order-insensitive).
-        interlayer_general: The run's ``[general]`` config. Under ilp/tmd its
-            style splits each material's chalcogen sub-layers into their own
-            types (monolayers and assembly spine alike), as the run's
-            ``flake_1``/``flake_2`` registration does. The assembly itself
-            keeps the ``lj`` interactions (see
-            :func:`~frictionsim2d.builders.construction.hetero_stack.register_hetero_potentials`).
-
-    Returns:
-        Tuple of (flake_path, flake_box_dims).
-
-    Raises:
-        ValueError: If ``flake_sheets`` does not hold exactly two materials.
-    """
-    # Local import: hetero_stack.py imports this module at module scope, so
-    # importing it back at module scope here would create a circular import.
-    # (The comment this replaces named "hetero.py", a module that has not
-    # existed since the builders split -- see the module-level
-    # disable=cyclic-import at the top of this file for the full reasoning.)
-    from .hetero_stack import (  # pylint: disable=import-outside-toplevel
-        assemble_hetero_stack,
-        build_matched_supercells,
-        register_hetero_potentials,
-    )
-
-    if len(flake_sheets) != 2:
-        raise ValueError(
-            f"build_hetero_flake_component builds a flake from exactly two "
-            f"materials (a bilayer); got {len(flake_sheets)}."
-        )
-
-    workdir = Path(workdir)
-    workdir.mkdir(parents=True, exist_ok=True)
-
-    # 1. Monolayer per flake material (build_monolayer returns the path first).
-    style = interlayer_style(interlayer_general)
-    mono_paths = [Path(build_monolayer(sheet, interlayer=style)[0])
-                  for sheet in flake_sheets]
-
-    # 2. Match -> two supercells sharing one in-plane box.
-    matched = build_matched_supercells(mono_paths[0], mono_paths[1], workdir)
-
-    # 3. Register the flake materials' potential/type spine (geometry-independent).
-    hetero_potentials = register_hetero_potentials(
-        flake_sheets, settings, workdir,
-        interlayer_general=interlayer_general, interlayer_terms=False)
-
-    # 4. Assemble the two matched supercells into one stacked bilayer hetero.data
-    #    (interface z-spacing by real minimization; types aligned to the spine).
-    stack = assemble_hetero_stack(
-        matched, flake_sheets, hetero_potentials, hetero_stacking, settings, workdir,
-    )
-
-    # 5. Carve the requested shape from the assembled bilayer. build_flake keeps
-    #    every type and both layers (they share xy), removing only out-of-shape
-    #    atoms via the boundary mask.
-    # 6. Corner-type ALL bilayer types (core 2t-1 / corner 2t, across both
-    #    materials) -> matches register_component(..., regions=[None, 'corner']).
-    flake_path = workdir / f"hetero_flake_{flake_cfg.shape}.data"
-    flake_dims = carve_flake(stack.data_path, flake_path, flake_cfg)
-    logger.info("Built hetero flake component: %s", flake_path.name)
     return flake_path, flake_dims
 
 
