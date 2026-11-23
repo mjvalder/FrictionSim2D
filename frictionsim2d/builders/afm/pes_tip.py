@@ -134,7 +134,6 @@ class PESTipSimulation(AFMSimulation):
         Returns ``(context, out_dir)``.
         """
         context = self.build_render_context(n_layers)
-        rel_layer = str(self.relative_run_dir_layer[n_layers])
         m = self._scan_cells()
         period_x = cell_period(self.sheet_unit_cell, "x")
         period_y = cell_period(self.sheet_unit_cell, "y")
@@ -149,7 +148,7 @@ class PESTipSimulation(AFMSimulation):
             # material by patching the rendered script's approach line to the gap that
             # lands the grid-mean load on target (see gap_load_calibration/).
             'contact_gap': PES_TIP_CONTACT_GAP,
-            'results_csv': f"{rel_layer}/results/pes_scan.csv",
+            'results_csv': self._layer_path(n_layers, "results", "pes_scan.csv"),
             'ev_a_to_nn': EV_A_TO_NN,
             # Force-converged minimize so per-point energies/forces are clean; the
             # sliding default's relative energy tol is too coarse for the PES.

@@ -293,7 +293,7 @@ class PESGridMixin:
             'period_y': period_y,
             'n_cells': n_cells,
             'z_relax': self._z_relax(),
-            'data_dir': f"{self.relative_run_dir}/data",   # final_pes.data
+            'data_dir': self._run_dir_path("data"),   # final_pes.data
             # Without these the scan deck silently renders the classical
             # branch (see mlip_template_context).
             **mlip_template_context(self._scan_mlip_pot_type()),
@@ -379,13 +379,13 @@ class PESSheetSimulation(PESGridMixin, SheetOnSheetSimulation):
         return "sheetonsheet/pes_scan.lmp"
 
     def _scan_data_file(self) -> str:
-        return f"{self.relative_run_dir}/build/{self.structure_paths['sheet'].name}"
+        return self._run_dir_path("build", self.structure_paths["sheet"].name)
 
     def _scan_potential_file(self) -> str:
-        return f"{self.relative_run_dir}/lammps/system.in.settings"
+        return self._run_dir_path("lammps", "system.in.settings")
 
     def _scan_results_path(self, csv_name: str) -> str:
-        return f"{self.relative_run_dir}/results/{csv_name}"
+        return self._run_dir_path("results", csv_name)
 
     def _scan_periods(self) -> tuple:
         return (cell_period(self.sheet_unit_cell, "x"),

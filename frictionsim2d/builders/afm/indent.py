@@ -129,10 +129,8 @@ class IndentSimulation(AFMSimulation):
         # hold length. Phase 2 (retract): the force–distance CSV path + retract
         # discretization; $(v_find) resolves to the peak load per (per-load) script.
         context['hold_steps'] = self.hold_steps
-        rel_layer = self.relative_run_dir_layer[n_layers]
-        context['results_csv'] = (
-            f"{rel_layer}/results/indent_f$(v_find)N_l{n_layers}.csv"
-        )
+        context['results_csv'] = self._layer_path(
+            n_layers, "results", f"indent_f$(v_find)N_l{n_layers}.csv")
         context['z_step'] = self.z_step
         context['n_steps'] = self.n_steps
         # Force-converged minimize for the retract only; system.in keeps the

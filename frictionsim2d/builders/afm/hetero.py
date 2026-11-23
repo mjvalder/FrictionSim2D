@@ -640,7 +640,7 @@ class HeteroAFMSimulation(AFMSimulation):
         pm = PotentialManager(
             self.config.settings,
             potentials_dir=self.output_dir / "provenance" / "potentials",
-            potentials_prefix=str(self.relative_run_dir / "provenance" / "potentials"),
+            potentials_prefix=self._potentials_prefix(),
             shared_potentials_dir=self.shared_potentials_dir,
             shared_potentials_prefix=self.SHARED_POTENTIALS_PREFIX,
         )

@@ -512,9 +512,7 @@ class SheetOnSheetSimulation(SimulationBase):
         pm = PotentialManager(
             self.config.settings,
             potentials_dir=self.output_dir / "provenance" / "potentials",
-            potentials_prefix=str(
-                self.relative_run_dir / "provenance" / "potentials"
-            ),
+            potentials_prefix=self._potentials_prefix(),
             shared_potentials_dir=self.shared_potentials_dir,
             shared_potentials_prefix=self.SHARED_POTENTIALS_PREFIX,
         )
@@ -720,8 +718,6 @@ class SheetOnSheetSimulation(SimulationBase):
         sim = self.config.settings.simulation
         out = self.config.settings.output
 
-        rel_run_dir_str = str(self.relative_run_dir)
-
         if constraint_mode == 'atom_bonds':
             n_bond_types = 1
         else:
@@ -742,19 +738,17 @@ class SheetOnSheetSimulation(SimulationBase):
         interlayer_ctx = interlayer_template_context(
             self.config.general, has_internal_lj=has_internal_lj, pm=self.pm,
             molecule_groups=[f'layer_{i}' for i in range(1, n_layers + 1)])
-        results_file_pattern = (
-            f"{rel_run_dir_str}/results/"
-            f"friction_p${{pressure}}_a${{a}}_s${{speed}}"
-        )
+        results_file_pattern = self._run_dir_path(
+            "results", "friction_p${pressure}_a${a}_s${speed}")
 
         base_context = {
             'seed_sheet_center': self._run_seed('sheet_center'),
-            'data_dir': f"{rel_run_dir_str}/data",   # final-state retention
+            'data_dir': self._run_dir_path("data"),   # final-state retention
             'temp': self.config.general.temp,
             'halt_temperature': halt_temperature(
                 self.config.settings, self.config.general.temp),
             # Points the guard halted (common/halt.lmp); run_status reads it.
-            'halt_record': f"{rel_run_dir_str}/results/halted.txt",
+            'halt_record': self._run_dir_path("results", "halted.txt"),
             'scan_angle_config': self.config.general.scan_angle,
             'scan_angle_force': self.config.general.scan_angle_force,
             'xlo': self.sheet_dims.get('xlo', 0.0),
@@ -763,13 +757,8 @@ class SheetOnSheetSimulation(SimulationBase):
             'yhi': self.sheet_dims.get('yhi', 100.0),
             'zhi': self.sheet_dims.get('zhi', 15.0),
             **self.z_box.context(),
-            'data_file': (
-                f"{rel_run_dir_str}/build/"
-                f"{self.structure_paths['sheet'].name}"
-            ),
-            'potential_file': (
-                f"{rel_run_dir_str}/lammps/system.in.settings"
-            ),
+            'data_file': self._run_dir_path("build", self.structure_paths["sheet"].name),
+            'potential_file': self._run_dir_path("lammps", "system.in.settings"),
             'num_atom_types': total_types,
             'ngroups': total_types,
             'n_layers': n_layers,
@@ -801,19 +790,10 @@ class SheetOnSheetSimulation(SimulationBase):
             'obs_ctx': self._build_obs_ctx(
                 n_layers, results_file_pattern, has_internal_lj,
                 interlayer_ctx),
-            'results_file_raw': (
-                f"{rel_run_dir_str}/results/"
-                f"raw_p${{pressure}}_a${{a}}_s${{speed}}"
-            ),
-            'results_file_peratom': (
-                f"{rel_run_dir_str}/results/"
-                f"peratom_p${{pressure}}_a${{a}}_s${{speed}}"
-            ),
+            'results_file_raw': self._run_dir_path("results", "raw_p${pressure}_a${a}_s${speed}"),
+            'results_file_peratom': self._run_dir_path("results", "peratom_p${pressure}_a${a}_s${speed}"),
             'hold_steps': sim.sheet_hold_steps,
-            'dump_file_pattern': (
-                f"{rel_run_dir_str}/visuals/"
-                f"slide_p${{pressure}}_a${{a}}_s${{speed}}.lammpstrj"
-            ),
+            'dump_file_pattern': self._run_dir_path("visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"),
             'drive_method': sim.drive_method,
             'thermostat_type': self.config.settings.thermostat.type,
             'atom_style': atom_style,

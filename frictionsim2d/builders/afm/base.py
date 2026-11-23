@@ -279,6 +279,10 @@ class AFMSimulation(SimulationBase):
         """
         return self.config.general if n_layers > 1 else None
 
+    def _layer_path(self, n_layers: int, *parts: str) -> str:
+        """A file inside the ``L{n_layers}`` run directory, named as LAMMPS must."""
+        return str(Path(self.relative_run_dir_layer[n_layers], *parts))
+
     def _material_id(self) -> str:
         """Material token used in the HPC job name.
 
@@ -621,7 +625,7 @@ class AFMSimulation(SimulationBase):
         pm = PotentialManager(
             self.config.settings,
             potentials_dir=self.output_dir / "provenance" / "potentials",
-            potentials_prefix=str(self.relative_run_dir / "provenance" / "potentials"),
+            potentials_prefix=self._potentials_prefix(),
             shared_potentials_dir=self.shared_potentials_dir,
             shared_potentials_prefix=self.SHARED_POTENTIALS_PREFIX,
         )
@@ -825,7 +829,7 @@ class AFMSimulation(SimulationBase):
             flake_center_x = (self.flake_dims['xlo'] + self.flake_dims['xhi']) / 2.0
             flake_center_y = (self.flake_dims['ylo'] + self.flake_dims['yhi']) / 2.0
             flake_ctx.update({
-                'flake_file': f"{self.relative_run_dir}/build/{self.flake_path.name}",
+                'flake_file': self._run_dir_path("build", self.flake_path.name),
                 'flake_shift_x': tip_x - flake_center_x,
                 'flake_shift_y': tip_y - flake_center_y,
                 'flake_z': z_positions['flake'],
@@ -866,7 +870,7 @@ class AFMSimulation(SimulationBase):
             'halt_temperature': halt_temperature(
                 self.config.settings, self.config.general.temp),
             # Points the guard halted (common/halt.lmp); run_status reads it.
-            'halt_record': f"{self.relative_run_dir_layer[n_layers]}/results/halted.txt",
+            'halt_record': self._layer_path(n_layers, "results", "halted.txt"),
             'forces': self.config.general.force,
             'scan_angle_config': self.config.general.scan_angle,
             'scan_angle_force': self.config.general.scan_angle_force,
@@ -876,19 +880,19 @@ class AFMSimulation(SimulationBase):
             'ylo': ylo,
             'yhi': yhi,
             **self.z_box.context(),
-            'potential_file': f"{self.relative_run_dir_layer[n_layers]}/lammps/system.in.settings",
+            'potential_file': self._layer_path(n_layers, "lammps", "system.in.settings"),
             'sub_file': (
-                f"{self.relative_run_dir}/build/{sub_path.name}"
+                self._run_dir_path("build", sub_path.name)
                 if sub_path is not None else None
             ),
-            'tip_file': f"{self.relative_run_dir}/build/{tip_path.name}",
-            'sheet_file': f"{self.relative_run_dir}/build/{sheet_path.name}",
+            'tip_file': self._run_dir_path("build", tip_path.name),
+            'sheet_file': self._run_dir_path("build", sheet_path.name),
             'path_sub': (
-                f"{self.relative_run_dir}/build/{sub_path.name}"
+                self._run_dir_path("build", sub_path.name)
                 if sub_path is not None else None
             ),
-            'path_tip': f"{self.relative_run_dir}/build/{tip_path.name}",
-            'path_sheet': f"{self.relative_run_dir}/build/{sheet_path.name}",
+            'path_tip': self._run_dir_path("build", tip_path.name),
+            'path_sheet': self._run_dir_path("build", sheet_path.name),
             'tip_x': tip_x,
             'tip_y': tip_y,
             'tip_z': tip_z,
@@ -897,10 +901,11 @@ class AFMSimulation(SimulationBase):
             'sheet_shift_y': sheet_offset['y'],
             'sheet_z': z_positions['sheet'],
             'offset_2d': offset_2d,
-            'results_file_pattern': (f"{self.relative_run_dir_layer[n_layers]}/results/"
-                                    f"friction_f$(v_find)_a${{a}}_s${{speed}}_layer{n_layers}.txt"),
-            'dump_file_pattern': (f"{self.relative_run_dir_layer[n_layers]}/visuals/"
-                                    f"slide_f$(v_find)_a${{a}}_s${{speed}}.lammpstrj"),
+            'results_file_pattern': self._layer_path(
+                n_layers, "results",
+                f"friction_f$(v_find)_a${{a}}_s${{speed}}_layer{n_layers}.txt"),
+            'dump_file_pattern': self._layer_path(
+                n_layers, "visuals", "slide_f$(v_find)_a${a}_s${speed}.lammpstrj"),
             'dump_enabled': out.dump.get('slide', False),
             'z_sub': z_positions['sub'],
             'z_sheet': z_positions['sheet'],
@@ -935,8 +940,8 @@ class AFMSimulation(SimulationBase):
             'use_langevin': self.config.settings.thermostat.type == 'langevin',
             'min_style': sim.min_style,
             'minimization_command': sim.minimization_command,
-            'output_dir': f"{self.relative_run_dir_layer[n_layers]}/data",
-            'dump_file': f"{self.relative_run_dir_layer[n_layers]}/visuals/system.lammpstrj",
+            'output_dir': self._layer_path(n_layers, "data"),
+            'dump_file': self._layer_path(n_layers, "visuals", "system.lammpstrj"),
             'atom_style': atom_style,
             'ev_a_to_nn': EV_A_TO_NN,
             'finite_sheet_enabled': bool(self.config.general.finite_sheet),
