@@ -38,3 +38,13 @@ def test_get_source_maps_a_vanishing_file_to_template_not_found(monkeypatch):
     monkeypatch.setattr(Path, 'read_text', vanish)
     with pytest.raises(TemplateNotFound):
         loader.get_source(Environment(), 'common/observables.lmp')
+
+
+def test_render_lammps_commands_drops_comments_and_blanks():
+    from frictionsim2d.interfaces.jinja import render_lammps_commands
+    commands = render_lammps_commands(
+        'common/apply_sheet_edge_types.lmp',
+        {'input_path': 'sheet.lmp', 'num_types': 2, 'edge_width': 5.0})
+    assert commands[0] == 'units metal'
+    assert 'read_data sheet.lmp extra/atom/types 2' in commands
+    assert all(c == c.strip() and c and not c.startswith('#') for c in commands)

@@ -5,7 +5,9 @@ in package resources.
 """
 
 from importlib import resources
-from jinja2 import BaseLoader, TemplateNotFound
+from typing import Any, Dict, List
+
+from jinja2 import BaseLoader, Environment, TemplateNotFound
 
 
 class PackageLoader(BaseLoader):
@@ -48,3 +50,18 @@ class PackageLoader(BaseLoader):
             return source, template, lambda: True
         except FileNotFoundError as exc:
             raise TemplateNotFound(template) from exc
+
+
+def render_lammps_commands(template: str, context: Dict[str, Any]) -> List[str]:
+    """Render a packaged LAMMPS template into its command lines.
+
+    Blank lines and ``#`` comment lines are dropped, the rest stripped.
+    """
+    env = Environment(
+        loader=PackageLoader('frictionsim2d.templates'),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    rendered = env.get_template(template).render(context)
+    lines = (line.strip() for line in rendered.strip().split('\n'))
+    return [line for line in lines if line and not line.startswith('#')]

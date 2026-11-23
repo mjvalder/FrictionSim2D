@@ -58,7 +58,7 @@ from ...core.utils.structures import cifread
 from ...potentials.utils import (
     check_potential_cif_compatibility, get_potential_element_order
 )
-from ...interfaces.jinja import PackageLoader
+from ...interfaces.jinja import PackageLoader, render_lammps_commands
 from ...interfaces.lammps import run_lammps_commands
 # No cycle: builders/utils/interlayer imports only frictionsim2d.potentials.interlayer.
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
@@ -2059,12 +2059,6 @@ def stack_multilayer_sheet(
     total_types = len(pm.types)
     max_z = initial_guess * (layers_for_setup - 1) + 20.0
 
-    jinja_env = Environment(
-        loader=PackageLoader('frictionsim2d.templates'),
-        trim_blocks=True,
-        lstrip_blocks=True
-    )
-
     layer_shifts = [initial_guess * l for l in range(layers_for_setup)]
 
     per_layer_shifts = calculate_layer_shifts(
@@ -2104,9 +2098,7 @@ def stack_multilayer_sheet(
         'molecule_groups': [f'layer_{i}' for i in range(1, layers_for_setup + 1)],
     }
 
-    template = jinja_env.get_template('common/stack_layers.lmp')
-    commands = template.render(context).strip().split('\n')
-    commands = [cmd.strip() for cmd in commands if cmd.strip() and not cmd.strip().startswith('#')]
+    commands = render_lammps_commands('common/stack_layers.lmp', context)
 
     lmp = _create_lammps_instance()
     try:
@@ -2203,12 +2195,6 @@ def build_tip(
 
     h = radius / settings.geometry.tip_reduction_factor
 
-    jinja_env = Environment(
-        loader=PackageLoader('frictionsim2d.templates'),
-        trim_blocks=True,
-        lstrip_blocks=True
-    )
-
     context = {
         'base_lmp': base_lmp,
         'radius': radius,
@@ -2216,9 +2202,7 @@ def build_tip(
         'output_path': final_lmp
     }
 
-    template = jinja_env.get_template('common/build_tip.lmp')
-    commands = template.render(context).strip().split('\n')
-    commands = [cmd.strip() for cmd in commands if cmd.strip() and not cmd.strip().startswith('#')]
+    commands = render_lammps_commands('common/build_tip.lmp', context)
 
     run_lammps_commands(commands)
     base_lmp.unlink()
@@ -2277,12 +2261,6 @@ def build_substrate(
         box_x_span = cast(float, base_dims['xhi']) - cast(float, base_dims['xlo'])
         box_y_span = cast(float, base_dims['yhi']) - cast(float, base_dims['ylo'])
 
-    jinja_env = Environment(
-        loader=PackageLoader('frictionsim2d.templates'),
-        trim_blocks=True,
-        lstrip_blocks=True
-    )
-
     context = {
         'base_lmp': base_lmp,
         'box_xlo': box_dims['xlo'],
@@ -2294,9 +2272,7 @@ def build_substrate(
         'output_path': final_lmp
     }
 
-    template = jinja_env.get_template('common/build_substrate.lmp')
-    commands = template.render(context).strip().split('\n')
-    commands = [cmd.strip() for cmd in commands if cmd.strip() and not cmd.strip().startswith('#')]
+    commands = render_lammps_commands('common/build_substrate.lmp', context)
 
     run_lammps_commands(commands)
     base_lmp.unlink()
@@ -2365,12 +2341,6 @@ def apply_langevin_regions(
     # those commands, which is why the call survives there (and why an MLIP is
     # still refused on that path -- v6 §5).
 
-    jinja_env = Environment(
-        loader=PackageLoader('frictionsim2d.templates'),
-        trim_blocks=True,
-        lstrip_blocks=True
-    )
-
     context = {
         'component_name': component_name,
         'input_path': component_path,
@@ -2378,9 +2348,7 @@ def apply_langevin_regions(
         'boundaries': boundaries,
     }
 
-    template = jinja_env.get_template('common/apply_langevin_regions.lmp')
-    commands = template.render(context).strip().split('\n')
-    commands = [cmd.strip() for cmd in commands if cmd.strip() and not cmd.strip().startswith('#')]
+    commands = render_lammps_commands('common/apply_langevin_regions.lmp', context)
 
     run_lammps_commands(commands)
 
@@ -2396,21 +2364,13 @@ def apply_sheet_edge_types(component_path: Path, edge_width: float) -> Path:
     if num_types < 1:
         return component_path
 
-    jinja_env = Environment(
-        loader=PackageLoader('frictionsim2d.templates'),
-        trim_blocks=True,
-        lstrip_blocks=True
-    )
-
     context = {
         'input_path': component_path,
         'num_types': num_types,
         'edge_width': edge_width,
     }
 
-    template = jinja_env.get_template('common/apply_sheet_edge_types.lmp')
-    commands = template.render(context).strip().split('\n')
-    commands = [cmd.strip() for cmd in commands if cmd.strip() and not cmd.strip().startswith('#')]
+    commands = render_lammps_commands('common/apply_sheet_edge_types.lmp', context)
 
     run_lammps_commands(commands)
 
