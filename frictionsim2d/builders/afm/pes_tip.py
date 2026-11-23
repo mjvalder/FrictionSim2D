@@ -203,76 +203,19 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
     ``sheet_2`` potential split). Only the scan-period population and the
     job-name token are added here.
 
-    **Step-1 state-contract audit** (verified by printing/asserting in
-    ``tests/builders/test_hetero_pes_tip.py``, not inferred):
+    MRO: ``HeteroPESTipSimulation -> PESTipSimulation -> HeteroAFMSimulation ->
+    AFMSimulation``, so ``write_inputs`` is the static-scan version and
+    ``SPLIT_OUTER_LOOPS == frozenset()`` (pinned by
+    ``test_hetero_pes_tip_mro_and_split_outer_loops``).
 
-    - MRO: ``HeteroPESTipSimulation -> PESTipSimulation -> HeteroAFMSimulation
-      -> AFMSimulation -> SimulationBase -> ABC -> object``.
-      ``PESTipSimulation`` resolves before ``HeteroAFMSimulation``, so
-      ``write_inputs`` is its self-contained static-scan version (not
-      ``AFMSimulation``'s indentation + slide), and
-      ``SPLIT_OUTER_LOOPS == frozenset()`` (``PESTipSimulation`` declares that
-      class attribute directly, ahead of ``HeteroAFMSimulation``'s *inherited*
-      ``AFMSimulation.SPLIT_OUTER_LOOPS == {'force', 'scan_angle'}`` in MRO
-      order) — correct here too: a static scan replaces the run phase outright
-      and never reads ``outer_loop``, hetero or not. Pinned by
-      ``test_hetero_pes_tip_mro_and_split_outer_loops`` so a future
-      MRO/base-class change cannot silently flip it and make the GUI promise a
-      job count the build never produces (the exact bug class fixed elsewhere
-      on this branch).
-    - Every attribute ``PESTipSimulation.write_inputs``/its helpers read,
-      and where the hetero build populates each:
-
-        * ``self.sheet_unit_cell`` (via ``cell_period``, the scan period) —
-          the homogeneous path fills it from ``build_sheet(...,
-          unit_cell_out=...)``: one material's own orthogonalized unit cell,
-          i.e. the smallest lateral displacement that returns the tip to an
-          equivalent registry. The hetero analogue is the assembled stack's
-          MINIMAL in-plane repeat, measured off the *unreplicated* stack by
-          :func:`~frictionsim2d.builders.construction.hetero_stack.detect_inplane_repeat` and
-          filled here by
-          overriding :meth:`_build_sheet_for_layers` (which calls ``super()``,
-          dispatching to ``HeteroAFMSimulation``'s override) into the same
-          ``xlo``/``xhi``/``ylo``/``yhi`` shape ``cell_period`` expects.
-
-          The unreplicated assembled box is NOT the repeat: each material is
-          tiled to the configured x/y footprint before the match runs, so the
-          box is a superlattice of the real repeat and scanning it would
-          re-visit registries already sampled. ``afm/pes_scan.lmp`` records the
-          total energy and the lateral force on the tip, with no per-cell
-          divisor.
-        * ``self.sheet_dims`` (the built footprint; read by ``build_sheet``'s
-          sibling ``PESSheetSimulation._tile_count``, not by
-          ``PESTipSimulation.write_inputs`` itself, but by
-          ``build_render_context`` for tip centring) — already populated by
-          ``_build_hetero_sheet`` from the *replicated* box (distinct from both
-          the coincidence cell and the repeat unit above); no override needed.
-        * ``self.box_dims`` (read by ``_warn_if_footprint_too_small`` for the
-          tip-periodic-image guard) — populated by the inherited
-          ``AFMSimulation.build()`` calling ``self._get_substrate_box_dims()``
-          after ``_build_components``; neither is overridden by
-          ``HeteroAFMSimulation``, so it already works off the hetero
-          ``self.sheet_dims``; no override needed.
-        * ``self.config.tip.r`` (also read by ``_warn_if_footprint_too_small``)
-          — plain config, unaffected by hetero.
-        * ``build_render_context`` (called by ``write_inputs``) reads
-          ``self.pm[n]``, ``self.sheet_offset``, ``self.lat_c``,
-          ``self.z_positions[n]``, ``self.groups[n]``, ``self.sheet_paths[n]``,
-          ``self.tip_path``, ``self.sub_path``, ``self.sheet_dims`` — all
-          already populated by ``HeteroAFMSimulation``'s overridden
-          ``_build_components`` / ``_generate_potentials`` /
-          ``_calculate_z_positions`` (documented on that class); no additional
-          override needed for the build/render path itself.
-    - Job name: ``PESTipSimulation._get_hpc_job_name`` hardcodes
-      ``f"pes_tip_{self.config.sheet.mat}"`` (sheet 1's material only — it
-      does NOT call ``_material_id()``), so MRO alone would collide two hetero
-      pairs sharing material 1 (e.g. ``h-MoS2+h-WS2`` vs ``h-MoS2+h-WSe2``)
-      on the identical job name ``pes_tip_h-MoS2``. Overridden below to
-      compose ``pes_tip_<pair>`` from
-      :meth:`~frictionsim2d.builders.afm.AFMSimulation._material_id` (which
-      ``HeteroAFMSimulation`` overrides to the numeric-order pair token) —
-      reusing the Task-3 hook built for exactly this, rather than duplicating
-      its pair-token logic.
+    The scan period is the stack's MINIMAL in-plane repeat, measured off the
+    unreplicated stack by
+    :func:`~frictionsim2d.builders.construction.hetero_stack.detect_inplane_repeat`
+    and stored in ``sheet_unit_cell`` as ``cell_period`` expects. The assembled
+    box is not the repeat: each material is tiled to the configured footprint
+    before the match runs, so the box is a superlattice of it and scanning the
+    box would re-visit registries already sampled. The job name is
+    ``pes_tip_<pair>`` through ``_material_id``.
     """
 
     FAMILY = 'pes_tip'
