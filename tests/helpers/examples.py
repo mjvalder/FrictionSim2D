@@ -82,7 +82,7 @@ def build(name: str, model: str, root: Path, **overrides):
     cwd = os.getcwd()
     os.chdir(REPO_ROOT)
     try:
-        return generate_package(
+        result = generate_package(
             config, model,
             output_root=root,
             generate_hpc=False,
@@ -92,3 +92,5 @@ def build(name: str, model: str, root: Path, **overrides):
         )
     finally:
         os.chdir(cwd)
+    assert not result.failures, "; ".join(f.render() for f in result.failures)
+    return result
