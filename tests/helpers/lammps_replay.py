@@ -11,94 +11,106 @@ import re
 import shutil
 import types
 from pathlib import Path
-from typing import Callable, Dict, List
+from typing import Callable, Dict, Iterable, List, Tuple
 
 from .deck_snapshot import normalise_deck
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "lammps_replay"
-_ABS_PATH = re.compile(r"(?<![\w.])/[^\s\"']+")
 
 
-def replay_key(script_text: str) -> str:
-    return hashlib.sha256(normalise_deck(script_text).encode()).hexdigest()
+_INPUT_RE = re.compile(r"(?m)^[ \t]*(?:read_data|include|read_restart)[ \t]+(\S+)")
+_OUTPUT_RE = re.compile(r"(?m)^[ \t]*(?:write_data|write_restart)[ \t]+(\S+)")
+
+
+def replay_key(script_text: str, input_files: Iterable[Path] = ()) -> str:
+    """sha256 of the normalised script plus the normalised content of its input files."""
+    digest = hashlib.sha256(normalise_deck(script_text).encode())
+    parts = sorted(
+        hashlib.sha256(normalise_deck(Path(f).read_text(encoding="utf-8")).encode()).hexdigest()
+        for f in input_files
+    )
+    for part in parts:
+        digest.update(b"\n" + part.encode())
+    return digest.hexdigest()
 
 
 def _missing(key: str) -> LookupError:
     return LookupError(f"no recorded LAMMPS output for {key}; rerun with --record-lammps")
 
 
-def _snapshot(directory: Path) -> Dict[Path, tuple]:
-    out = {}
-    if directory.is_dir():
-        for p in directory.rglob("*"):
-            if p.is_file():
-                st = p.stat()
-                out[p.relative_to(directory)] = (st.st_mtime_ns, st.st_size)
-    return out
+def _resolve(token: str, cwd: Path) -> Path:
+    p = Path(token)
+    return p if p.is_absolute() else Path(cwd) / p
 
 
-def _store(key_dir: Path, watch: List[Path], before: List[Dict[Path, tuple]]) -> None:
+def _literal(tokens: Iterable[str]) -> List[str]:
+    return [t for t in tokens if not any(c in t for c in "${}")]
+
+
+def _inputs(text: str, cwd: Path) -> List[Path]:
+    paths = [_resolve(t, cwd) for t in _literal(_INPUT_RE.findall(text))]
+    for p in paths:
+        if not p.is_file():
+            raise FileNotFoundError(f"LAMMPS input {p} is missing; cannot key the replay")
+    return paths
+
+
+def _outputs(text: str, cwd: Path) -> List[Tuple[str, Path]]:
+    seen: Dict[Path, None] = {}
+    for t in _literal(_OUTPUT_RE.findall(text)):
+        seen.setdefault(_resolve(t, cwd))
+    return [(f"{i}_{p.name}", p) for i, p in enumerate(seen)]
+
+
+def _store(key_dir: Path, outputs: List[Tuple[str, Path]]) -> None:
     if key_dir.exists():
         shutil.rmtree(key_dir)
     key_dir.mkdir(parents=True)
-    for i, (d, snap) in enumerate(zip(watch, before)):
-        for rel, sig in _snapshot(d).items():
-            if snap.get(rel) != sig:
-                dest = key_dir / f"d{i}" / rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(d / rel, dest)
+    for label, path in outputs:
+        if path.is_file():
+            shutil.copy2(path, key_dir / label)
 
 
-def _restore(key_dir: Path, watch: List[Path]) -> None:
-    for i, d in enumerate(watch):
-        src = key_dir / f"d{i}"
-        if src.is_dir():
-            for f in src.rglob("*"):
-                if f.is_file():
-                    dest = d / f.relative_to(src)
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(f, dest)
-
-
-def _command_dirs(commands: List[str]) -> List[Path]:
-    """Directories of the absolute paths a command list references."""
-    dirs = set()
-    for cmd in commands:
-        for m in _ABS_PATH.findall(cmd):
-            dirs.add(Path(m).parent)
-    return sorted(d for d in dirs if d.is_dir())
+def _restore(key_dir: Path, outputs: List[Tuple[str, Path]]) -> None:
+    for label, path in outputs:
+        src = key_dir / label
+        if src.is_file():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, path)
 
 
 def make_run_lammps_commands(real: Callable, record: bool, fixture_dir: Path = FIXTURE_DIR):
     def run(commands: List[str]) -> None:
-        key = replay_key("\n".join(commands))
-        watch = _command_dirs(commands)
+        text = "\n".join(commands)
+        cwd = Path.cwd()
+        key = replay_key(text, _inputs(text, cwd))
+        outputs = _outputs(text, cwd)
         key_dir = fixture_dir / key
         if record:
-            before = [_snapshot(d) for d in watch]
             real(commands)
-            _store(key_dir, watch, before)
+            _store(key_dir, outputs)
             return
         if not key_dir.is_dir():
             raise _missing(key)
-        _restore(key_dir, watch)
+        _restore(key_dir, outputs)
     return run
 
 
 def make_run_lammps(real: Callable, record: bool, fixture_dir: Path = FIXTURE_DIR):
     def run(workdir: Path, script_path: Path) -> str:
         workdir = Path(workdir)
-        key = replay_key(Path(script_path).read_text(encoding="utf-8"))
+        text = Path(script_path).read_text(encoding="utf-8")
+        key = replay_key(text, _inputs(text, workdir))
+        outputs = _outputs(text, workdir)
         key_dir = fixture_dir / key
         if record:
-            before = [_snapshot(workdir)]
             out = real(workdir, script_path)
-            _store(key_dir, [workdir], before)
-            (key_dir / "stdout.txt").write_text(out, encoding="utf-8")
+            _store(key_dir, outputs)
+            (key_dir / "stdout.txt").write_text(normalise_deck(out), encoding="utf-8")
             return out
         if not key_dir.is_dir():
             raise _missing(key)
-        _restore(key_dir, [workdir])
+        _restore(key_dir, outputs)
         stdout = key_dir / "stdout.txt"
         return stdout.read_text(encoding="utf-8") if stdout.exists() else ""
     return run

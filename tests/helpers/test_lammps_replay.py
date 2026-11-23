@@ -8,13 +8,13 @@ from tests.helpers import lammps_replay as lr
 
 def test_replay_returns_recorded_files(tmp_path, monkeypatch):
     fixtures = tmp_path / "fx"
-    script = "units metal\nvelocity all create 300 4711\nrun 0\n"
-    key_dir = fixtures / lr.replay_key(script)
-    (key_dir / "d0").mkdir(parents=True)
-    (key_dir / "d0" / "out.data").write_text("DATA")
-    (key_dir / "stdout.txt").write_text("log")
     work = tmp_path / "work"
     work.mkdir()
+    script = "units metal\nvelocity all create 300 4711\nwrite_data out.data\n"
+    key_dir = fixtures / lr.replay_key(script)
+    key_dir.mkdir(parents=True)
+    (key_dir / "0_out.data").write_text("DATA")
+    (key_dir / "stdout.txt").write_text("log")
     script_path = work / "in.lmp"
     script_path.write_text(script)
 
@@ -47,7 +47,7 @@ def test_record_then_replay_roundtrip(tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     script_path = work / "in.lmp"
-    script_path.write_text("run 0\n")
+    script_path.write_text("write_data made.data\n")
 
     def real(workdir, script):
         (workdir / "made.data").write_text("X")
@@ -57,3 +57,43 @@ def test_record_then_replay_roundtrip(tmp_path):
     (work / "made.data").unlink()
     out = lr.make_run_lammps(real, False, fixtures)(work, script_path)
     assert out == "stdout" and (work / "made.data").read_text() == "X"
+
+
+def test_key_depends_on_input_file_content(tmp_path):
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / "a.data").write_text("one")
+    script = work / "in.lmp"
+    script.write_text("read_data a.data\n")
+    run = lr.make_run_lammps(lambda *a: "", record=False, fixture_dir=tmp_path / "none")
+    with pytest.raises(LookupError) as e1:
+        run(work, script)
+    (work / "a.data").write_text("two")
+    with pytest.raises(LookupError) as e2:
+        run(work, script)
+    assert str(e1.value) != str(e2.value)
+
+
+def test_missing_input_file_fails_loudly(tmp_path):
+    work = tmp_path / "w"
+    work.mkdir()
+    script = work / "in.lmp"
+    script.write_text("include nowhere.in\n")
+    run = lr.make_run_lammps(lambda *a: "", record=False, fixture_dir=tmp_path)
+    with pytest.raises(FileNotFoundError):
+        run(work, script)
+
+
+def test_commands_outputs_by_label(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "base.lmp").write_text("base")
+    cmds = ["read_data base.lmp", "write_data final.lmp"]
+    fixtures = tmp_path / "fx"
+
+    def real(commands):
+        (tmp_path / "final.lmp").write_text("F")
+
+    lr.make_run_lammps_commands(real, True, fixtures)(cmds)
+    (tmp_path / "final.lmp").unlink()
+    lr.make_run_lammps_commands(real, False, fixtures)(cmds)
+    assert (tmp_path / "final.lmp").read_text() == "F"
