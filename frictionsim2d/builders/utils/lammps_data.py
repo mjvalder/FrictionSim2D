@@ -15,9 +15,7 @@ from ...core.utils.tokens import is_int_token
 logger = logging.getLogger(__name__)
 
 # LAMMPS file section markers
-LAMPS_SECTION_ATOMS = 'Atoms'
-LAMMPS_SECTION_MASSES = 'Masses'
-LAMMPS_SECTION_VELOCITIES = 'Velocities'
+LAMMPS_SECTION_ATOMS = 'Atoms'
 
 
 # LAMMPS atom style markers
@@ -54,8 +52,8 @@ def _convert_atoms_style(
     for raw_line in lines:
         stripped = raw_line.strip()
 
-        if stripped == f"{LAMPS_SECTION_ATOMS} {source_style}":
-            converted_lines.append(f"{LAMPS_SECTION_ATOMS} {target_style}\n")
+        if stripped == f"{LAMMPS_SECTION_ATOMS} {source_style}":
+            converted_lines.append(f"{LAMMPS_SECTION_ATOMS} {target_style}\n")
             in_atoms_section = True
             continue
 
@@ -154,7 +152,7 @@ def shift_atoms_to_z_zero(filename: Union[str, Path]) -> None:
     atoms_section = False
     z_values: List[float] = []
     for line in lines:
-        if LAMPS_SECTION_ATOMS in line:
+        if LAMMPS_SECTION_ATOMS in line:
             atoms_section = True
             continue
         if atoms_section and line.strip():
@@ -175,7 +173,7 @@ def shift_atoms_to_z_zero(filename: Union[str, Path]) -> None:
     # Shift atom z-coordinates and update zlo/zhi box bounds
     atoms_section = False
     for i, line in enumerate(lines):
-        if LAMPS_SECTION_ATOMS in line:
+        if LAMMPS_SECTION_ATOMS in line:
             atoms_section = True
             continue
         if atoms_section and line.strip():
@@ -280,7 +278,7 @@ def atom_count_and_z_extent(path: Union[str, Path]) -> Tuple[int, float]:
     z_values: List[float] = []
     in_atoms = False
     for line in Path(path).read_text(encoding='utf-8').splitlines():
-        if LAMPS_SECTION_ATOMS in line:
+        if LAMMPS_SECTION_ATOMS in line:
             in_atoms = True
             continue
         if not in_atoms or not line.strip():

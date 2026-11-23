@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from frictionsim2d.builders.afm.pes_tip import PESTipSimulation
-from frictionsim2d.builders.utils.pes_common import _cell_period
+from frictionsim2d.builders.utils.pes_common import cell_period
 from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation, _tile_count
 from frictionsim2d.core.config import (
     AFMSimulationConfig,
@@ -49,15 +49,15 @@ def _afm_cfg(tmp_path: Path, force):
 
 def test_cell_period_and_tile_count():
     uc = {"xlo": 0.0, "xhi": 3.0, "ylo": 0.0, "yhi": 5.0}
-    assert _cell_period(uc, "x") == pytest.approx(3.0)
-    assert _cell_period(uc, "y") == pytest.approx(5.0)
+    assert cell_period(uc, "x") == pytest.approx(3.0)
+    assert cell_period(uc, "y") == pytest.approx(5.0)
     full = {"xlo": 0.0, "xhi": 30.0, "ylo": 0.0, "yhi": 25.0}
     assert _tile_count(full, uc) == 10 * 5
 
 
 def test_cell_period_missing_raises():
     with pytest.raises(ValueError, match="unit-cell"):
-        _cell_period({}, "x")
+        cell_period({}, "x")
 
 
 def test_cell_period_subtracts_lo_not_just_hi():
@@ -75,14 +75,14 @@ def test_cell_period_subtracts_lo_not_just_hi():
     a = 3.1840664646845926
     unit_cell = {"xlo": -a / 2, "xhi": a / 2,
                  "ylo": 2.5, "yhi": 2.5 + a * math.sqrt(3)}
-    assert _cell_period(unit_cell, "x") == pytest.approx(a)
-    assert _cell_period(unit_cell, "y") == pytest.approx(a * math.sqrt(3))
+    assert cell_period(unit_cell, "x") == pytest.approx(a)
+    assert cell_period(unit_cell, "y") == pytest.approx(a * math.sqrt(3))
 
 
 def test_cell_period_rejects_a_non_positive_period():
     unit_cell = {"xlo": 5.0, "xhi": 5.0}
     with pytest.raises(ValueError, match="Non-positive"):
-        _cell_period(unit_cell, "x")
+        cell_period(unit_cell, "x")
 
 
 # --- PESSheetSimulation ----------------------------------------------------

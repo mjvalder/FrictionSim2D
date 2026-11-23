@@ -1,7 +1,7 @@
 """Static PES scan over a sheet stack (sheet family).
 
 Split out of the former ``builders/pes_scan.py``. The tip scan lives in
-``afm/pes_tip.py``; the two shared constants and ``_cell_period`` are in
+``afm/pes_tip.py``; the two shared constants and ``cell_period`` are in
 ``builders/pes_common.py``.
 
 ``PESGridMixin`` is here rather than shared because only the two sheet-family
@@ -15,7 +15,7 @@ from ...potentials.utils import normalize_potential_type
 from ..construction.hetero_stack import detect_inplane_repeat
 from ..simulation_base import mlip_template_context
 from ..utils.interlayer import interlayer_template_context
-from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
+from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, cell_period
 from .base import (CUTOFF_NOT_APPLICABLE, SheetOnSheetSimulation,
                    write_sheet_provenance)
 from .hetero import HeteroSheetOnSheetSimulation
@@ -28,10 +28,10 @@ PES_SHEET_LAYERS = 2
 def _tile_count(full_dims: Dict[str, float], unit_cell: Dict[str, float]) -> int:
     """Number of surface unit cells tiling the built sheet footprint (x·y)."""
     nx = max(1, round(
-        (float(full_dims["xhi"]) - float(full_dims["xlo"])) / _cell_period(unit_cell, "x")
+        (float(full_dims["xhi"]) - float(full_dims["xlo"])) / cell_period(unit_cell, "x")
     ))
     ny = max(1, round(
-        (float(full_dims["yhi"]) - float(full_dims["ylo"])) / _cell_period(unit_cell, "y")
+        (float(full_dims["yhi"]) - float(full_dims["ylo"])) / cell_period(unit_cell, "y")
     ))
     return int(nx * ny)
 
@@ -391,8 +391,8 @@ class PESSheetSimulation(PESGridMixin, SheetOnSheetSimulation):
         return f"{self.relative_run_dir}/results/{csv_name}"
 
     def _scan_periods(self) -> tuple:
-        return (_cell_period(self.sheet_unit_cell, "x"),
-                _cell_period(self.sheet_unit_cell, "y"))
+        return (cell_period(self.sheet_unit_cell, "x"),
+                cell_period(self.sheet_unit_cell, "y"))
 
     def _scan_n_cells(self) -> int:
         assert self.sheet_dims is not None

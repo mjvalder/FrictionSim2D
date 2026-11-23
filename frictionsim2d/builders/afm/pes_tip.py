@@ -1,14 +1,14 @@
 """Static PES scan with an AFM tip (AFM family).
 
 Split out of the former ``builders/pes_scan.py``. The sheet-family scan lives in
-``sheetonsheet/pes_sheet.py``; the two shared constants and ``_cell_period`` are
+``sheetonsheet/pes_sheet.py``; the two shared constants and ``cell_period`` are
 in ``builders/pes_common.py``.
 """
 import logging
 
 from ...data.models import EV_A_TO_NN
 from ..construction.hetero_stack import detect_inplane_repeat
-from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
+from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, cell_period
 from .base import AFMSimulation
 from .hetero import HeteroAFMSimulation
 
@@ -138,8 +138,8 @@ class PESTipSimulation(AFMSimulation):
         context = self.build_render_context(n_layers)
         rel_layer = str(self.relative_run_dir_layer[n_layers])
         m = self._scan_cells()
-        period_x = _cell_period(self.sheet_unit_cell, "x")
-        period_y = _cell_period(self.sheet_unit_cell, "y")
+        period_x = cell_period(self.sheet_unit_cell, "x")
+        period_y = cell_period(self.sheet_unit_cell, "y")
         self._warn_if_footprint_too_small(m, period_x, period_y)
         context.update({
             # M×M unit cells at grid_n points *per cell*: multiply both the scanned
@@ -226,7 +226,7 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
     - Every attribute ``PESTipSimulation.write_inputs``/its helpers read,
       and where the hetero build populates each:
 
-        * ``self.sheet_unit_cell`` (via ``_cell_period``, the scan period) —
+        * ``self.sheet_unit_cell`` (via ``cell_period``, the scan period) —
           the homogeneous path fills it from ``build_sheet(...,
           unit_cell_out=...)``: one material's own orthogonalized unit cell,
           i.e. the smallest lateral displacement that returns the tip to an
@@ -236,7 +236,7 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
           filled here by
           overriding :meth:`_build_sheet_for_layers` (which calls ``super()``,
           dispatching to ``HeteroAFMSimulation``'s override) into the same
-          ``xlo``/``xhi``/``ylo``/``yhi`` shape ``_cell_period`` expects.
+          ``xlo``/``xhi``/``ylo``/``yhi`` shape ``cell_period`` expects.
 
           An earlier revision used ``self._hetero_coincidence_cell`` (the whole
           unreplicated assembled box) here on the premise that the coincidence

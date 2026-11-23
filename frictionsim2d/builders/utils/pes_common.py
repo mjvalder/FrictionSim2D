@@ -1,20 +1,12 @@
-"""Constants and helpers shared by both families' PES scans.
-
-Split out of the former ``pes_scan.py``, which held the tip scan (AFM family)
-and the sheet scan (sheet family) in one file. These three symbols are the only
-ones both halves read; everything else went to whichever family owns it.
-"""
-import logging
+"""Constants and the unit-cell period helper shared by both PES scans."""
 from typing import Dict
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_GRID_N = 12
 
 PES_MINIMIZE_COMMAND = "minimize 0.0 1.0e-6 10000 100000"
 
 
-def _cell_period(unit_cell: Dict[str, float], axis: str) -> float:
+def cell_period(unit_cell: Dict[str, float], axis: str) -> float:
     """Return the orthogonalized surface-unit-cell period along ``axis`` (Å)."""
     lo = unit_cell.get(f"{axis}lo")
     hi = unit_cell.get(f"{axis}hi")

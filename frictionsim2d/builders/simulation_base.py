@@ -16,7 +16,6 @@ import hashlib
 
 from jinja2 import Environment
 
-from ..interfaces.atomsk import AtomskWrapper
 from ..interfaces.jinja import PackageLoader
 from ..core.mlip import get_mlip, is_mlip
 from ..core.utils.paths import get_material_path, get_potential_path
@@ -34,11 +33,8 @@ POTENTIAL_EXTENSIONS = {
 }
 
 #: The target temperature the halt threshold is floored at (K). A cold run is
-#: not a cold system: releasing the minimiser's strain energy into 500-odd
-#: atoms puts a 1 K-target smoke run at tens of K within a thousand steps, and
-#: it is perfectly healthy there. Measured 2026-09-22: 119 K on the AFM smoke,
-#: 13-78 K across the hetero and flake slides, every one of them a good run
-#: that a bare 10x1 K threshold aborted.
+#: not a cold system: releasing the minimiser's strain energy puts a 1 K-target
+#: run at tens of K within a thousand steps, and it is healthy there.
 HALT_FLOOR_TEMPERATURE_K = 300.0
 
 
@@ -108,17 +104,16 @@ def _infer_provenance_category(file_path: Path) -> str:
         return 'potential'
     return 'other'
 
+
 class SimulationBase(ABC):
     """Abstract base class for simulation setup.
 
-    Provides common infrastructure for directory creation, template rendering,
-    and file writing. Concrete simulation classes (AFM, SheetOnSheet) inherit
-    from this.
+    Provides directory creation, template rendering, file writing, provenance
+    and HPC-script generation shared by every builder.
 
     Attributes:
         config: The validated configuration object for the simulation.
         output_dir: The root directory for simulation output.
-        atomsk: Optional Atomsk interface for geometry manipulation.
         jinja_env: Template engine environment.
     """
 
@@ -188,18 +183,10 @@ class SimulationBase(ABC):
     def _run_seed(self, channel: str) -> int:
         """A fresh random seed for one RNG channel, drawn once per build.
 
-        The seed exists to make runs independent samples of the thermostat
-        ensemble, not to make a run reproducible: a friction result that
-        depends on which seed it drew is a sampling problem, not a provenance
-        one. So this is a consistency mechanism, not a correctness one.
-
-        It is drawn here rather than by a template-side ``| random`` for two
-        practical reasons: one channel gets one seed no matter how many
-        templates read it (``| random`` re-draws per occurrence, so a velocity
-        and a thermostat line in the same script would silently disagree), and
-        the value is available to the builder afterwards -- for a provenance
-        record, or simply to log. Templates that take a seed should be handed
-        one so every family behaves the same way.
+        Drawn here, not by a template-side ``| random`` (which re-draws per
+        occurrence), so every template reading one channel gets one value and
+        the builder can record it. The seed gives independent samples of the
+        thermostat ensemble; it does not make a run reproducible.
         """
         if channel not in self._seeds:
             self._seeds[channel] = random.randint(1, 900_000_000)
@@ -229,15 +216,6 @@ class SimulationBase(ABC):
         #: once it knows its atoms and cutoff). :meth:`write_file` checks
         #: every ``.in`` deck against it.
         self.z_box: Optional[ZBox] = None
-        try:
-            self.atomsk: Optional[AtomskWrapper] = AtomskWrapper()
-        except RuntimeError:
-            self.atomsk = None
-            logger.info(
-                "Atomsk not found. Continuing with native geometry pipeline; "
-                "Atomsk-only operations will be unavailable."
-            )
-
         self.jinja_env = Environment(
             loader=PackageLoader('frictionsim2d.templates'),
             trim_blocks=True,
@@ -414,19 +392,9 @@ class SimulationBase(ABC):
     def _load_or_init_manifest(self) -> Dict[str, Any]:
         """Read ``provenance/manifest.json``, or start a fresh one.
 
-        Shared by :meth:`_update_provenance_manifest` and by the two
-        ``_record_twist_manifest`` methods that add a ``twist`` block to the
-        same file (``sheetonsheet.hetero.HeteroSheetOnSheetSimulation`` and
-        ``sheetonsheet.flake_slide.FlakeSlideSimulation``), which had grown
-        their own copy of this read-or-init -- one of the ``duplicate-code``
-        blocks the Phase 2c review tabulated.
-
-        The copies had also DIVERGED: both wrote ``{'version': '1.0',
-        'files': []}`` where this method writes a ``created`` timestamp too, so
-        a manifest first created by the twist path permanently lacked it.
-        Harmless in itself (only ``files`` is ever read back) but exactly the
-        kind of silent schema drift a third copy invites, and the reason to
-        collapse them rather than pragma the duplication away.
+        Shared by :meth:`_update_provenance_manifest` and the two
+        ``_record_twist_manifest`` methods, which add a ``twist`` block to the
+        same file.
         """
         manifest_path = self.output_dir / 'provenance' / 'manifest.json'
         if manifest_path.exists():
@@ -452,24 +420,6 @@ class SimulationBase(ABC):
         Creates/updates a JSON manifest file that tracks which files are used for
         which components. This enables AiiDA to trace potentials to specific
         components (e.g., tip, substrate) via the config.ini file.
-        
-        Manifest structure:
-        {
-            "version": "1.0",
-            "created": "2025-01-19T...",
-            "last_updated": "2025-01-19T...",
-            "files": [
-                {
-                    "filename": "Au.sw",
-                    "original_path": "/path/to/repo/potentials/Au.sw",
-                    "stored_path": "provenance/potentials/Au.sw",
-                    "category": "potential",
-                    "component": "tip",
-                    "checksum": "sha256...",
-                    "added_at": "2025-01-19T..."
-                }
-            ]
-        }
         """
         manifest_data = self._load_or_init_manifest()
 
@@ -637,15 +587,7 @@ class SimulationBase(ABC):
             logger.info("Generated HPC script in %s", hpc_dir)
 
     def _get_hpc_output_dir(self) -> Path:
-        """Get the output directory for HPC scripts.
-        
-        Override this method if you need custom HPC script location.
-        Default is output_dir/hpc for single simulations,
-        or base_output_dir/hpc for multi-simulation setups.
-        
-        Returns:
-            Path to HPC scripts directory
-        """
+        """``base_output_dir/hpc`` for a campaign, else ``output_dir/hpc``."""
         if self.base_output_dir is not None:
             return self.base_output_dir / 'hpc'
         return self.output_dir / 'hpc'
