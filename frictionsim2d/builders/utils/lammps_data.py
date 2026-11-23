@@ -8,7 +8,7 @@ files, not structure files, and use no ASE.
 """
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from ...core.utils.tokens import is_int_token
 
@@ -136,6 +136,20 @@ def atomic2molecular(filepath: Union[str, Path]) -> None:
     _convert_atoms_style(filepath, LAMMPS_STYLE_ATOMIC, LAMMPS_STYLE_MOLECULAR, _to_molecular)
 
 
+def _atom_lines(lines: List[str]) -> Iterator[Tuple[int, List[str]]]:
+    """``(index, fields)`` of every atom line in the ``Atoms`` section."""
+    in_atoms = False
+    for i, line in enumerate(lines):
+        if LAMMPS_SECTION_ATOMS in line:
+            in_atoms = True
+            continue
+        if not in_atoms or not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
+            yield i, parts
+
+
 def shift_atoms_to_z_zero(filename: Union[str, Path]) -> None:
     """Shift all atom z-coordinates so the minimum z is 0, and update the box bounds.
 
@@ -148,20 +162,12 @@ def shift_atoms_to_z_zero(filename: Union[str, Path]) -> None:
     with open(filename, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    # Find minimum z across all atom lines
-    atoms_section = False
     z_values: List[float] = []
-    for line in lines:
-        if LAMMPS_SECTION_ATOMS in line:
-            atoms_section = True
-            continue
-        if atoms_section and line.strip():
-            parts = line.strip().split()
-            if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
-                try:
-                    z_values.append(float(parts[4]))
-                except ValueError:
-                    pass
+    for _, parts in _atom_lines(lines):
+        try:
+            z_values.append(float(parts[4]))
+        except ValueError:
+            pass
 
     if not z_values:
         return
@@ -170,21 +176,14 @@ def shift_atoms_to_z_zero(filename: Union[str, Path]) -> None:
     if abs(z_min) < 1e-10:
         return  # Already at zero, nothing to do
 
-    # Shift atom z-coordinates and update zlo/zhi box bounds
-    atoms_section = False
+    for i, parts in _atom_lines(lines):
+        try:
+            parts[4] = f"{float(parts[4]) - z_min:.15f}"
+            lines[i] = '  '.join(parts) + '\n'
+        except ValueError:
+            pass
     for i, line in enumerate(lines):
-        if LAMMPS_SECTION_ATOMS in line:
-            atoms_section = True
-            continue
-        if atoms_section and line.strip():
-            parts = line.strip().split()
-            if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
-                try:
-                    parts[4] = f"{float(parts[4]) - z_min:.15f}"
-                    lines[i] = '  '.join(parts) + '\n'
-                except ValueError:
-                    pass
-        elif 'zlo zhi' in line:
+        if 'zlo zhi' in line:
             zlo, zhi = map(float, line.split()[:2])
             lines[i] = f"      {zlo - z_min:.15f}      {zhi - z_min:.15f}  zlo zhi\n"
 
@@ -276,20 +275,12 @@ def atom_count_and_z_extent(path: Union[str, Path]) -> Tuple[int, float]:
     """
     n_atoms = 0
     z_values: List[float] = []
-    in_atoms = False
-    for line in Path(path).read_text(encoding='utf-8').splitlines():
-        if LAMMPS_SECTION_ATOMS in line:
-            in_atoms = True
+    for _, parts in _atom_lines(Path(path).read_text(encoding='utf-8').splitlines()):
+        try:
+            z_values.append(float(parts[_atom_z_column(len(parts))]))
+        except ValueError:
             continue
-        if not in_atoms or not line.strip():
-            continue
-        parts = line.split()
-        if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
-            try:
-                z_values.append(float(parts[_atom_z_column(len(parts))]))
-            except ValueError:
-                continue
-            n_atoms += 1
+        n_atoms += 1
     if not z_values:
         return 0, 0.0
     return n_atoms, max(z_values) - min(z_values)
