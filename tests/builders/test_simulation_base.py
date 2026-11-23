@@ -143,7 +143,8 @@ def test_family_job_name_prefixes():
         PESSheetSimulation: "pes_sheet", HeteroPESSheetSimulation: "pes_sheet",
     }
     for cls, prefix in expected.items():
-        assert cls.HPC_JOB_PREFIX == prefix, cls.__name__
+        stub = SimpleNamespace(HPC_JOB_PREFIX=cls.HPC_JOB_PREFIX, _material_id=lambda: "X")
+        assert cls._get_hpc_job_name(stub) == f"{prefix}_X", cls.__name__
 
 
 class _Cfg(SimpleNamespace):

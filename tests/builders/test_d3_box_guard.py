@@ -8,7 +8,7 @@ from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_setting
 from tests.builders.test_family_mlip import (
     _all_mlip_afm_like, _build, _deepmd_sheet, _model, needs_lmp)
 
-D3_MATCH = r'(?i)d3|dispersion'
+D3_MATCH = r'd3_cutoff = .* needs a periodic box'
 
 
 class _Sim(SimulationBase):
