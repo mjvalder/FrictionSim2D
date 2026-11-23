@@ -2014,13 +2014,13 @@ def stack_multilayer_sheet(
     """
     if n_layers < 2:
         raise ValueError("stack_multilayer_sheet requires at least 2 layers")
+    assert settings is not None
 
     calculate_lat_c = lat_c is None
     if info_out is not None and not calculate_lat_c:
         info_out['lat_c_source'] = _lat_c_source or 'config'
 
     if calculate_lat_c:
-        assert settings is not None
         if is_mlip(config.pot_type):
             # Belt and braces: SheetConfig makes lat_c mandatory for MLIP
             # sheets precisely so this branch is unreachable. Reaching it would
@@ -2036,7 +2036,6 @@ def stack_multilayer_sheet(
         logger.info("Running minimization to find optimal interlayer distance")
         initial_guess = settings.geometry.lat_c_default
     else:
-        assert settings is not None
         initial_guess = lat_c
 
     layers_for_setup = 2 if calculate_lat_c else n_layers
@@ -2147,8 +2146,6 @@ def stack_multilayer_sheet(
 
     except Exception as e:
         logger.error("Failed to stack layers: %s", e)
-        if calculate_lat_c:
-            lat_c = settings.geometry.lat_c_default
         raise
     finally:
         lmp.close()
