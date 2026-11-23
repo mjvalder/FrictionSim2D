@@ -650,3 +650,18 @@ def test_orthogonalize_snaps_the_residual_tilt_of_a_near_hexagonal_cell(tmp_path
     dims = get_model_dimensions(out)
     assert dims['xhi'] - dims['xlo'] == pytest.approx(3.0, abs=1e-3)
     assert dims['yhi'] - dims['ylo'] == pytest.approx(2 * 0.866 * 3.0, abs=1e-3)
+
+
+def test_assign_pot_types_matches_uncommented_masses_by_nearest_element(tmp_path: Path) -> None:
+    path = tmp_path / "prim.lmp"
+    path.write_text(
+        "t\n\n3 atoms\n2 atom types\n\n"
+        "0.0 3.0 xlo xhi\n0.0 3.0 ylo yhi\n0.0 6.0 zlo zhi\n\n"
+        "Masses\n\n1 195.084\n2 78.971\n\n"
+        "Atoms # atomic\n\n1 1 0 0 0\n2 2 1 1 1\n3 2 2 2 2\n"
+    )
+    components._assign_pot_types_by_order(path, ["Pt", "Se"], {"Pt": 1, "Se": 2})
+    text = path.read_text()
+    atoms = text.split("Atoms # atomic")[1].split()
+    assert [int(atoms[i]) for i in (1, 6, 11)] == [1, 2, 3]
+    assert "# Pt" in text and text.count("# Se") == 2
