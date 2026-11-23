@@ -124,6 +124,7 @@ class PESGridMixin:
     #: A static scan applies no normal load, so it needs no pressure -- this
     #: overrides the slide builders' True for both sheet PES scans.
     REQUIRES_PRESSURE: bool = False
+    HPC_JOB_PREFIX = 'pes_sheet'
 
     #: The two sheet scan templates, named in the refusal below so the claim is
     #: checkable rather than asserted: both read ONE pre-assembled data file.
@@ -245,10 +246,6 @@ class PESGridMixin:
                 "PES sheet scan requires exactly 2 layers (a frozen bottom + a "
                 f"scanned top); {self._layer_count_hint()}, got {n_layers}."
             )
-
-    def _get_hpc_job_name(self) -> str:
-        """``pes_sheet_<material token>`` (a pair token for the hetero variant)."""
-        return f"pes_sheet_{self._material_id()}"
 
     def _grid_n(self) -> int:
         pes = getattr(self.config, 'pes', None)

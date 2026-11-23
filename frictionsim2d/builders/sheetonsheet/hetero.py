@@ -175,28 +175,6 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         """
         return '+'.join(sheet.mat for sheet in self.config.sheets)
 
-    def _get_hpc_job_name(self) -> str:
-        """Job name keyed by every configured material, not just sheet 1.
-
-        This class doesn't subclass
-        :class:`~frictionsim2d.builders.sheetonsheet.SheetOnSheetSimulation`
-        (it subclasses :class:`SimulationBase` directly), so without this
-        override it fell back to :meth:`SimulationBase._get_hpc_job_name`'s
-        generic ``friction_{sheet 1's material}`` default — the same
-        sheet-1-alone collision :class:`~frictionsim2d.builders.afm.hetero.HeteroAFMSimulation`
-        had: two hetero pairs sharing material 1 (or a twist-only single
-        material, whose token is just that one material) produced identical
-        HPC job identities despite building into distinct output directories
-        (already pair-token-safe via Task 1's ``output_dir_for``). Same
-        numeric-``[2D-N]``-order ``+``-joined convention as
-        :func:`frictionsim2d.run.naming.material_token` /
-        :func:`~frictionsim2d.builders.afm.hetero._pair_material_token`; kept as a
-        private inline join (in :meth:`_material_id`) rather than importing
-        from ``hetero_afm`` since the two builder families are otherwise
-        independent.
-        """
-        return f"friction_{self._material_id()}"
-
     @property
     def n_layers(self) -> int:
         """Total layer count = sum of each material's single layer count.

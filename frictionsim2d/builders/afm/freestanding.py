@@ -19,9 +19,7 @@ class FreestandingPESTipSimulation(PESTipSimulation):
     """Tip PES on a self-supported multilayer slab (no substrate)."""
 
     FAMILY = 'pes_tip'
-
-    def _get_hpc_job_name(self) -> str:
-        return f"pes_tip_free_{self.config.sheet.mat}"
+    HPC_JOB_PREFIX = 'pes_tip_free'
 
     def _eval_mode(self) -> str:
         pes = getattr(self.config, 'pes', None)

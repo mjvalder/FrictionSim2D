@@ -365,6 +365,7 @@ class SheetOnSheetSimulation(SimulationBase):
     """
 
     FAMILY = 'sheetonsheet'
+    HPC_JOB_PREFIX = 'sheet'
 
     #: Minimum number of layers this builder accepts. Subclasses (e.g. the
     #: static PES bilayer scan) may lower it.
@@ -511,29 +512,6 @@ class SheetOnSheetSimulation(SimulationBase):
             layer_thickness=info.get('layer_thickness'),
             tip_r=None,
         )
-
-    def _material_id(self) -> str:
-        """Material token for HPC job names: this builder's single material.
-
-        The sheet-family counterpart of
-        :meth:`~frictionsim2d.builders.afm.AFMSimulation._material_id`, added so the PES
-        scan's job name can be composed from one hook rather than hardcoding
-        ``config.sheet.mat``: the hetero builder overrides it with the
-        ``mat1+mat2`` pair token (two pairs sharing material 1 would otherwise
-        collide on one job name).
-        """
-        return self.config.sheet.mat
-
-    def _get_hpc_job_name(self) -> str:
-        """Get sheet-on-sheet specific job name.
-
-        Through :meth:`_material_id` rather than ``config.sheet.mat`` directly:
-        two spellings of the same token one line apart is how they drift, and
-        the hook is what the hetero builders override to key the name on the
-        full pair. Inert here (this builder's ``_material_id`` IS
-        ``config.sheet.mat``) — it is the consistency that matters.
-        """
-        return f"sheet_{self._material_id()}"
 
     def _init_provenance(self) -> None:
         """Initialize provenance folder and collect input files."""

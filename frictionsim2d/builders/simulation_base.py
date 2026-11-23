@@ -592,15 +592,13 @@ class SimulationBase(ABC):
             return self.base_output_dir / 'hpc'
         return self.output_dir / 'hpc'
 
+    #: Leading token of the HPC job name.
+    HPC_JOB_PREFIX: str = 'friction'
+
+    def _material_id(self) -> str:
+        """Material token of the job name: the sheet's material."""
+        return self.config.sheet.mat
+
     def _get_hpc_job_name(self) -> str:
-        """Get the job name for HPC scripts.
-        
-        Override this method to customize job names.
-        
-        Returns:
-            Job name string
-        """
-        material = getattr(self.config, 'sheet', None) or getattr(self.config, '2D', None)
-        if material and hasattr(material, 'mat'):
-            return f"friction_{material.mat}"
-        return "friction2d"
+        """``<HPC_JOB_PREFIX>_<material token>``."""
+        return f"{self.HPC_JOB_PREFIX}_{self._material_id()}"

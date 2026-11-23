@@ -27,6 +27,7 @@ class PESTipSimulation(AFMSimulation):
     """
 
     FAMILY = 'pes_tip'
+    HPC_JOB_PREFIX = 'pes_tip'
 
     #: write_inputs below replaces the AFM run phase with a single
     #: self-contained scan script and never reads outer_loop -- nothing splits.
@@ -74,9 +75,6 @@ class PESTipSimulation(AFMSimulation):
                 "from this PES-tip config, or drive the flake with `run afm` / "
                 "`run indent`, whose templates do read it."
             )
-
-    def _get_hpc_job_name(self) -> str:
-        return f"pes_tip_{self.config.sheet.mat}"
 
     def _grid_n(self) -> int:
         pes = getattr(self.config, 'pes', None)
@@ -303,7 +301,3 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
         (period_x, period_y), _ = detect_inplane_repeat(self._hetero_stack.data_path)
         self.sheet_unit_cell = {'xlo': 0.0, 'xhi': period_x,
                                 'ylo': 0.0, 'yhi': period_y}
-
-    def _get_hpc_job_name(self) -> str:
-        """``pes_tip_<pair>`` via :meth:`_material_id`, not sheet 1 alone."""
-        return f"pes_tip_{self._material_id()}"

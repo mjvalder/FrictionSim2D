@@ -164,6 +164,7 @@ class AFMSimulation(SimulationBase):
     """
 
     FAMILY = 'afm'
+    HPC_JOB_PREFIX = 'afm'
 
     #: Run-phase (post-indentation) LAMMPS template. Subclasses swap this to
     #: reuse the identical build + system.in indentation with a different
@@ -322,10 +323,6 @@ class AFMSimulation(SimulationBase):
         if self.config.flake is not None and self.config.flake.mat is not None:
             return f'+flake-{self.config.flake.mat}'
         return ''
-
-    def _get_hpc_job_name(self) -> str:
-        """Get AFM-specific job name."""
-        return f"afm_{self._material_id()}"
 
     # pylint: disable-next=unused-argument
     def _velocity_seed(self, n_layers: int) -> Optional[int]:

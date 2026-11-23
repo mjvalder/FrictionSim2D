@@ -82,6 +82,7 @@ class IndentSimulation(AFMSimulation):
     """
 
     FAMILY = 'indent'
+    HPC_JOB_PREFIX = 'indent'
 
     #: Swap the sliding run for the hold+retract; the build + system.in are reused.
     SLIDE_TEMPLATE = "afm/indent.lmp"
@@ -109,9 +110,6 @@ class IndentSimulation(AFMSimulation):
         #: n_layers -> derived velocity seed (populated during build()).
         self.indent_seeds: Dict[int, int] = {}
 
-
-    def _get_hpc_job_name(self) -> str:
-        return f"indent_{self._material_id()}"
 
     def _velocity_seed(self, n_layers: int) -> int:
         """Fresh, recorded ``velocity create`` seed for this (material, layer)."""
