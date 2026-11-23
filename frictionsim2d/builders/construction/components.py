@@ -2274,7 +2274,6 @@ def build_substrate(
 def apply_langevin_regions(
     component_name: str,
     component_path: Path,
-    config: ComponentConfig,  # pylint: disable=unused-argument  # API; see body
     settings: GlobalSettings,
     component_height: float,
     substrate_thickness: Optional[float] = None
@@ -2292,7 +2291,6 @@ def apply_langevin_regions(
     Args:
         component_name: Name of component ('tip' or 'sub').
         component_path: Path to the component LAMMPS data file.
-        config: Component configuration with potential info.
         settings: Global simulation settings with langevin_boundaries.
         component_height: Height of component (tip_height or substrate thickness).
         substrate_thickness: Required if component_name='sub' to calculate boundaries.

@@ -333,7 +333,6 @@ class AFMSimulation(SimulationBase):
             components.apply_langevin_regions(
                 component_name='tip',
                 component_path=tip_path,
-                config=self.config.tip,
                 settings=self.config.settings,
                 component_height=tip_height
             )
@@ -343,7 +342,6 @@ class AFMSimulation(SimulationBase):
                 components.apply_langevin_regions(
                     component_name='sub',
                     component_path=sub_path,
-                    config=self.config.sub,
                     settings=self.config.settings,
                     component_height=self.config.sub.thickness,
                     substrate_thickness=self.config.sub.thickness
