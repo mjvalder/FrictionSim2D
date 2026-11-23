@@ -1317,6 +1317,14 @@ def _duplicate_lammps_data(
         lmp.close()
 
 
+def _replicate_or_copy(src: Path, dst: Path, nx: int, ny: int, nz: int) -> None:
+    """Replicate ``src`` ``nx x ny x nz`` into ``dst``; a 1x1x1 request is a plain copy."""
+    if nx == 1 and ny == 1 and nz == 1:
+        shutil.copy(src, dst)
+    else:
+        _duplicate_lammps_data(src, dst, nx, ny, nz)
+
+
 def calculate_layer_shifts(
     mat_name: str,
     dims: Dict[str, float],
@@ -1415,10 +1423,7 @@ def create_orthogonal_slab(
 
     duplication = [dup_x, dup_y, dup_z]
 
-    if dup_x == 1 and dup_y == 1 and dup_z == 1:
-        shutil.copy(ortho_cell, output_path)
-    else:
-        _duplicate_lammps_data(ortho_cell, output_path, dup_x, dup_y, dup_z)
+    _replicate_or_copy(ortho_cell, output_path, dup_x, dup_y, dup_z)
 
     ortho_cell.unlink()
 
@@ -1589,10 +1594,7 @@ def build_matched_crystalline_substrate(
 
     # 4) Apply the supercell matrix in-plane + thicken in z (single replicate).
     rep = build_dir / f"{sub_config.mat}_crystal_rep.lmp"
-    if nx == 1 and ny == 1 and dup_z == 1:
-        shutil.copy(prim, rep)
-    else:
-        _duplicate_lammps_data(prim, rep, nx, ny, dup_z)
+    _replicate_or_copy(prim, rep, nx, ny, dup_z)
 
     # 5) Strain the tiled block exactly onto the fixed hetero box (no seam). The
     #    out-of-plane vector and z coordinates are left untouched.
@@ -2488,10 +2490,7 @@ def build_monolayer(
     dup_x = max(1, round(target_x / unit_x))
     dup_y = max(1, round(target_y / unit_y))
 
-    if dup_x == 1 and dup_y == 1:
-        shutil.copy(ortho_cell, base_path)
-    else:
-        _duplicate_lammps_data(ortho_cell, base_path, dup_x, dup_y, 1)
+    _replicate_or_copy(ortho_cell, base_path, dup_x, dup_y, 1)
     ortho_cell.unlink()
 
     shift_atoms_to_z_zero(base_path)

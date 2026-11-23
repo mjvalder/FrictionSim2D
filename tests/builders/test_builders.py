@@ -577,3 +577,14 @@ def test_tmp_path_format_and_uniqueness() -> None:
     assert re.fullmatch(r"MoS2_[0-9a-f]{8}_unit\.lmp", first.name)
     assert re.fullmatch(r"sheet_2_[0-9a-f]{8}\.in\.settings",
                         components._tmp_path("sheet_2", ext=".in.settings").name)
+
+
+def test_replicate_or_copy_replicates_only_above_one(tmp_path: Path) -> None:
+    src = tmp_path / "src.lmp"
+    src.write_text("data")
+    with patch("frictionsim2d.builders.construction.components._duplicate_lammps_data") as dup:
+        components._replicate_or_copy(src, tmp_path / "same.lmp", 1, 1, 1)
+        dup.assert_not_called()
+        assert (tmp_path / "same.lmp").read_text() == "data"
+        components._replicate_or_copy(src, tmp_path / "big.lmp", 1, 2, 1)
+        dup.assert_called_once_with(src, tmp_path / "big.lmp", 1, 2, 1)
