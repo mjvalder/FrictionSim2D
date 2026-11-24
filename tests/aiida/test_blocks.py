@@ -9,13 +9,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from frictionsim2d.aiida.blocks import (
-    BLOCK_KINDS, EXCLUDED, FIELD_MAP, PROVENANCE_EXCLUDED, PROVENANCE_MAP,
-    PROVENANCE_SOURCED, SWEPT, UNRESOLVED, RunBlocks, assigned, block_hash,
-    block_kind, leaf_field_paths, split_blocks, upgrade_block,
-)
 from frictionsim2d.aiida import block_schema
-from frictionsim2d.aiida.block_schema import defaults_for
+from frictionsim2d.aiida.block_schema import (
+    BLOCK_KINDS, EXCLUDED, FIELD_MAP, PROVENANCE_EXCLUDED, PROVENANCE_MAP,
+    PROVENANCE_SOURCED, SWEPT, RunBlocks, defaults_for, leaf_field_paths,
+)
+from frictionsim2d.aiida.blocks import (
+    UNRESOLVED, block_hash, block_kind, split_blocks, upgrade_block,
+)
 from frictionsim2d.core.config import (
     AFMSimulationConfig, GlobalSettings, SheetOnSheetSimulationConfig,
 )
@@ -24,6 +25,11 @@ from frictionsim2d.data.provenance import (
 )
 
 TOP_LEVEL_MODELS = (AFMSimulationConfig, SheetOnSheetSimulationConfig)
+
+
+def assigned(path):
+    """Is the field at ``path`` assigned a block, a swept axis, or provenance?"""
+    return path in FIELD_MAP or path in PROVENANCE_SOURCED or path in SWEPT
 
 
 def _files(tmp_path):

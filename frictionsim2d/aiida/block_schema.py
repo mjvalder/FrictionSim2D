@@ -1,8 +1,7 @@
 """The block schema: which block each field belongs to, its unit and its default.
 
-This is the declarative half of the parameter blocks (spec §5.2, plan
-*Revision 2026-11-16*); :mod:`frictionsim2d.aiida.blocks` is the half that splits a
-run with it, and re-exports the names defined here.
+This is the declarative half of the parameter blocks;
+:mod:`frictionsim2d.aiida.blocks` is the half that splits a run with it.
 
 - :data:`FIELD_MAP` assigns every requested leaf of ``AFMSimulationConfig``,
   ``SheetOnSheetSimulationConfig`` and ``GlobalSettings`` (as ``settings.<...>``)
@@ -30,6 +29,7 @@ from typing import (Any, Dict, Iterator, List, Literal, Mapping, Optional, Tuple
 import numpy as np
 from pydantic import BaseModel
 
+from ..core.compare import unindexed
 from ..core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
 from ..data.models import NM_TO_EV_A2
 from ..data.provenance import BuiltGeometry, ProvenanceRecord
@@ -88,7 +88,7 @@ _COMPONENT_FROM_PROVENANCE = _fields(_POTENTIAL, 'pot_type', 'pot_path')
 _SHEET = {
     **_COMPONENT,
     **_fields(_GEOMETRY, 'x', 'y', 'layers', 'stack_type', 'lat_c'),
-    # A Gaussian strength in meV: interaction, not geometry (reverses P2-R3).
+    # A Gaussian strength in meV: interaction, not geometry.
     'interlayer_g': _INTERACTION,
     # MLIP sheets: dispersion = d3 overlays a D3 term on the model.
     'dispersion': _INTERACTION,
@@ -183,7 +183,7 @@ FIELD_MAP: Dict[str, str] = {
 }
 
 #: Swept axes -> the point attribute they become. Assigned, never block
-#: content: a load sweep must not put each campaign on its own block (C1a).
+#: content: a load sweep must not put each campaign on its own block.
 SWEPT: Dict[str, str] = {
     'general.force': 'load', 'general.pressure': 'load',
     'general.scan_angle': 'angle', 'general.scan_speed': 'speed',
@@ -255,7 +255,7 @@ _INTEGRITY = ('hole_bonds', 'isolated_radius_bonds', 'isolated_atoms',
 #: ``friction2d_run_uuid``) and on its points, never in a block, or every run
 #: would get blocks of its own. ``materials.role`` is the block
 #: name's role, not its content; ``pot_path``/``pot_resolution_route`` say
-#: where and how the file was found, ``pot_file_sha256`` what it is (M6).
+#: where and how the file was found, ``pot_file_sha256`` what it is.
 PROVENANCE_EXCLUDED = frozenset((
     'schema_version', 'run_uuid', 'run_uuid_stamped_at', 'family', 'model',
     'run_role', 'git_commit', 'git_dirty', 'config_hash', 'materials.role', 'materials.pot_path',
@@ -486,7 +486,7 @@ SUMMARY_UNITS: Dict[str, Dict[str, str]] = {
 
 
 #: The observable registry's unit spelling -> this module's. Two spellings
-#: of one unit, kept apart on purpose (controller ruling P2-R14):
+#: of one unit, kept apart on purpose:
 #: ``core.observables`` units are part of the ``output_full`` export
 #: contract that external tools read (changing them needs an EXPORT_SCHEMA
 #: bump), and these are hashed into stored schema nodes. Every other unit is
@@ -561,11 +561,6 @@ ANNOTATIONS: Dict[str, Any] = {
     **{p: i.annotation for p, i in _leaves(SheetOnSheetSimulationConfig)},
     **{p: i.annotation for p, i in _leaves(AFMSimulationConfig)},
 }
-
-
-def unindexed(path: str) -> str:
-    """``sheets.0.x`` -> ``sheets.x``: the :data:`FIELD_MAP` path of a content path."""
-    return '.'.join(part for part in path.split('.') if not part.isdigit())
 
 
 def _types(annotation: Any) -> set:

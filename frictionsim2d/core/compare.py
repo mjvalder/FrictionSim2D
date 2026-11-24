@@ -92,7 +92,7 @@ class CompareReport:
         return '\n'.join(lines)
 
 
-def _unindexed(path: str) -> str:
+def unindexed(path: str) -> str:
     """``sheets.0.x`` -> ``sheets.x``, the schema path of a content path."""
     return '.'.join(part for part in path.split('.') if not part.isdigit())
 
@@ -190,7 +190,7 @@ def _visible(name: str, fields: Iterable[Mapping[str, Any]],
     of the block's kind some side carries a default for (so two different
     defaults, each elided, are seen)."""
     paths = {p for f in fields for p in f}
-    written = {_unindexed(p) for p in paths}
+    written = {unindexed(p) for p in paths}
     kind = name.partition('__')[0]
     for table in defaults:
         for path in table:
@@ -211,7 +211,7 @@ def refill(name: str, fields: Mapping[str, Any], defaults: Mapping[str, Any],
     out = dict(_fields(fields))
     for path in _visible(name, (out,), (defaults,), kinds):
         if path not in out:
-            out[path] = defaults.get(_unindexed(path))
+            out[path] = defaults.get(unindexed(path))
     return out
 
 
@@ -252,7 +252,7 @@ def compare_blocks(a: Mapping[str, dict], b: Mapping[str, dict], *,
         diffs: List[Diff] = []
         mismatched: List[Tuple[str, str, str]] = []
         for path in _visible(name, (fa, fb), (defaults, defaults_b), kinds):
-            sp = _unindexed(path)
+            sp = unindexed(path)
             ua, ub = units.get(sp) or '', units_b.get(sp) or ''
             if ua != ub:
                 mismatched.append((path, ua, ub))
@@ -302,7 +302,7 @@ def merge_varying(members: Iterable[Tuple[Mapping[str, dict], Mapping[str, Any],
         have = [(blocks[name], table) for blocks, _, table in listed if name in blocks]
         out: Dict[str, Any] = {}
         for path in _visible(name, [f for f, _ in have], [t for _, t in have], kinds):
-            sp = _unindexed(path)
+            sp = unindexed(path)
             values = [f[path] if path in f else t.get(sp) for f, t in have]
             out[path] = (values[0] if all(same_value(v, values[0]) for v in values)
                          else VARIES)

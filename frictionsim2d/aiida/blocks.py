@@ -1,4 +1,4 @@
-"""Canonical parameter blocks of one run (spec §5.2, plan *Revision 2026-11-16*).
+"""Canonical parameter blocks of one run.
 
 A run's ``config.json``, ``settings.yaml`` and ``provenance.json`` are split
 into named blocks: one ``material`` and one ``potential`` block per entry of
@@ -9,7 +9,7 @@ into named blocks: one ``material`` and one ``potential`` block per entry of
 to the same node.
 
 A block holds **requested** values only, so that "which runs differ only in X"
-has an answer (critique C1):
+has an answer:
 
 - the swept axes (:data:`SWEPT`: load, angle, speed) are point attributes, not
   block content, and the deck shape (``outer_loop``) is not identity;
@@ -20,7 +20,7 @@ has an answer (critique C1):
   family model's default is elided, so an absent field and its default hash
   alike and a field added later changes no existing hash;
 - ``kind`` and ``block_schema`` sit inside the content, so the hash is
-  recomputable from the stored attributes alone (C2). A block of an older
+  recomputable from the stored attributes alone. A block of an older
   schema version is brought to the current one by :func:`upgrade_block`
   (old defaults refilled, then elided against the current ones).
 
@@ -32,8 +32,8 @@ reads it. A field the builder may ignore still enters identity by design --
 re-implementing every builder's branches here, and getting one wrong would
 merge different physics; a spurious split is the safe failure.
 
-The field table, units and defaults live in :mod:`frictionsim2d.aiida.block_schema`;
-the names are re-exported here. Files enter a block by sha256, never by path.
+The field table, units and defaults live in :mod:`frictionsim2d.aiida.block_schema`.
+Files enter a block by sha256, never by path.
 
 Keep this module free of aiida imports: it runs in the fast suite without it.
 """
@@ -51,18 +51,13 @@ from ..data.provenance import MATERIAL_ROLES, sha256_file
 from ..run.tree import provenance_dir_for
 from . import block_schema as _schema
 from .block_schema import (
-    ANNOTATIONS, BLOCK_KINDS, BLOCK_SCHEMA_VERSION, DERIVED_PATHS, EXCLUDED,
-    FIELD_MAP, INTERLAYER_DERIVED, PROVENANCE_EXCLUDED,
-    PROVENANCE_MAP, PROVENANCE_SOURCED, REALIZATION_FIELDS, SWEPT, RunBlocks,
-    coerce, defaults_for, is_sweep_union, leaf_field_paths, unindexed, version_key,
+    ANNOTATIONS, BLOCK_KINDS, DERIVED_PATHS, FIELD_MAP, INTERLAYER_DERIVED,
+    REALIZATION_FIELDS, RunBlocks, coerce, defaults_for, is_sweep_union, unindexed,
+    version_key,
 )
 
-__all__ = [
-    'BLOCK_KINDS', 'BLOCK_SCHEMA_VERSION', 'EXCLUDED', 'FIELD_MAP', 'NAME_SEP',
-    'PROVENANCE_EXCLUDED', 'PROVENANCE_MAP', 'PROVENANCE_SOURCED', 'SWEPT',
-    'UNRESOLVED', 'RunBlocks', 'assigned', 'block_hash', 'block_kind',
-    'leaf_field_paths', 'split_blocks', 'upgrade_block',
-]
+__all__ = ['NAME_SEP', 'UNRESOLVED', 'block_hash', 'block_kind', 'split_blocks',
+           'upgrade_block']
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +82,6 @@ _PROVENANCE_SUBDIR = {'cif_path': 'cif', 'interlayer_file': 'potentials'}
 
 #: The content key of the interlayer file in the ``interaction`` block.
 _INTERLAYER_KEY = 'general.interlayer_file_sha256'
-
-
-def assigned(path: str) -> bool:
-    """Is the field at ``path`` assigned (a block, a swept axis, or provenance-sourced)?"""
-    return path in FIELD_MAP or path in PROVENANCE_SOURCED or path in SWEPT
 
 
 # --- hashing --------------------------------------------------------------------
@@ -334,7 +324,7 @@ def _material_block(entry: Mapping[str, Any], component: Optional[Mapping[str, A
 
 
 def _potential_block(entry: Mapping[str, Any]) -> Dict[str, Any]:
-    """The material's potential: its type and its file's sha256 (M6)."""
+    """The material's potential: its type and its file's sha256."""
     return _canonical(_POTENTIAL, _without_none({
         'pot_type': entry.get('pot_type'),
         'pot_file_sha256': entry.get('pot_file_sha256'),

@@ -143,20 +143,29 @@ def _snapshot_drift(current_version, current, golden):
         return (f"BLOCK_SCHEMA_VERSION is {current_version} but "
                 f"{SNAPSHOT.name} was taken at {golden['block_schema']}: "
                 "regenerate the snapshot for the new version.")
-    lines = []
+    changed, added = [], []
     for family in sorted(set(current) | set(golden['families'])):
         now, then = current.get(family, {}), golden['families'].get(family, {})
         for path in sorted(set(now) | set(then)):
-            if now.get(path, '<absent>') != then.get(path, '<absent>'):
-                lines.append(f"  {family}: {path}: {then.get(path, '<absent>')!r} -> "
-                             f"{now.get(path, '<absent>')!r}")
-    if not lines:
+            if now.get(path, '<absent>') == then.get(path, '<absent>'):
+                continue
+            line = (f"  {family}: {path}: {then.get(path, '<absent>')!r} -> "
+                    f"{now.get(path, '<absent>')!r}")
+            (added if path not in then else changed).append(line)
+    if not changed and not added:
         return None
-    return ("A model default changed without a schema bump, so default elision would "
-            "now hash different physics alike:\n" + "\n".join(lines) + "\n"
-            "Bump BLOCK_SCHEMA_VERSION, record each old value in "
-            "LEGACY_DEFAULTS[<old version>], then regenerate "
-            f"tests/fixtures/{SNAPSHOT.name}.")
+    text = ''
+    if changed:
+        text += ("A model default changed or was removed without a schema bump, so default "
+                 "elision would now hash different physics alike:\n" + "\n".join(changed)
+                 + "\nBump BLOCK_SCHEMA_VERSION, record each old value in "
+                 "LEGACY_DEFAULTS[<old version>], then regenerate the snapshot.\n")
+    if added:
+        text += ("A model field was added (an elided default changes no existing hash, so no "
+                 "bump is needed):\n" + "\n".join(added) + "\n")
+    return text + (f"Regenerate tests/fixtures/{SNAPSHOT.name}: "
+                   "{'block_schema': VERSION, 'families': {family: defaults_for(family)}} "
+                   "as json.dumps(indent=1, sort_keys=True) plus a newline.")
 
 
 def _current_defaults():
@@ -177,6 +186,17 @@ def test_snapshot_drift_names_the_fix():
     assert 'afm: settings.simulation.timestep: 0.001 -> 0.002' in drift
     assert 'Bump BLOCK_SCHEMA_VERSION' in drift and 'LEGACY_DEFAULTS' in drift
     assert 'regenerate' in _snapshot_drift('9.9.9', _current_defaults(), golden)
+
+
+def test_snapshot_drift_tells_an_added_field_from_a_changed_default():
+    golden = {'block_schema': BLOCK_SCHEMA_VERSION,
+              'families': {'afm': {'a': 1, 'b': 2}}}
+    added = _snapshot_drift(BLOCK_SCHEMA_VERSION, {'afm': {'a': 1, 'b': 2, 'c': 3}}, golden)
+    assert "afm: c: '<absent>' -> 3" in added and 'no bump is needed' in added
+    assert 'Bump' not in added
+    changed = _snapshot_drift(BLOCK_SCHEMA_VERSION, {'afm': {'a': 9, 'b': 2}}, golden)
+    assert 'afm: a: 1 -> 9' in changed and 'Bump BLOCK_SCHEMA_VERSION' in changed
+    assert _snapshot_drift(BLOCK_SCHEMA_VERSION, golden['families'], golden) is None
 
 
 def test_defaults_are_environment_free():

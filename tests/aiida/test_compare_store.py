@@ -144,3 +144,25 @@ def test_array_and_combined_decks_of_one_physics_do_not_differ(computer, tmp_pat
     report = _diff(load_blocks('c'), load_blocks('arr'))
     assert report.same, report.render()
     assert VARIES not in str(load_blocks('arr').blocks)
+
+
+# --- merging and sidecar schema selection (no store needed) --------------------
+
+def test_merge_refuses_blocks_stored_in_different_units():
+    from frictionsim2d.aiida.compare import LoadedBlocks, _merge
+
+    a = LoadedBlocks({'drive': {'x': 1.0}}, {}, {'drive.x': 'nm'}, {}, {'drive.x': 'drive'})
+    b = LoadedBlocks({'drive': {'x': 1.0}}, {}, {'drive.x': 'angstrom'}, {}, {'drive.x': 'drive'})
+    with pytest.raises(ValueError, match='different units for drive.x'):
+        _merge([a, b])
+
+
+def test_a_sidecar_is_read_against_its_own_schema_else_the_newest(tmp_path):
+    from frictionsim2d.aiida.compare import _schema_for
+
+    for version in ('1.0.0', '1.10.0', '1.2.0'):
+        (tmp_path / f'schema-{version}.json').write_text('{}', encoding='utf-8')
+
+    assert _schema_for(tmp_path, ['1.2.0']).name == 'schema-1.2.0.json'
+    assert _schema_for(tmp_path, ['9.9.9']).name == 'schema-1.10.0.json'   # newest, by version
+    assert _schema_for(tmp_path / 'nowhere', ['1.0.0']) is None
