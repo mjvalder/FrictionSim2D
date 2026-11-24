@@ -55,14 +55,26 @@ def _run_cli(tmp_path: Path, root: Path, settings: GlobalSettings, scheduler: st
 
 @pytest.mark.parametrize("scheduler, variable", [("pbs", "$PBS_O_WORKDIR"),
                                                  ("slurm", "$SLURM_SUBMIT_DIR")])
-def test_cli_base_dir_is_the_submit_directory_even_with_hpc_home(
+def test_cli_base_dir_is_hpc_home_then_the_submit_directory(
         tmp_path, base_dirs, scheduler, variable):
     root = _tree(tmp_path)
 
-    result = _run_cli(tmp_path, root, _settings(hpc_home=HPC_HOME), scheduler)
+    with_home = _run_cli(tmp_path, root, _settings(hpc_home=HPC_HOME), scheduler)
+    without = _run_cli(tmp_path, root, _settings(), scheduler)
 
-    assert result.exit_code == 0, result.output
-    assert base_dirs == [variable]
+    assert with_home.exit_code == 0, with_home.output
+    assert without.exit_code == 0, without.output
+    assert base_dirs == [f"{HPC_HOME}/sim_root", variable]
+
+
+def test_cli_scripts_point_at_hpc_home(tmp_path):
+    root = _tree(tmp_path)
+
+    assert _run_cli(tmp_path, root, _settings(hpc_home=HPC_HOME), "pbs").exit_code == 0
+
+    script = (root / "hpc" / "run.pbs").read_text(encoding="utf-8")
+    assert f"{HPC_HOME}/logs" in script
+    assert "$PBS_O_WORKDIR/logs" not in script
 
 
 @pytest.mark.parametrize("scheduler, variable", [("pbs", "$PBS_O_WORKDIR"),

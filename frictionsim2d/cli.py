@@ -394,7 +394,7 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     Example:
         FrictionSim2D hpc generate ./afm_output --scheduler pbs
     """
-    from .hpc.scripts import HPCConfig, scheduler_base_dir
+    from .hpc.scripts import HPCConfig
 
     sim_dir = Path(simulation_dir)
     out_dir = Path(output_dir) if output_dir else sim_dir / 'hpc'
@@ -424,7 +424,7 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     preflight = preflight or hpc_config.preflight
     result = generate_scripts_for_tree(
         sim_dir, hpc_config, out_dir, simulation_paths,
-        scheduler_base_dir(scheduler), preflight=preflight,
+        hpc_config.base_dir(sim_dir.name), preflight=preflight,
     )
 
     if isinstance(result, dict):
