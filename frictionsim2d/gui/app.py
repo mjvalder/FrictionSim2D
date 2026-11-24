@@ -51,7 +51,7 @@ from .controllers.settings_document import SettingsDocument
 from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
-from .schema.simulation_types import FAMILIES, MODES, family_for_model
+from .schema.simulation_types import FAMILIES, MODES
 from .widgets.database.detail import format_bytes
 from .widgets.database.pane import DatabasePane, render_checks
 from .widgets.form import ConfigForm
@@ -60,10 +60,6 @@ from .workspace import RecentWorkspaces, Workspace
 logger = logging.getLogger(__name__)
 
 APP_NAME = 'FrictionSim2D'
-
-#: What the Database pane remembers between sessions (D10). Workspace state
-#: is a plain key/value store, so this is the whole schema.
-DB_STATE_KEYS = ('db_source', 'db_filters', 'db_dest')
 
 #: Workspace state key for the Assistant dock: {'open': bool, 'width': int}.
 ASSISTANT_STATE_KEY = 'assistant'
@@ -1080,10 +1076,6 @@ class MainWindow(QMainWindow):
         they are applied: `self.workspace.state` is the dict that method
         writes, so a write in between would clobber the new workspace's saved
         filters with the old workspace's still-on-screen ones.
-
-        The remembered `db_source` is not read back: the pane has one source,
-        the local store, so a workspace that remembers the removed 'central'
-        one opens on the local store like every other.
         """
         state = self.workspace.state
         filters = state.get('db_filters')
@@ -1100,7 +1092,6 @@ class MainWindow(QMainWindow):
     def _remember_database_state(self) -> None:
         if self._restoring_db_state:
             return
-        self.workspace.remember('db_source', self.database_pane.source)
         self.workspace.remember('db_filters', self.database_pane.filters.value())
 
     def _on_db_query(self, source: str, filters: dict) -> None:
@@ -1138,6 +1129,11 @@ class MainWindow(QMainWindow):
         self.database_pane.set_busy(False)
         self.database_pane.message(f"{kind}: {message}", 'error')
 
+    def _db_report(self, lines: List[str], warnings: List[str]) -> None:
+        """Show ``lines`` plus one note per warning; warn level if any."""
+        lines = lines + [f"note: {w}" for w in warnings]
+        self.database_pane.message('\n'.join(lines), 'warn' if warnings else 'info')
+
     def _on_db_finished(self, kind: str, result: object) -> None:
         self.database_pane.set_busy(False)
         if not isinstance(result, dict):
@@ -1161,21 +1157,14 @@ class MainWindow(QMainWindow):
                 # fetched by, not to what just happened -- without saying so,
                 # a replay of a week-old answer reads as a fresh one.
                 lines[0] += ' (cached — Refresh to re-query)'
-            warnings = result.get('warnings') or []
-            lines += [f"note: {w}" for w in warnings]
-            self.database_pane.message('\n'.join(lines),
-                                       'warn' if warnings else 'info')
+            self._db_report(lines, result.get('warnings') or [])
         elif kind == 'detail':
             self.database_pane.show_detail(result)
         elif kind == 'export':
             written = result.get('files') or []
-            warnings = result.get('warnings') or []
-            lines = [f"Wrote {plural(len(written), 'file')} "
-                     f"({format_bytes(int(result.get('bytes') or 0))}) "
-                     f"to {result.get('dest')}"]
-            lines += [f"note: {w}" for w in warnings]
-            self.database_pane.message('\n'.join(lines),
-                                       'warn' if warnings else 'info')
+            self._db_report([f"Wrote {plural(len(written), 'file')} "
+                             f"({format_bytes(int(result.get('bytes') or 0))}) "
+                             f"to {result.get('dest')}"], result.get('warnings') or [])
         elif kind == 'import':
             lines = [result.get('report', '')]
             failures = [': '.join(str(part) for part in f)
@@ -1537,13 +1526,14 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------------- events
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        """Ask before discarding an edited config or settings document.
+    def _accept_close(self, event: QCloseEvent) -> None:
+        self.quench_run.cancel()
+        self.database.cancel()
+        self._shutdown_assistant()
+        event.accept()
 
-        A quit that silently threw away unsaved work used to be the only
-        behaviour on offer; this puts the same Save/Discard/Cancel choice in
-        front of the user that closing an editor normally would.
-        """
+    def closeEvent(self, event: QCloseEvent) -> None:  # pylint: disable=invalid-name
+        """Ask Save/Discard/Cancel before closing with unsaved config or settings."""
         if self.quench_run.running:
             stop = QMessageBox.question(
                 self, 'Quench run in progress',
@@ -1557,10 +1547,7 @@ class MainWindow(QMainWindow):
         config_dirty = self.document.dirty
         settings_dirty = self.settings_document.dirty
         if not (config_dirty or settings_dirty):
-            self.quench_run.cancel()
-            self.database.cancel()
-            self._shutdown_assistant()
-            event.accept()
+            self._accept_close(event)
             return
 
         if config_dirty and settings_dirty:
@@ -1580,10 +1567,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if choice == QMessageBox.Discard:
-            self.quench_run.cancel()
-            self.database.cancel()
-            self._shutdown_assistant()
-            event.accept()
+            self._accept_close(event)
             return
 
         # Save: route through whichever document(s) are actually dirty. Each
@@ -1597,10 +1581,7 @@ class MainWindow(QMainWindow):
         if self.document.dirty or self.settings_document.dirty:
             event.ignore()
             return
-        self.quench_run.cancel()
-        self.database.cancel()
-        self._shutdown_assistant()
-        event.accept()
+        self._accept_close(event)
 
     def _on_family_changed(self) -> None:
         self._populate_modes()
@@ -1659,18 +1640,8 @@ class MainWindow(QMainWindow):
             self.mode_box.blockSignals(False)
 
     def _on_commit_refused(self, message: str) -> None:
-        """Show a refused commit without blocking on it.
-
-        Deliberately not a dialog: this arrives from `_on_field_changed`,
-        which fires on ordinary field edits, so a modal would interrupt typing
-        -- and, with no one to dismiss it in an automated run, would hang
-        rather than fail.
-
-        The status bar is enough *here* only because nothing has been written
-        or launched yet. The moment an action would persist something, the
-        refusal has to stop it and be said somewhere that survives -- see
-        `_record_refusals`.
-        """
+        """Status bar, never a modal: this fires on every field edit. A refusal
+        that would stop a write is reported by `_record_refusals` instead."""
         logger.warning("commit refused: %s", message)
         self.statusBar().showMessage(message)
 

@@ -13,6 +13,7 @@ import pytest
 
 from frictionsim2d.core.config import parse_config
 from frictionsim2d.gui.controllers.document import ConfigDocument, DocumentError
+from tests.helpers.config_issues import issues_for
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -344,7 +345,7 @@ class TestSecondMaterialValidation:
         document = ConfigDocument.blank('sheetonsheet')
         document.add_second_material()
         result = document.validate()
-        assert result.issues_for('2D-2', 'cif_path'), result.render()
+        assert issues_for(result, '2D-2', 'cif_path'), result.render()
 
     def test_the_first_sheet_is_not_reported_twice(self, monkeypatch):
         """The model mirrors [2D-1] onto its `2D` field as well as into
@@ -352,7 +353,7 @@ class TestSecondMaterialValidation:
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.blank('sheetonsheet')
         document.add_second_material()
-        issues = document.validate().issues_for('2D', 'cif_path')
+        issues = issues_for(document.validate(), '2D', 'cif_path')
         assert len(issues) == 1, [i.render() for i in issues]
 
     def test_a_pair_sweep_validates_with_only_pending_templates(self, monkeypatch):
@@ -396,7 +397,7 @@ class TestSweepProbe:
         document = self._afm_sweep(tmp_path, ['h-MoS2', 'h-WS2'], complete=False)
         result = document.validate()
         assert not result.ok
-        assert result.issues_for('tip', 'mat'), result.render()
+        assert issues_for(result, 'tip', 'mat'), result.render()
         assert {i.section for i in result.issues} >= {'tip', 'sub'}
 
     def test_a_complete_sweep_is_ok_with_its_templates_pending(self, monkeypatch, tmp_path):
@@ -432,9 +433,9 @@ class TestSweepProbe:
         document.set('2D', 'materials_list', str(pairs))
         result = document.validate()
         assert not result.ok
-        flagged = result.issues_for('2D-2', 'cif_path')
+        flagged = issues_for(result, '2D-2', 'cif_path')
         assert flagged and 'no-such-mat' in flagged[0].message, result.render()
-        assert not result.issues_for('2D', 'cif_path'), result.render()
+        assert not issues_for(result, '2D', 'cif_path'), result.render()
 
     def test_a_single_sweep_skips_a_missing_first_material(self, monkeypatch, tmp_path):
         monkeypatch.chdir(REPO_ROOT)
@@ -447,7 +448,7 @@ class TestSweepProbe:
         document = self._afm_sweep(tmp_path, ['no-such-mat', 'nor-this'], complete=True)
         result = document.validate()
         assert not result.ok
-        flagged = result.issues_for('2D', 'cif_path')
+        flagged = issues_for(result, '2D', 'cif_path')
         assert flagged and 'no-such-mat' in flagged[0].message, result.render()
 
     def test_an_empty_list_validates_as_before(self, monkeypatch, tmp_path):
@@ -1026,7 +1027,7 @@ class TestValidation:
         document.set('tip', 'pot_path', 'nope.sw')
         result = document.validate()
         assert not result.ok
-        assert result.issues_for('tip', 'pot_path')
+        assert issues_for(result, 'tip', 'pot_path')
 
     def test_a_bad_type_is_reported_on_its_field(self, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
@@ -1034,7 +1035,7 @@ class TestValidation:
         document.set('tip', 'r', 'enormous')
         result = document.validate()
         assert not result.ok
-        assert result.issues_for('tip', 'r')
+        assert issues_for(result, 'tip', 'r')
 
 
 class TestAngleSplitWithAForceGate:
@@ -1057,7 +1058,7 @@ class TestAngleSplitWithAForceGate:
         result = self._document('afm_flake_config.ini', 'afm').validate()
 
         assert not result.ok
-        issues = result.issues_for('general', 'outer_loop')
+        issues = issues_for(result, 'general', 'outer_loop')
         assert issues and 'scan_angle_force' in issues[0].message
 
     def test_silent_where_the_builder_never_splits(self, monkeypatch):
@@ -1368,7 +1369,7 @@ class TestInterlayerValidation:
         document = self._sheet(monkeypatch, interlayer_style='kc')
         result = document.validate()
         assert not result.ok
-        assert result.issues_for('general', 'interlayer_file')
+        assert issues_for(result, 'general', 'interlayer_file')
         # The model's unlocated copy of the same rule is not repeated.
         assert not [i for i in result.issues
                     if i.section is None and 'interlayer_file' in i.message]
@@ -1376,21 +1377,21 @@ class TestInterlayerValidation:
     def test_kc_with_a_file_is_not_blocked_on_it(self, monkeypatch):
         document = self._sheet(monkeypatch, interlayer_style='kc',
                                interlayer_file='CC.KC-full')
-        assert not document.validate().issues_for('general', 'interlayer_file')
+        assert not issues_for(document.validate(), 'general', 'interlayer_file')
 
     def test_ilp_mos2_has_a_default_file(self, monkeypatch):
         document = self._sheet(monkeypatch, interlayer_style='ilp')
-        assert not document.validate().issues_for('general', 'interlayer_file')
+        assert not issues_for(document.validate(), 'general', 'interlayer_file')
 
     def test_ljg_without_g_blocks_on_the_sheet(self, monkeypatch):
         document = self._sheet(monkeypatch, interlayer_style='lj_g')
         document.values['2D']['mat'] = 'h-WTe2'
         result = document.validate()
-        assert result.issues_for('2D', 'interlayer_g')
+        assert issues_for(result, '2D', 'interlayer_g')
 
     def test_ljg_mos2_uses_the_table(self, monkeypatch):
         document = self._sheet(monkeypatch, interlayer_style='lj_g')
-        assert not document.validate().issues_for('2D', 'interlayer_g')
+        assert not issues_for(document.validate(), '2D', 'interlayer_g')
 
     def test_a_style_sweep_validates_member_by_member(self, monkeypatch, mock_settings):
         """`interlayer_style = [lj, lj_g, ilp]` is a sweep, not a bad value."""
@@ -1405,5 +1406,5 @@ class TestInterlayerValidation:
     def test_a_style_sweep_member_that_cannot_build_still_blocks(self, monkeypatch):
         document = self._sheet(monkeypatch, interlayer_style=['lj', 'kc'])
         result = document.validate()
-        assert result.issues_for('general', 'interlayer_file')
-        assert not result.issues_for('general', 'interlayer_style')
+        assert issues_for(result, 'general', 'interlayer_file')
+        assert not issues_for(result, 'general', 'interlayer_style')

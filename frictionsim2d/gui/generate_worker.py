@@ -7,6 +7,7 @@ the ``run quench --for`` command, and a quench config only has its decks written
 
 Protocol: :mod:`.worker_common`.
 """
+# pylint: disable=import-outside-toplevel  # the build stack loads only once a request is read
 
 from __future__ import annotations
 

@@ -28,6 +28,7 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple, Type, Union, get_args, get_origin
 
 from pydantic import BaseModel
+from pydantic_core import PydanticUndefined
 
 __all__ = [
     'FieldKind', 'FieldSpec', 'SectionSpec',
@@ -59,6 +60,9 @@ class FieldKind(enum.Enum):
     UNKNOWN = 'unknown'
 
 
+_NoneType = type(None)
+
+
 @dataclass(frozen=True)
 class FieldSpec:
     """One editable field."""
@@ -71,12 +75,7 @@ class FieldSpec:
     doc: str = ''
     choices: Tuple[Any, ...] = ()
     item_kind: Optional[FieldKind] = None
-    constraints: Dict[str, Any] = field(default_factory=dict)
     annotation: Any = None
-
-    @property
-    def is_pathlike(self) -> bool:
-        return self.kind is FieldKind.PATH
 
 
 @dataclass
@@ -97,7 +96,7 @@ class SectionSpec:
 def _unwrap_optional(annotation: Any) -> Tuple[Any, bool]:
     """Strip ``Optional`` and report whether it was there."""
     if get_origin(annotation) is Union:
-        args = [a for a in get_args(annotation) if a is not type(None)]
+        args = [a for a in get_args(annotation) if a is not _NoneType]
         if len(args) < len(get_args(annotation)):
             return (args[0] if len(args) == 1 else Union[tuple(args)]), True
     return annotation, False
@@ -162,20 +161,7 @@ def _classify(annotation: Any, name: str) -> Tuple[FieldKind, Tuple[Any, ...], O
     return _scalar_kind(annotation, name), (), None
 
 
-def _constraints(info: Any) -> Dict[str, Any]:
-    """Numeric and length bounds declared on a field."""
-    out: Dict[str, Any] = {}
-    for meta in getattr(info, 'metadata', ()) or ():
-        for attribute in ('ge', 'gt', 'le', 'lt', 'min_length', 'max_length'):
-            value = getattr(meta, attribute, None)
-            if value is not None:
-                out[attribute] = value
-    return out
-
-
 def _default_of(info: Any) -> Any:
-    from pydantic_core import PydanticUndefined  # noqa: PLC0415
-
     if info.default is not PydanticUndefined:
         return info.default
     if info.default_factory is not None:
@@ -205,7 +191,6 @@ def describe_section(model: Type[BaseModel], name: str, key: str,
             doc=(info.description or '').strip(),
             choices=choices,
             item_kind=item_kind,
-            constraints=_constraints(info),
             annotation=info.annotation,
         ))
 

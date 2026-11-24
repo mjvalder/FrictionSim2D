@@ -9,6 +9,7 @@ element or by component, per-component visibility (sheets are what most often
 generate wrongly, and you cannot see one through a substrate), and a warning
 when a component meets a periodic boundary.
 """
+# pylint: disable=import-outside-toplevel  # ovito is imported lazily: importing frictionsim2d.gui must not load it
 
 from __future__ import annotations
 

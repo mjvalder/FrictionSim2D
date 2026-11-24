@@ -108,6 +108,26 @@ packages = ["frictionsim2d"]
 [tool.hatch.build.targets.sdist]
 include = ["frictionsim2d/**"]
 
+[tool.pylint.main]
+# PySide6 is a compiled extension: without this every Qt import is a false
+# no-name-in-module. ovito's lazily loaded submodules defeat inference the
+# same way, so its members are not checked.
+extension-pkg-allow-list = ["PySide6"]
+ignored-modules = ["ovito"]
+
+[tool.pylint.classes]
+# gui.app.MainWindow builds its widgets in the _build_* helpers __init__ calls.
+defining-attr-methods = [
+    "__init__", "__new__", "setUp", "asyncSetUp", "__post_init__",
+    "_build_ui", "_build_builder_tab", "_build_database_tab", "_build_plots_tab",
+    "_build_header", "_build_left", "_build_settings_tab", "_build_right",
+    "_build_actions",
+]
+
+[tool.pylint.typecheck]
+# Qt signals are bound at runtime; astroid sees the unbound descriptor.
+generated-members = ["connect", "emit", "disconnect"]
+
 [tool.pylint.messages_control]
 # Gate command (codebase review; extended by the AiiDA data rework, Task 35,
 # 2026-09-22): pylint frictionsim2d/cli.py frictionsim2d/__init__.py frictionsim2d/core frictionsim2d/run

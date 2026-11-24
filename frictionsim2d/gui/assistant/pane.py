@@ -293,7 +293,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.stop_button = QPushButton('Stop', self)
         self.retry_button = QPushButton('Retry', self)
         self.new_button = QPushButton('New chat', self)
-        self.send_button.clicked.connect(lambda: self.send())
+        # `clicked` passes `checked`; `send`'s first parameter is the text.
+        self.send_button.clicked.connect(lambda _checked=False: self.send())
         self.stop_button.clicked.connect(self.stop)
         self.retry_button.clicked.connect(lambda: self.send(self._last_text))
         self.new_button.clicked.connect(self.new_chat)

@@ -692,14 +692,14 @@ class TestConnectionCheck:
 class TestWorkspaceMemory:
     """Nothing new on disk: the workspace's existing key/value state."""
 
-    def test_a_query_records_the_source_and_the_filters(self, window, monkeypatch):
+    def test_a_query_records_the_filters_not_the_source(self, window, monkeypatch):
         monkeypatch.setattr(window.database, 'start', lambda request, **kwargs: None)
         window.database_pane.filters.family.addItem('afm')
         window.database_pane.filters.family.setCurrentText('afm')
 
         window.database_pane.search_button.click()
 
-        assert window.workspace.state['db_source'] == 'local'
+        assert 'db_source' not in window.workspace.state  # one source: nothing to remember
         assert window.workspace.state['db_filters']['family'] == 'afm'
 
     def test_a_download_records_its_destination(self, window, tmp_path, monkeypatch):

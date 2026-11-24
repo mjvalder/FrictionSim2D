@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from frictionsim2d.run.artifacts import discover_preview_target, generate_package
-from frictionsim2d.gui.preview.assemble import assemble, to_ovito
+from frictionsim2d.gui.preview.assemble import assemble, build_data_collection
 from frictionsim2d.gui.preview.init_script import parse_assembly
 from frictionsim2d.gui.preview.settings_file import parse_identity
 
@@ -96,7 +96,7 @@ def test_every_atom_has_a_legend_entry(name, model, groups, systems):
 def test_atoms_lie_within_the_cell_laterally(name, model, groups, systems):
     _, system = systems[name]
     xlo, xhi, ylo, yhi, _, _ = system.cell
-    extent = system.extent()
+    extent = (system.positions.min(axis=0), system.positions.max(axis=0))
     # A small tolerance: components may sit exactly on the periodic wall.
     assert extent[0][0] >= xlo - 1.0 and extent[1][0] <= xhi + 1.0
     assert extent[0][1] >= ylo - 1.0 and extent[1][1] <= yhi + 1.0
@@ -186,21 +186,21 @@ class TestUnresolvableComponents:
 class TestOvitoConversion:
 
     @pytest.mark.parametrize('name,model,groups', CASES, ids=[c[0] for c in CASES])
-    def test_pipeline_round_trips_the_data(self, name, model, groups, systems):
+    def test_data_collection_round_trips_the_data(self, name, model, groups, systems):
         _, system = systems[name]
-        data = to_ovito(system).compute()
+        data = build_data_collection(system)
         assert data.particles.count == system.count
         assert 'Group' in data.particles
         assert np.allclose(np.asarray(data.particles['Position']), system.positions)
 
     def test_cell_is_periodic_in_x_and_y_only(self, systems):
         _, system = systems['indent_config.ini']
-        data = to_ovito(system).compute()
+        data = build_data_collection(system)
         assert tuple(data.cell.pbc) == (True, True, False)
 
     def test_group_property_partitions_the_atoms(self, systems):
         _, system = systems['indent_config.ini']
-        data = to_ovito(system).compute()
+        data = build_data_collection(system)
         groups = np.asarray(data.particles['Group'])
         for component in system.components:
             block = groups[component.first:component.last]

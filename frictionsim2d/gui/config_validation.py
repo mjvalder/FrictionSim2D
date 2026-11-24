@@ -1,22 +1,10 @@
 """Validating a raw config mapping and reporting failures per field.
 
-Constructing a simulation config can fail in two different ways, and only one
-of them is a ``ValidationError``:
-
-* ordinary field problems (wrong type, out of range, cross-field rules) raise
-  ``pydantic.ValidationError``, which carries a ``loc`` we can map to a section
-  and key;
-* a missing potential or CIF file raises ``FileNotFoundError`` from inside the
-  ``pot_path`` / ``cif_path`` field validator. Pydantic v2 only converts
-  ``ValueError`` and ``AssertionError``, so this propagates uncaught -- and it
-  is the most common authoring mistake there is. Four of the nine configs in
-  ``examples/`` fail this way.
-
-:func:`validate_config` turns both into one uniform report, so a caller can
-decorate the offending field instead of surfacing a traceback.
-
-Model semantics are untouched: the CLI still gets the raise. This is a wrapper
-around construction, not a change to the models.
+Construction fails two ways: a ``ValidationError`` (its ``loc`` maps to a
+section and key), or a ``FileNotFoundError`` raised from the ``pot_path`` /
+``cif_path`` validators, which pydantic does not convert. :func:`validate_config`
+turns both into one report, so a field can be decorated instead of a traceback
+shown. The models are untouched: the CLI still gets the raise.
 """
 
 from __future__ import annotations
@@ -80,13 +68,6 @@ class ConfigValidation:
     @property
     def ok(self) -> bool:
         return not self.issues
-
-    def issues_for(self, section: str, key: Optional[str] = None) -> List[ConfigIssue]:
-        """Issues attached to a section, or to one key within it."""
-        return [
-            i for i in self.issues
-            if i.section == section and (key is None or i.key == key)
-        ]
 
     def render(self) -> str:
         if self.ok:

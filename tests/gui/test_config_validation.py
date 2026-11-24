@@ -17,6 +17,7 @@ from frictionsim2d.core.config import (
     parse_config,
 )
 from frictionsim2d.gui.config_validation import preflight_paths, validate_config
+from tests.helpers.config_issues import issues_for
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -111,7 +112,7 @@ def test_missing_potential_is_located_on_the_right_field(monkeypatch):
 
     result = validate_config(raw, AFMSimulationConfig)
     assert not result.ok
-    tip_issues = result.issues_for('tip', 'pot_path')
+    tip_issues = issues_for(result, 'tip', 'pot_path')
     assert tip_issues, result.render()
     assert 'not_a_real_potential.sw' in tip_issues[0].message
 
@@ -163,7 +164,7 @@ def test_a_plain_nested_loc_is_unchanged(monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     raw = _raw('indent_config.ini')
     raw['tip']['r'] = 'not-a-number'
-    issue = validate_config(raw, AFMSimulationConfig).issues_for('tip', 'r')[0]
+    issue = issues_for(validate_config(raw, AFMSimulationConfig), 'tip', 'r')[0]
     assert issue.index is None
 
 
@@ -173,7 +174,7 @@ def test_type_errors_are_reported_with_a_location(monkeypatch):
     raw['tip']['r'] = 'not-a-number'
     result = validate_config(raw, AFMSimulationConfig)
     assert not result.ok
-    assert result.issues_for('tip', 'r'), result.render()
+    assert issues_for(result, 'tip', 'r'), result.render()
 
 
 class TestBaseDirResolution:

@@ -81,11 +81,6 @@ class Identity:
             if name.endswith(_COMPONENT_SUFFIX)
         }
 
-    @property
-    def layer_groups(self) -> Dict[str, List[int]]:
-        """Per-layer groups, present for multilayer sheets."""
-        return {n: t for n, t in self.groups.items() if n.startswith('layer_')}
-
     def group_of(self, type_id: int) -> Optional[str]:
         """Which component a type belongs to."""
         for name, types in self.component_groups.items():

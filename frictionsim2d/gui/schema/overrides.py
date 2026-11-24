@@ -60,8 +60,6 @@ class FieldOverride:
     enable_if: Optional[Tuple[str, object]] = None
     #: Reason shown when the control is disabled by ``enable_if``.
     enable_hint: Optional[str] = None
-    #: Render read-only.
-    read_only: bool = False
     #: Restrict an enum's choices below what the model allows.
     choices: Optional[Tuple[object, ...]] = None
     #: Display text for individual enum choices, keyed by the stored value.

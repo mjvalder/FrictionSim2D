@@ -85,11 +85,6 @@ class Assembly:
     cell: Optional[Tuple[float, float, float, float, float, float]] = None
     placements: List[Placement] = field(default_factory=list)
 
-    @property
-    def is_preassembled(self) -> bool:
-        """True when the script reads one already-assembled file and has no box."""
-        return self.cell is None and len(self.placements) == 1
-
     def resolved_placements(self) -> List[Tuple[Placement, Path]]:
         """Placements whose component file exists, with its absolute path."""
         out = []

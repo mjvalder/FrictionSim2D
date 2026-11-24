@@ -7,6 +7,7 @@ PATH.
 
 Imported only by ``FrictionSim2D gui --check`` -- it pulls in Qt and ovito.
 """
+# pylint: disable=import-outside-toplevel  # each probe imports what it checks, inside its own try
 
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ class Check:
 
 @dataclass
 class Report:
+    """Every check run, plus free-text notes."""
     checks: List[Check] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
 
@@ -68,7 +70,8 @@ def _display(report: Report) -> None:
     wayland = os.environ.get("WAYLAND_DISPLAY")
     platform_hint = os.environ.get("QT_QPA_PLATFORM", "(auto)")
     has_display = bool(display or wayland)
-    detail = f"DISPLAY={display or '-'} WAYLAND_DISPLAY={wayland or '-'} QT_QPA_PLATFORM={platform_hint}"
+    detail = (f"DISPLAY={display or '-'} WAYLAND_DISPLAY={wayland or '-'} "
+              f"QT_QPA_PLATFORM={platform_hint}")
     report.add("display", has_display, detail)
     if not has_display:
         report.notes.append(

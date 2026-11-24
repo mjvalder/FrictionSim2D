@@ -93,7 +93,7 @@ class TestAssemblyParsing:
     def test_preassembled_form_is_recognised(self, previews):
         target = previews['pes_sheet_config.ini']
         assembly = parse_assembly(target.init_script, target.simulation_root)
-        assert assembly.is_preassembled
+        assert len(assembly.placements) == 1
         assert assembly.cell is None
         assert assembly.effective_cell() is not None, "cell must come from the data file"
 
@@ -186,10 +186,6 @@ class TestIdentityParsing:
         identity = parse_identity(previews['indent_config.ini'].settings_file)
         assert 'sub_fix' in identity.groups
         assert 'sub_fix' not in identity.component_groups
-
-    def test_layer_groups_appear_for_multilayer_sheets(self, previews):
-        identity = parse_identity(previews['pes_sheet_config.ini'].settings_file)
-        assert set(identity.layer_groups) == {'layer_1', 'layer_2'}
 
     def test_legend_can_exclude_types_with_no_atoms(self, previews):
         """The virtual driving atom is declared but contributes no atoms."""

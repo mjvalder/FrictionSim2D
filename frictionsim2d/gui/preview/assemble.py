@@ -7,6 +7,7 @@ cell. Nothing here decides *where* anything goes.
 Imports ovito (for the LAMMPS data reader and the resulting data collection)
 but not Qt, so it can be exercised without a display.
 """
+# pylint: disable=import-outside-toplevel  # ovito is imported lazily: importing frictionsim2d.gui must not load it
 
 from __future__ import annotations
 
@@ -23,10 +24,6 @@ from .settings_file import Identity
 logger = logging.getLogger(__name__)
 
 __all__ = ['AssembledSystem', 'ComponentSlice', 'assemble', 'assemble_data_file']
-
-#: Group id used for atoms whose component could not be determined.
-UNGROUPED = -1
-
 
 @dataclass
 class ComponentSlice:
@@ -59,16 +56,6 @@ class AssembledSystem:
     @property
     def count(self) -> int:
         return int(self.positions.shape[0])
-
-    @property
-    def group_names(self) -> Dict[int, str]:
-        return {c.group_id: c.name for c in self.components}
-
-    def extent(self) -> Optional[np.ndarray]:
-        """Bounding box of the atoms themselves, as ``[[lo], [hi]]``."""
-        if self.count == 0:
-            return None
-        return np.vstack([self.positions.min(axis=0), self.positions.max(axis=0)])
 
     def touches_boundary(self, tolerance: float = 1.0) -> Dict[str, bool]:
         """Whether each component reaches the periodic x/y walls.
@@ -292,29 +279,3 @@ def build_data_collection(system: AssembledSystem,
         types_property.types.append(element_type)
 
     return data
-
-
-def to_ovito(system: AssembledSystem,
-             colours: Optional[Dict[int, Tuple[float, float, float]]] = None,
-             radii: Optional[Dict[int, float]] = None):
-    """Convert an assembled system into an ovito pipeline for display.
-
-    Retained for tests and back-compat callers: production code (
-    `ViewportPanel._update_pipeline`) builds the data collection itself via
-    `build_data_collection` instead, so it can update an existing pipeline's
-    source in place rather than constructing a new `Pipeline` on every
-    render.
-
-    Args:
-        system: The assembled system.
-        colours: Optional ``type id -> (r, g, b)``, see :func:`build_data_collection`.
-        radii: Optional ``type id -> display radius``.
-
-    Returns:
-        An ``ovito.pipeline.Pipeline`` whose source holds the assembled data,
-        carrying ``Position``, ``Particle Type`` and ``Group`` properties.
-    """
-    from ovito.pipeline import Pipeline, StaticSource  # noqa: PLC0415
-
-    data = build_data_collection(system, colours=colours, radii=radii)
-    return Pipeline(source=StaticSource(data=data))

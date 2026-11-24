@@ -3,6 +3,7 @@
 Construction calls LAMMPS in-process: no cancel point in a thread, and a
 C-level abort would take the window down.
 """
+# pylint: disable=import-outside-toplevel  # the build stack loads only once a request is read
 
 from __future__ import annotations
 
@@ -20,13 +21,11 @@ def run_quench(request: Dict[str, Any]) -> Dict[str, Any]:
     (a crystal block and a deck, which is what Generate would write) and only
     the block is read back.
     """
-    # pylint: disable=import-outside-toplevel
     from ..builders.construction.amorphous import (
         member_rel_dir, read_data_header, write_quench_root)
     from ..core.config import load_settings, parse_config
     from ..core.utils.structures import cifread
     from .controllers.quench import plan_quench, quench_steps
-    # pylint: enable=import-outside-toplevel
 
     config_file = Path(request['config_file'])
     _emit('progress', message='building the crystal slab')
