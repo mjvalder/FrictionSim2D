@@ -1,38 +1,5 @@
-{% include 'hpc/_slurm_header.j2' %}
-
-{% include 'hpc/_environment.j2' %}
-
-
-# Deck for this task
-LINE=$(sed -n "{% if array_size > 1 %}${SLURM_ARRAY_TASK_ID}{% else %}1{% endif %}p" "$SLURM_SUBMIT_DIR/hpc/{{ manifest_filename }}")
-CASE=${LINE%%$'\t'*}
-DECK=${LINE#*$'\t'}
-SIM=$(dirname "$(dirname "$DECK")")
-TAG=$(basename "$DECK" .in)
-{% if use_tmpdir %}
-
-SRC="$SLURM_SUBMIT_DIR"
-SCRATCH="{{ scratch_dir }}/{{ job_name }}_${SLURM_JOB_ID}"
-
-# Copy simulation to scratch
-mkdir -p "$SCRATCH/$CASE"
-cp -a "$SRC/$CASE/." "$SCRATCH/$CASE/"
-cd "$SCRATCH"
-{% else %}
-
-cd "$SLURM_SUBMIT_DIR"
-{% endif %}
-
-# Run
-{{ launch_command }} -in "$DECK" -log "$SIM/lammps/run_$TAG.log"
-{% if use_tmpdir %}
-
-# Copy results back
-cp -a "$SIM/results/." "$SRC/$SIM/results/"
-cp -a "$SIM/visuals/." "$SRC/$SIM/visuals/"
-cp -a "$SIM/data/." "$SRC/$SIM/data/"
-cp "$SIM"/lammps/run_*.log "$SRC/$SIM/lammps/"
-
-# Remove scratch
-rm -rf "$SCRATCH"
-{% endif %}
+{% set header = 'hpc/_slurm_header.j2' %}
+{% set workdir_var = 'SLURM_SUBMIT_DIR' %}
+{% set jobid_var = 'SLURM_JOB_ID' %}
+{% set array_index_var = 'SLURM_ARRAY_TASK_ID' %}
+{% include 'hpc/_array_job.j2' %}

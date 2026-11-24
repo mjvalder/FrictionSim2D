@@ -1,0 +1,38 @@
+{% include header %}
+
+{% include 'hpc/_environment.j2' %}
+
+
+# Deck for this task
+LINE=$(sed -n "{% if array_size > 1 %}{{ '${' ~ array_index_var ~ '}' }}{% else %}1{% endif %}p" "${{ workdir_var }}/hpc/{{ manifest_filename }}")
+CASE=${LINE%%$'\t'*}
+DECK=${LINE#*$'\t'}
+SIM=$(dirname "$(dirname "$DECK")")
+TAG=$(basename "$DECK" .in)
+{% if use_tmpdir %}
+
+SRC="${{ workdir_var }}"
+SCRATCH="{{ scratch_dir }}/{{ job_name }}_{{ '${' ~ jobid_var ~ '}' }}"
+
+# Copy simulation to scratch
+mkdir -p "$SCRATCH/$CASE"
+cp -a "$SRC/$CASE/." "$SCRATCH/$CASE/"
+cd "$SCRATCH"
+{% else %}
+
+cd "${{ workdir_var }}"
+{% endif %}
+
+# Run
+{{ launch_command }} -in "$DECK" -log "$SIM/lammps/run_$TAG.log"
+{% if use_tmpdir %}
+
+# Copy results back
+cp -a "$SIM/results/." "$SRC/$SIM/results/"
+cp -a "$SIM/visuals/." "$SRC/$SIM/visuals/"
+cp -a "$SIM/data/." "$SRC/$SIM/data/"
+cp "$SIM"/lammps/run_*.log "$SRC/$SIM/lammps/"
+
+# Remove scratch
+rm -rf "$SCRATCH"
+{% endif %}

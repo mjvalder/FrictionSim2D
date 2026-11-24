@@ -1,38 +1,5 @@
-{% include 'hpc/_pbs_header.j2' %}
-
-{% include 'hpc/_environment.j2' %}
-
-
-# Simulation for this task
-LINE=$(sed -n "{% if array_size > 1 %}${PBS_ARRAY_INDEX}{% else %}1{% endif %}p" "$PBS_O_WORKDIR/hpc/{{ manifest_filename }}")
-CASE=${LINE%%$'\t'*}
-SIM=${LINE#*$'\t'}
-{% if use_tmpdir %}
-
-SRC="$PBS_O_WORKDIR"
-SCRATCH="{{ scratch_dir }}/{{ job_name }}_${PBS_JOBID}"
-
-# Copy simulation to scratch
-mkdir -p "$SCRATCH/$CASE"
-cp -a "$SRC/$CASE/." "$SCRATCH/$CASE/"
-cd "$SCRATCH"
-{% else %}
-
-cd "$PBS_O_WORKDIR"
-{% endif %}
-
-# Run. slide.in runs even when system.in failed: it slides every load whose
-# load_*.data was written and skips the rest.
-{{ launch_command }} -in "$SIM/lammps/system.in" -log "$SIM/lammps/run_system.log"
-{{ launch_command }} -in "$SIM/lammps/slide.in" -log "$SIM/lammps/run_slide.log"
-{% if use_tmpdir %}
-
-# Copy results back
-cp -a "$SIM/results/." "$SRC/$SIM/results/"
-cp -a "$SIM/visuals/." "$SRC/$SIM/visuals/"
-cp -a "$SIM/data/." "$SRC/$SIM/data/"
-cp "$SIM"/lammps/run_*.log "$SRC/$SIM/lammps/"
-
-# Remove scratch
-rm -rf "$SCRATCH"
-{% endif %}
+{% set header = 'hpc/_pbs_header.j2' %}
+{% set workdir_var = 'PBS_O_WORKDIR' %}
+{% set jobid_var = 'PBS_JOBID' %}
+{% set array_index_var = 'PBS_ARRAY_INDEX' %}
+{% include 'hpc/_combined_job.j2' %}

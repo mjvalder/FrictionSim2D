@@ -1,0 +1,38 @@
+{% include header %}
+
+{% include 'hpc/_environment.j2' %}
+
+
+# Simulation for this task
+LINE=$(sed -n "{% if array_size > 1 %}{{ '${' ~ array_index_var ~ '}' }}{% else %}1{% endif %}p" "${{ workdir_var }}/hpc/{{ manifest_filename }}")
+CASE=${LINE%%$'\t'*}
+SIM=${LINE#*$'\t'}
+{% if use_tmpdir %}
+
+SRC="${{ workdir_var }}"
+SCRATCH="{{ scratch_dir }}/{{ job_name }}_{{ '${' ~ jobid_var ~ '}' }}"
+
+# Copy simulation to scratch
+mkdir -p "$SCRATCH/$CASE"
+cp -a "$SRC/$CASE/." "$SCRATCH/$CASE/"
+cd "$SCRATCH"
+{% else %}
+
+cd "${{ workdir_var }}"
+{% endif %}
+
+# Run. slide.in runs even when system.in failed: it slides every load whose
+# load_*.data was written and skips the rest.
+{{ launch_command }} -in "$SIM/lammps/system.in" -log "$SIM/lammps/run_system.log"
+{{ launch_command }} -in "$SIM/lammps/slide.in" -log "$SIM/lammps/run_slide.log"
+{% if use_tmpdir %}
+
+# Copy results back
+cp -a "$SIM/results/." "$SRC/$SIM/results/"
+cp -a "$SIM/visuals/." "$SRC/$SIM/visuals/"
+cp -a "$SIM/data/." "$SRC/$SIM/data/"
+cp "$SIM"/lammps/run_*.log "$SRC/$SIM/lammps/"
+
+# Remove scratch
+rm -rf "$SCRATCH"
+{% endif %}
