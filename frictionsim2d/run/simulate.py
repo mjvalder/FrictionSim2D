@@ -1,14 +1,11 @@
-"""The runner: route a config to its builder and execute the builds.
-
-Split out of frictionsim2d/core/run.py. This is the only module in the package that
-instantiates builders, which is why frictionsim2d/run/__init__.py stays free of eager
-re-exports.
-"""
+"""The runner: route a config to its builder and execute the builds."""
 import copy
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import yaml
 
 from ..builders.afm import AFMSimulation
 from ..builders.afm.freestanding import FreestandingPESTipSimulation
@@ -39,38 +36,18 @@ logger = logging.getLogger(__name__)
 class FreestandingConfigError(ValueError):
     """A substrate-free config was used with a model lacking a freestanding builder.
 
-    Raised by :func:`_select_afm_builder_cls` and deliberately NOT caught by
-    ``run_simulations``'s per-config broad-except (which exists to let a
-    material/parameter sweep continue past isolated build failures) — this is
-    a hard misconfiguration, not a recoverable per-config build error, so it
-    must propagate and abort the whole run.
+    Not caught by ``run_simulations``'s per-config handler: it aborts the run.
     """
 
 
 class NoHeteroBuilderError(ValueError):
-    """No builder exists for a hetero (>=2-material) model/config combination.
-
-    Sibling to :class:`FreestandingConfigError` — same category ("this
-    config-level setting has no builder that can serve it", not a
-    per-sweep-member build failure) and the same hard-abort treatment:
-    deliberately NOT caught by ``run_simulations``'s per-config broad-except.
-    Raised by :func:`_select_afm_builder_cls` for ``finite_sheet`` + hetero
-    ``indent`` (only plain ``afm`` has a finite hetero variant). ``finite_sheet``
-    is set once in ``[general]``, so every member of a sweep would fail
-    identically — catching it per-config would silently skip every member and
-    report a misleading "created 0 simulation(s)" instead of aborting with a
-    message naming the problem.
+    """No builder exists for a hetero model/config combination (e.g. finite_sheet
+    hetero ``indent``). Aborts the run like :class:`FreestandingConfigError`.
     """
 
 
 # pylint: disable=import-outside-toplevel
-# The hetero/finite/PES builder classes below (frictionsim2d.builders.afm.hetero,
-# frictionsim2d.builders.afm.pes_tip, frictionsim2d.builders.sheetonsheet.pes_sheet,
-# frictionsim2d.builders.sheetonsheet.flake_slide) are imported lazily in both selector
-# functions because they are needed only by the hetero/twist/flake/PES
-# branches -- most configs route to the plain builders already imported
-# at module level above, so a homogeneous single-material run never pays
-# for them.
+# The hetero/flake/PES builder classes are imported lazily: only those branches need them.
 def _select_afm_builder_cls(model, config_obj):
     """Pick the builder class, routing substrate-free configs to freestanding.
 
@@ -99,16 +76,11 @@ def _select_afm_builder_cls(model, config_obj):
             f"'pes-tip' (the freestanding tip PES). Model '{model}' requires a [sub] "
             f"section; freestanding dynamic slide/indent is a future (Phase 2) feature."
         )
-    # Hetero AFM when >=2 materials are configured (amorphous sub). ONE hetero
-    # decision point: a finite ([general] finite_sheet) stack routes to the D5
-    # edge-typed FiniteHeteroAFMSimulation, else the D2 periodic HeteroAFMSimulation.
-    # 'indent' reroutes to the pure-MRO HeteroIndentSimulation (no finite variant
-    # exists for it — only plain 'afm' has one). 'pes_tip' reroutes to the
-    # pure-MRO HeteroPESTipSimulation (scans the matched interface's coincidence
-    # cell rather than either material's own unit cell).
+    # >=2 materials: hetero builders; finite_sheet picks the finite variant
+    # (only plain 'afm' has one).
     if is_hetero:
         if model == 'indent':
-            from frictionsim2d.builders.afm.hetero import HeteroIndentSimulation
+            from ..builders.afm.hetero import HeteroIndentSimulation
             if getattr(config_obj.general, 'finite_sheet', False):
                 raise NoHeteroBuilderError(
                     "finite_sheet hetero indent is not supported: only the "
@@ -119,13 +91,13 @@ def _select_afm_builder_cls(model, config_obj):
                 )
             return HeteroIndentSimulation
         if model == 'afm':
-            from frictionsim2d.builders.afm.hetero import (
+            from ..builders.afm.hetero import (
                 HeteroAFMSimulation, FiniteHeteroAFMSimulation)
             if getattr(config_obj.general, 'finite_sheet', False):
                 return FiniteHeteroAFMSimulation
             return HeteroAFMSimulation
         if model == 'pes_tip':
-            from frictionsim2d.builders.afm.pes_tip import HeteroPESTipSimulation
+            from ..builders.afm.pes_tip import HeteroPESTipSimulation
             return HeteroPESTipSimulation
     return default_cls
 
@@ -133,16 +105,8 @@ def _select_afm_builder_cls(model, config_obj):
 def _select_sheet_builder_cls(model, config_obj):
     """Route sheet-on-sheet to the hetero builder for >=2 materials or a twist.
 
-    A single ``[2D]`` material with ``general.twist_angle`` set is a genuine
-    same-material moiré, so it must also reach the hetero builder (which
-    synthesises the two sheets). A single material with no twist stays on the
-    homogeneous builder (unchanged).
-
-    The same rule applies to the static ``pes_sheet`` scan: a two-material (or
-    twisted) bilayer is scanned over the matched interface's coincidence cell
-    by :class:`~frictionsim2d.builders.sheetonsheet.pes_sheet.HeteroPESSheetSimulation`, since the
-    homogeneous scan builder can neither assemble the stack nor group its
-    layers (hetero layers share atom types).
+    A single ``[2D]`` material with ``general.twist_angle`` is a same-material
+    moiré and also takes the hetero builder; the same rule applies to ``pes_sheet``.
     """
     sheets = getattr(config_obj, 'sheets', None) or []
     twist = getattr(getattr(config_obj, 'general', None), 'twist_angle', None)
@@ -150,13 +114,12 @@ def _select_sheet_builder_cls(model, config_obj):
 
     if model == 'pes_sheet':
         if is_hetero:
-            from frictionsim2d.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+            from ..builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
             return HeteroPESSheetSimulation
         return PESSheetSimulation
-    # A [Flake] section switches sheet-on-sheet to the D4 flake-driven slide,
-    # regardless of the substrate being homogeneous or hetero (precedence).
+    # A [Flake] section takes precedence over hetero.
     if model == 'sheetonsheet' and getattr(config_obj, 'flake', None) is not None:
-        from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+        from ..builders.sheetonsheet.flake_slide import FlakeSlideSimulation
         return FlakeSlideSimulation
     if is_hetero:
         return HeteroSheetOnSheetSimulation
@@ -179,12 +142,9 @@ def run_simulations(
 
     Args:
         on_failure: Called as ``(output_dir, run_dict, exception)`` for each
-            config whose build fails. Failures are otherwise only logged, and
-            the caller sees just a success count with no way to say which
-            member failed.
+            config whose build fails; the sweep continues.
         allow_generate_amorphous: When False, a missing amorphous structure
-            raises instead of triggering a melt-quench. See
-            :func:`frictionsim2d.builders.construction.components.make_amorphous`.
+            raises instead of triggering a melt-quench.
 
     Returns a tuple of (created_simulations, simulation_root, configs_to_run, settings).
     """
@@ -195,8 +155,6 @@ def run_simulations(
     base_dict = parse_config(config_path)
     defaults = load_settings(settings_file=settings_file)
 
-    # Carried on the settings rather than threaded through every builder: the
-    # builders already pass `settings` down to make_amorphous.
     if not allow_generate_amorphous:
         defaults.quench.allow_generate = False
 
@@ -219,9 +177,7 @@ def run_simulations(
 
     for run_dict in configs_to_run:
         _validate_runtime_sweep_ordering(run_dict.get('general', {}))
-        # Before the simulation root exists: a conflict the builders would
-        # only raise on from write_inputs, i.e. after a full geometry build
-        # onto a tree that then stays half written.
+        # Before the simulation root exists, so a conflict leaves no half-written tree.
         conflict = outer_loop_conflict(run_dict, model)
         if conflict is not None:
             raise ValueError(conflict)
@@ -236,9 +192,7 @@ def run_simulations(
     (simulation_root / 'logs').mkdir(parents=True, exist_ok=True)
 
     created_simulations: List[Path] = []
-    # What goes INTO the run tree (config.json, provenance/settings.yaml, and
-    # through them the AiiDA repository, archives and export bundles) never
-    # carries a credential.
+    # Nothing written into the run tree carries a credential.
     tree_settings = redact_secrets(defaults).model_dump()
 
     for run_dict in configs_to_run:
@@ -248,45 +202,31 @@ def run_simulations(
 
         prov_dir = output_dir / 'provenance'
         prov_dir.mkdir(parents=True, exist_ok=True)
-        # The rebuild path needs the settings the run was built with; nothing
-        # wrote them before, so `aiida rebuild` silently used the defaults.
-        import yaml  # pylint: disable=import-outside-toplevel
+        # `aiida rebuild` needs the settings the run was built with.
         (prov_dir / 'settings.yaml').write_text(
             yaml.safe_dump(tree_settings, sort_keys=False), encoding='utf-8')
 
         try:
             if model in AFM_LIKE_MODELS:
-                config_obj = AFMSimulationConfig(**run_dict)
-                config_json_path = prov_dir / 'config.json'
-                config_json_path.write_text(config_obj.model_dump_json(indent=2), encoding='utf-8')
-                builder_cls = _select_afm_builder_cls(model, config_obj)
-                builder = builder_cls(config_obj, output_dir, config_path=str(config_json_path))
-                builder.set_model(model)
+                config_cls, select_builder = AFMSimulationConfig, _select_afm_builder_cls
             else:
-                config_obj = SheetOnSheetSimulationConfig(**run_dict)
-                config_json_path = prov_dir / 'config.json'
-                config_json_path.write_text(config_obj.model_dump_json(indent=2), encoding='utf-8')
-                builder_cls = _select_sheet_builder_cls(model, config_obj)
-                builder = builder_cls(config_obj, output_dir, config_path=str(config_json_path))
-                builder.set_model(model)
+                config_cls, select_builder = SheetOnSheetSimulationConfig, _select_sheet_builder_cls
+            config_obj = config_cls(**run_dict)
+            config_json_path = prov_dir / 'config.json'
+            config_json_path.write_text(config_obj.model_dump_json(indent=2), encoding='utf-8')
+            builder_cls = select_builder(model, config_obj)
+            builder = builder_cls(config_obj, output_dir, config_path=str(config_json_path))
+            builder.set_model(model)
 
             builder.set_base_output_dir(simulation_root)
             builder.build()
             created_simulations.append(output_dir)
 
         except (FreestandingConfigError, NoHeteroBuilderError):
-            # Hard misconfiguration (substrate-free config on a model with no
-            # freestanding builder, or a hetero combination -- e.g. finite_sheet
-            # hetero indent -- with no builder at all) — abort the whole run
-            # instead of silently skipping this config and reporting a false
-            # "N/M successful". Both are config-level settings that would fail
-            # identically for every member of a sweep, not an isolated
-            # per-config build error.
+            # Config-level: every member of a sweep would fail identically.
             raise
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("Build failed for %s: %s", output_dir, exc)
-            # Logging alone leaves callers with only "N/M successful" and no way
-            # to say which member failed or why. The callback lets them report it.
             if on_failure is not None:
                 on_failure(output_dir, run_dict, exc)
             continue

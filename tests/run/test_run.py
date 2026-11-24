@@ -1164,6 +1164,50 @@ def test_run_simulations_continues_after_build_failure(
     assert len(created) == 1
 
 
+def test_on_failure_callback_gets_the_failed_member_and_the_sweep_continues(
+        tmp_path: Path, monkeypatch) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[dummy]\n", encoding="utf-8")
+    base_dict = _minimal_afm_raw_dict(tmp_path)
+    base_dict["general"]["temp"] = [300.0, 350.0]
+    settings = real_load_settings()
+    monkeypatch.setattr("frictionsim2d.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("frictionsim2d.run.simulate.load_settings", lambda **_kwargs: settings)
+    built = []
+
+    class FailsAt300:
+        def __init__(self, config, _output_dir, config_path=None):
+            self.temp = config.general.temp
+
+        def set_model(self, _model):
+            pass
+
+        def set_base_output_dir(self, _root):
+            pass
+
+        def build(self):
+            if self.temp == 300.0:
+                raise RuntimeError("boom")
+            built.append(self.temp)
+
+    monkeypatch.setattr("frictionsim2d.run.simulate.AFMSimulation", FailsAt300)
+    failures = []
+
+    created, root, configs, _settings = run_simulations(
+        config_file=str(config_file), model="afm", output_root=tmp_path,
+        simulation_root_name="sim_run",
+        on_failure=lambda out, run_dict, exc: failures.append((out, run_dict, exc)),
+    )
+
+    assert built == [350.0]
+    assert len(created) == 1 and len(configs) == 2
+    [(out, run_dict, exc)] = failures
+    assert "K300" in out.parts
+    assert out.is_relative_to(root)
+    assert run_dict["general"]["temp"] == 300.0
+    assert isinstance(exc, RuntimeError) and str(exc) == "boom"
+
+
 def test_run_simulations_raises_for_missing_config_file(tmp_path: Path) -> None:
     """Missing config file should raise immediately."""
     with pytest.raises(FileNotFoundError):
