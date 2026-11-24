@@ -10,7 +10,6 @@ installable with ``ollama pull`` on a machine without the bundle.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -18,6 +17,8 @@ import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+
+from ..data.provenance import sha256_file
 
 logger = logging.getLogger(__name__)
 
@@ -70,15 +71,6 @@ class FineTune:  # pylint: disable=too-many-instance-attributes
 
 #: Registry-only fine-tunes, by tag (nothing is published yet).
 PUBLISHED: Dict[str, FineTune] = {}
-
-
-def sha256_file(path: Path) -> str:
-    """Hex sha256 of ``path``, read in 1 MiB chunks."""
-    digest = hashlib.sha256()
-    with open(path, 'rb') as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b''):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def render_modelfile(template: str) -> str:

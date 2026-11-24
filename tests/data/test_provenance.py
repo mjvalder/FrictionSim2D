@@ -450,3 +450,18 @@ def test_config_hash_recomputes_the_builders_hash_from_config_json(model, mock_s
     written = obj.model_dump_json(indent=2)
     assert config_hash(json.loads(written)) == hashlib.sha256(
         obj.model_dump_json().encode()).hexdigest()
+
+
+def test_write_atomic_failure_leaves_the_original_and_no_temp_file(tmp_path, monkeypatch):
+    import os
+    from frictionsim2d.data import provenance
+    target = tmp_path / 'provenance.json'
+    target.write_text('original')
+
+    def boom(*args, **kwargs):
+        raise OSError('rename failed')
+    monkeypatch.setattr(os, 'replace', boom)
+    with pytest.raises(OSError, match='rename failed'):
+        provenance._write_atomic(target, 'new')
+    assert target.read_text() == 'original'
+    assert list(tmp_path.glob('*.tmp')) == []

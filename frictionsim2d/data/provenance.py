@@ -66,22 +66,21 @@ class BuiltGeometry(BaseModel):
 
 
 class ProvenanceRecord(BaseModel):
-    """Everything needed to reproduce and audit one run (spec §5 F5)."""
+    """Everything needed to reproduce and audit one run."""
     schema_version: str = PROVENANCE_SCHEMA_VERSION
 
-    # run identity (2.2.0, critique C3): a uuid4 drawn at build time, one per
-    # provenance.json -- each AFM L{n} record gets its own, and a rebuild of
-    # the same config is a new run. Optional only so pre-2.2 files still read;
-    # every builder sets it. ``run_uuid_stamped_at`` (ISO date) marks a legacy
-    # record that :func:`stamp_run_uuids` gave a uuid after the fact.
+    # run identity: a uuid4 drawn at build time, one per provenance.json (each
+    # AFM L{n} record gets its own; a rebuild is a new run). Optional only so
+    # pre-2.2 files still read. ``run_uuid_stamped_at`` (ISO date) marks a
+    # legacy record that :func:`stamp_run_uuids` gave a uuid after the fact.
     run_uuid: Optional[str] = None
     run_uuid_stamped_at: Optional[str] = None
 
-    # what this run is (spec section 3 F1: model = where it lives, family = its schema)
+    # what this run is: model = where it lives, family = its schema
     family: str
     model: str
 
-    # every material of the built system, replacing the single pot_* triple
+    # every material of the built system
     materials: List[MaterialProvenance] = []
 
     # the stacking twist, not the slide direction. The only thing that
@@ -96,8 +95,7 @@ class ProvenanceRecord(BaseModel):
     seed_velocity: Optional[int]
     seed_sheet_center: Optional[int] = None    # sheet runs only
 
-    # the hidden constant of the 2026 campaign (spec §2.4): every AFM run
-    # shares one cached amorphous-substrate realization
+    # every AFM run shares one cached amorphous-substrate realization
     substrate_realization_id: Optional[str]
 
     # damping: previously unrecorded free parameters of the friction result
@@ -136,12 +134,9 @@ class ProvenanceRecord(BaseModel):
 
     geometry: Optional[BuiltGeometry] = None
 
-    # interlayer-style choice (spec 2026-11-11 §7): PotentialManager
-    # .interlayer_provenance() plus 'comparison'. None -- and then absent from
-    # the file, see write_provenance -- for the default lj without comparison
-    # mode, so an lj record has no new key (config.json and config_hash still carry
-    # the four new default interlayer fields; only the LAMMPS inputs are
-    # byte-identical to before).
+    # interlayer-style choice: PotentialManager.interlayer_provenance() plus
+    # 'comparison'. None, and then absent from the file (see write_provenance),
+    # for the default lj without comparison mode.
     interlayer: Optional[Dict[str, Any]] = None
 
     # per-load diagnostics, keyed f'{load:g}' (enriched post-run)
@@ -173,6 +168,7 @@ def config_hash(config: Any) -> str:
 
 
 def sha256_file(path: Path) -> str:
+    """Hex sha256 of a file, read in 1 MiB chunks."""
     h = hashlib.sha256()
     with open(path, 'rb') as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b''):
@@ -183,14 +179,9 @@ def sha256_file(path: Path) -> str:
 def material_provenance(component: Any, role: str) -> MaterialProvenance:
     """One :class:`MaterialProvenance` from a component config.
 
-    The single construction site for the ``pot_path``/``pot_type``/
-    ``pot_resolution_route``/``pot_file_sha256`` quadruple -- including the
-    ``sha256_file`` existence guard -- shared by every builder family (Task 6,
-    spec §3 F3) instead of each family re-deriving it. ``component`` is any
-    ``ComponentConfig``-shaped object (``SheetConfig``, ``TipConfig``,
-    ``SubstrateConfig``, ``FlakeConfig``, ...) with at least a ``mat``
-    attribute; a component with no ``pot_path`` (e.g. an unfilled ``[Flake]``
-    shape spec) records every ``pot_*`` field as ``None`` rather than raising.
+    ``component`` is any ``ComponentConfig``-shaped object with at least a
+    ``mat`` attribute; one with no ``pot_path`` records every ``pot_*`` field
+    as ``None``.
     """
     pot = getattr(component, 'pot_path', None)
     pot_path = Path(str(pot)) if pot else None
@@ -206,6 +197,7 @@ def material_provenance(component: Any, role: str) -> MaterialProvenance:
 
 
 def write_provenance(run_dir: Path, record: ProvenanceRecord) -> Path:
+    """Write ``provenance.json`` into ``run_dir``; unset interlayer/run_uuid keys are omitted."""
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     out = run_dir / 'provenance.json'

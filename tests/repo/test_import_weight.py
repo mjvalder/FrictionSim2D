@@ -176,3 +176,8 @@ def test_lattice_imports_nothing_from_builders_at_module_level():
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+def test_importing_data_provenance_does_not_load_numpy():
+    """``data/__init__.py`` stays empty: provenance needs no numpy."""
+    assert not _loaded_after_importing("frictionsim2d.data.provenance", "numpy")

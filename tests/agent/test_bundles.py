@@ -90,3 +90,9 @@ def test_verified_schemas_count_as_a_fit(tmp_path):
     tune = FineTune(tag='t', base='b', schema_hash='old', knowledge_hash='k',
                     verified_schemas=('new',))
     assert tune.fits('old') and tune.fits('new') and not tune.fits('other')
+
+
+def test_bundles_use_the_one_sha256_file():
+    from frictionsim2d.data import provenance
+    from frictionsim2d.agent import bundles
+    assert bundles.sha256_file is provenance.sha256_file
