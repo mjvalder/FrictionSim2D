@@ -15,9 +15,9 @@ period:
   of the grid), ``k`` the param ``k`` (eV/A^2), ``a`` the param ``a`` (A).
   Neither has a default: without both, ``pt_eta`` is NaN rather than an
   invented spring or period. (``pes_eta`` is the grid's own: ``k`` the PES
-  curvature at its minimum, ``a`` the scanned cell, `pes_scan.py:104-106`.)
+  curvature at its minimum, ``a`` the scanned cell, ``pes_scan.grid_descriptors``.)
 
-Any other family is refused (spec §5.2: PES is not reachable from other
+Any other family is refused (PES is not reachable from other
 simulation types).
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ __all__ = ['KIND_BY_FAMILY', 'NO_GRID', 'PesLandscape', 'PesLandscapeParams', 'p
 #: The drop reason of a run with no usable grid (no window tier, no
 #: ``energy_eV``, or fewer than 4 points: ``pes_scan.extract_all`` :178).
 NO_GRID = 'no_pes_grid'
-#: The fewest grid points ``pes_scan.extract_all`` reduces (:178).
+#: The fewest grid points ``pes_scan.extract_all`` reduces.
 MIN_GRID_POINTS = 4
 
 

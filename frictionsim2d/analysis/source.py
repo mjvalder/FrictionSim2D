@@ -162,7 +162,7 @@ class StoreFetcher:
     def frames(self, row: Any) -> Dict[str, pd.DataFrame]:
         """`frictionsim2d.aiida.query.point_frames` of the row, plus its ``peratom``
         tier: the CalcJob outputs that as its own ``peratom.<point label>``
-        node beside the point (`calcjob.py:582-587`), read the same way."""
+        node beside the point, read the same way."""
         # pylint: disable=import-outside-toplevel
         from aiida import orm
 
@@ -195,10 +195,10 @@ class StoreFetcher:
         return orm.load_node(uuid).get_dict()
 
     def snapshot(self, row: Any, kind: SnapshotKind) -> Optional[Path]:
-        """``final``: the CalcJob's ``snapshots.<point label>`` output
-        (`calcjob.py:192-194`). ``load``: the ``load_<F>N.data`` structure of
+        """``final``: the CalcJob's ``snapshots.<point label>`` output.
+        ``load``: the ``load_<F>N.data`` structure of
         the row's load, an input or output ``structures`` node of the run's
-        CalcJobs (`calcjob.py:172-176, 195-197`)."""
+        CalcJobs."""
         from aiida import orm  # pylint: disable=import-outside-toplevel
         calc = orm.load_node(row.calc_uuid)
         node = None
@@ -222,8 +222,7 @@ class StoreFetcher:
         return path
 
     def settings_text(self, row: Any) -> str:
-        """``system.in.settings`` from the ``includes`` of the run's CalcJobs
-        (`calcjob.py:158-160`).
+        """``system.in.settings`` from the ``includes`` of the run's CalcJobs.
 
         Raises:
             LookupError: no CalcJob of the run includes it.
@@ -238,7 +237,7 @@ class StoreFetcher:
         raise LookupError(f'run {row.run_uuid}: no CalcJob includes {_SETTINGS_NAME}')
 
     def structure_text(self, row: Any) -> Optional[str]:
-        """The built ``<mat>_<n_layers>.lmp`` (`construction/components.py:2636`)
+        """The built ``<mat>_<n_layers>.lmp``
         among the ``structures`` inputs of the run's CalcJobs, or None."""
         from aiida import orm  # pylint: disable=import-outside-toplevel
         calc = orm.load_node(row.calc_uuid)
@@ -258,8 +257,8 @@ class StoreFetcher:
 
     def run_fields(self, row: Any) -> Dict[str, Any]:
         """The ``schema`` defaults of the row's CalcJob, overlaid with its
-        ``blocks`` fields, plus its ``derived`` fields as ``derived.<name>``
-        (`calcjob.py:161-166`). Read once per CalcJob."""
+        ``blocks`` fields, plus its ``derived`` fields as ``derived.<name>``.
+        Read once per CalcJob."""
         if row.calc_uuid not in self._fields:
             from aiida import orm  # pylint: disable=import-outside-toplevel
             calc = orm.load_node(row.calc_uuid)
@@ -303,7 +302,7 @@ def _excluded_rows(table: Any, kept: set) -> List[Dict[str, Any]]:
     their verdict: the identity columns `query._points` gives every point,
     plus ``set``, ``verdict_uuid`` and ``verdict_status`` (``None`` for a
     point with no verdict). The selection is `steps._dataset_rows`' own
-    (steps.py:1722-1727) under the dataset's stored policy.
+    under the dataset's stored policy.
 
     A ``complete`` point the dataset left out (it had no summary under the
     dataset's options) is not a drop for its verdict; it is logged and left out.

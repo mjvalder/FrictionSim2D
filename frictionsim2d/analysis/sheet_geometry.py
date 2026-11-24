@@ -1,6 +1,6 @@
 """Surface geometry of a built sheet: the lattice period along the scan.
 
-Port of ``ML_taxonomy/scripts/s42_sheet_geometry.py``. One row per material
+Method as in ML_taxonomy's ``s42_sheet_geometry.py``. One row per material
 and layer count, computed once from the run's built (unrelaxed)
 ``<mat>_<n>.lmp`` -- the same lattice and orientation as the MD runs -- and
 the element/type map and layer groups of its ``system.in.settings``.
@@ -25,7 +25,7 @@ from .source import PASS_STATUS, material_names
 
 __all__ = ['TOP_TOL', 'SheetGeometry', 'describe', 'read_lmp', 'read_settings']
 
-#: Atoms within this of the highest one form the top plane (s42:42, A).
+#: Atoms within this of the highest one form the top plane (A).
 TOP_TOL = 0.35
 
 
@@ -37,7 +37,7 @@ _ATOM_COLUMNS = {'atomic': (1, 2), 'molecular': (2, 3), 'bond': (2, 3), 'angle':
 
 
 def read_lmp(text: str) -> Tuple[Dict[str, float], np.ndarray, np.ndarray]:
-    """``(box, types, xyz)`` of a LAMMPS data file's ``Atoms`` block (s42:53-60),
+    """``(box, types, xyz)`` of a LAMMPS data file's ``Atoms`` block,
     the columns chosen by its ``# <style>`` hint (``atomic`` without one).
 
     Raises:
@@ -60,7 +60,7 @@ def read_lmp(text: str) -> Tuple[Dict[str, float], np.ndarray, np.ndarray]:
 
 def read_settings(text: str) -> Tuple[Dict[int, str], Dict[str, float], Dict[int, Set[int]]]:
     """``(type -> element, element -> tip LJ sigma, layer index -> types)`` of a
-    ``system.in.settings`` (s42:63-73). The sigma map is empty without a tip."""
+    ``system.in.settings``. The sigma map is empty without a tip."""
     elem: Dict[int, str] = {}
     for spec, name in re.findall(r'^mass ([\d*]+) \S+ #(\w+)', text, re.M):
         for t in expand_lammps_types(spec):
@@ -74,7 +74,7 @@ def read_settings(text: str) -> Tuple[Dict[int, str], Dict[str, float], Dict[int
 
 def _period_x(wrapped: np.ndarray, tree: cKDTree, cell: List[float]) -> float:
     """Shortest x shift mapping the plane onto itself: a 0.01 A scan from 0.5 A,
-    then a 0.002 A refinement over the next 0.08 A (s42:112-120)."""
+    then a 0.002 A refinement over the next 0.08 A."""
     for d0 in np.arange(0.5, 12.0, 0.01):
         if np.median(tree.query(np.mod(wrapped + [d0, 0], cell))[0]) < 0.05:
             cand = np.arange(d0, d0 + 0.08, 0.002)
@@ -86,7 +86,7 @@ def _period_x(wrapped: np.ndarray, tree: cKDTree, cell: List[float]) -> float:
 def _hollow_radius(xy: np.ndarray, box: Dict[str, float]) -> float:
     """Radius of the largest empty circle between plane atoms: the 95th
     percentile of the Delaunay circumradii of the 3x3 periodic tiling,
-    over the triangles centred in the cell (s42:122-131)."""
+    over the triangles centred in the cell."""
     shifts = [(i * box['x'], j * box['y']) for i in (-1, 0, 1) for j in (-1, 0, 1)]
     tiles = np.vstack([xy + s for s in shifts])
     p = tiles[Delaunay(tiles).simplices]
@@ -104,7 +104,7 @@ def _hollow_radius(xy: np.ndarray, box: Dict[str, float]) -> float:
 def describe(box: Dict[str, float], typ: np.ndarray, xyz: np.ndarray,
              elem: Dict[int, str], sigma: Dict[str, float],
              layers: Dict[int, Set[int]]) -> Dict[str, Any]:
-    """The geometry columns of one built sheet (s42:89-145).
+    """The geometry columns of one built sheet.
 
     ``typ`` are the structure's types already shifted to the settings'
     numbering. The top layer is the highest ``layers`` index; the layer
@@ -155,7 +155,7 @@ def describe(box: Dict[str, float], typ: np.ndarray, xyz: np.ndarray,
 
 
 def _material(name: str) -> str:
-    """s42:138: ``h-MoS2`` -> ``h_MoS2``."""
+    """``h-MoS2`` -> ``h_MoS2``."""
     return name.replace('-', '_', 1) if name[:2] in ('h-', 't-', 'b-', 'p-') else name
 
 
@@ -194,7 +194,7 @@ class SheetGeometry(Analysis):
             text, row = found
             elem, sigma, groups_t = read_settings(source.settings_text(row))
             box, typ, xyz = read_lmp(text)
-            # system.in reads the sheet with a type offset (s42:85).
+            # system.in reads the sheet with a type offset.
             typ = typ + (min(t for ts in groups_t.values() for t in ts) - typ.min())
             out.append({'material': material,
                         'layer': layers if layers is not None else max(groups_t),

@@ -1,20 +1,16 @@
 """Physical scales, an energy-balance residual and sliding descriptors of each
 AFM or sheet-on-sheet run. One row per run.
 
-Ports of ML_taxonomy's taxlib, value by value (each function cites its
-source), on the window tier (and, for ``e_int_rel``, the peratom tier):
+Method as in ML_taxonomy's taxlib, on the window tier (and, for ``e_int_rel``, the
+peratom tier):
 
-- scales (``taxlib/scales.py``): ``K_fit``, ``K_fit_r2`` (``spring_fit``
-  :10-19), ``K_nN_A``/``K_source`` (``_pick_K`` :38-47), ``F_N_nN``/``F_N_source``
-  (:63), ``sigma_th_nN`` and ``W_fric_eV`` (:65-70), ``n_skip`` (:22-27,
-  :func:`.periods.settle_skip`);
-- physics (``taxlib/physics.py``): ``spring_K_ratio`` (:56),
-  ``energy_resid_rel`` (``_energy`` :26-42, :59);
-- features (``taxlib/features.py``): ``cof_mean`` (:61), ``stick_frac`` (:71),
-  ``sheet_carried`` (:70), ``il_slip_frac`` (:86), ``ageing`` (``lat_growth_rel``
-  :62), ``e_int_rel`` (:129);
-- phenomena (``taxlib/phenomena.py``): ``cof_se`` (``_se`` :18-23),
-  ``superlubric_margin`` (:60), ``lattice_periodicity`` (``_periodicity`` :26-38).
+- scales: ``K_fit``, ``K_fit_r2`` (``spring_fit``), ``K_nN_A``/``K_source``,
+  ``F_N_nN``/``F_N_source``, ``sigma_th_nN``, ``W_fric_eV`` and ``n_skip``
+  (:func:`.periods.settle_skip`);
+- physics: ``spring_K_ratio``, ``energy_resid_rel``;
+- features: ``cof_mean``, ``stick_frac``, ``sheet_carried``, ``il_slip_frac``,
+  ``ageing`` (``lat_growth_rel``), ``e_int_rel``;
+- phenomena: ``cof_se``, ``superlubric_margin``, ``lattice_periodicity``.
   ``superlubric_margin`` is computed as |mean lf| / its block standard error:
   taxlib's |cof_mean| / cof_se with the load cancelled, so it is defined where
   ``F_N_nN`` is NaN (a pressure-loaded sheet run) and cof_mean, cof_se are not.
@@ -53,27 +49,26 @@ __all__ = ['SlidingPhysics', 'SlidingPhysicsParams', 'ageing', 'block_se', 'body
            'lattice_periodicity', 'pick_k', 'sheet_carried', 'shear_strength_gpa',
            'sigma_th', 'spring_fit', 'stick_frac', 'superlubric_margin']
 
-#: Boltzmann constant, eV/K (taxlib/constants.py:2).
+#: Boltzmann constant, eV/K.
 KB_EV = 8.617333262e-5
-#: 1 eV/A = 1.602 nN; 1 eV = 1.602 nN A (taxlib/constants.py:3).
+#: 1 eV/A = 1.602 nN; 1 eV = 1.602 nN A.
 EV_TO_NN_A = 1.602176634
-#: Sign of the thermostat work in the energy balance (taxlib/constants.py:11).
+#: Sign of the thermostat work in the energy balance.
 THERMO_SIGN = 1.0
-#: Below this stretch range (A) the spring fit is unidentifiable (scales.py:7).
+#: Below this stretch range (A) the spring fit is unidentifiable.
 MIN_STRETCH_RANGE = 0.5
-#: The channels of the energy balance (physics.py:23), beside lfx and tipz.
+#: The channels of the energy balance, beside lfx and tipz.
 ENERGY_COLS = ('etotal', 'w_thermostat_tip', 'w_thermostat_sub')
-#: Samples after the transient below which the whole run is the body
-#: (features.py:54, phenomena.py:46).
+#: Samples after the transient below which the whole run is the body.
 MIN_BODY = 100
-#: Samples averaged at each end for ``ageing`` (features.py:62).
+#: Samples averaged at each end for ``ageing``.
 END_SAMPLES = 100
-#: Blocks of the standard error (phenomena.py:18) and the fewest samples per block (:20).
+#: Blocks of the standard error and the fewest samples per block.
 SE_BLOCKS = 10
 SE_MIN_PER_BLOCK = 5
-#: A sample sticks when the tip advances by less than this many drive steps (features.py:71).
+#: A sample sticks when the tip advances by less than this many drive steps.
 STICK_DX = 0.1
-#: The lattice band of ``lattice_periodicity``, in 1/a (phenomena.py:36), and its grid (:31).
+#: The lattice band of ``lattice_periodicity``, in 1/a, and its grid.
 BAND = (0.75, 1.25)
 PERIODICITY_GRID = 512
 #: The channels only a tip run has.
@@ -97,7 +92,7 @@ NAN = float('nan')
 
 def spring_fit(lfx: np.ndarray, tipx: np.ndarray, dx: float) -> Tuple[float, float]:
     """``(K nN/A, r^2)`` of ``lfx = K (dx * step - (tipx - tipx0)) + c``
-    (scales.py:10-19); NaN when the stretch varies by less than
+; NaN when the stretch varies by less than
     :data:`MIN_STRETCH_RANGE` or a value is not finite."""
     lfx = np.asarray(lfx, dtype=float)
     tipx = np.asarray(tipx, dtype=float)
@@ -111,7 +106,7 @@ def spring_fit(lfx: np.ndarray, tipx: np.ndarray, dx: float) -> Tuple[float, flo
 
 def pick_k(provenance: float, run_fit: float) -> Tuple[float, str]:
     """``(K, source)``: the recorded spring, else this run's positive fit
-    (scales.py:38-47; taxlib's middle choice, the material's median fit, is
+    (taxlib's middle choice, the material's median fit, is
     campaign-wide and left out)."""
     if provenance is not None and np.isfinite(provenance):
         return float(provenance), 'provenance'
@@ -121,14 +116,14 @@ def pick_k(provenance: float, run_fit: float) -> Tuple[float, str]:
 
 
 def sigma_th(k: float, temperature: float) -> float:
-    """Thermal force noise sqrt(K kB T), nN (scales.py:65, :69): K nN/A, T K."""
+    """Thermal force noise sqrt(K kB T), nN: K nN/A, T K."""
     if not np.isfinite(k):
         return NAN
     return float(np.sqrt(k * KB_EV * temperature * EV_TO_NN_A))
 
 
 def friction_work(lfx: np.ndarray, length: float) -> float:
-    """``mean(lfx) * L`` in eV (scales.py:70): lfx nN, L A."""
+    """``mean(lfx) * L`` in eV: lfx nN, L A."""
     return float(np.mean(lfx)) * length / EV_TO_NN_A
 
 
@@ -139,7 +134,7 @@ def friction_work(lfx: np.ndarray, length: float) -> float:
 def energy_residual(w: pd.DataFrame, f_n: float, dx: float, w_fric: float,
                     w_floor: float, k: float) -> float:
     """End residual of the energy balance over max(|W_fric|, floor), 1
-    (physics.py:26-42): ``dE_tot - W_drive - W_load + THERMO_SIGN dW_thermostat
+: ``dE_tot - W_drive - W_load + THERMO_SIGN dW_thermostat
     + dE_spring``, all eV. NaN without :data:`ENERGY_COLS` or a scale."""
     scale = max(abs(w_fric), w_floor) if np.isfinite(w_floor) else abs(w_fric)
     if not all(c in w.columns for c in ENERGY_COLS) or not np.isfinite(scale) or scale < 1e-9:
@@ -150,7 +145,7 @@ def energy_residual(w: pd.DataFrame, f_n: float, dx: float, w_fric: float,
     w_drive = np.cumsum(lf) * dx / EV_TO_NN_A
     tz = w['tipz'].to_numpy(float)
     w_load = f_n * (tz[0] - tz) / EV_TO_NN_A
-    # the drive spring's 1/2 K s^2 = F^2 / (2K) is not in etotal (physics.py:39-40)
+    # the drive spring's 1/2 K s^2 = F^2 / (2K) is not in etotal
     e_spring = (lf ** 2 - lf[0] ** 2) / (2 * k) / EV_TO_NN_A if np.isfinite(k) and k > 0 else 0.0
     r = (e - e[0]) - w_drive - w_load + THERMO_SIGN * (wth - wth[0]) + e_spring
     return float(r[-1] / scale)
@@ -162,13 +157,13 @@ def energy_residual(w: pd.DataFrame, f_n: float, dx: float, w_fric: float,
 
 def body_start(n: int, n_skip: int) -> int:
     """First sample after the transient, or 0 when fewer than
-    :data:`MIN_BODY` would be left (features.py:54, phenomena.py:46)."""
+    :data:`MIN_BODY` would be left."""
     return int(n_skip) if n - int(n_skip) >= MIN_BODY else 0
 
 
 def block_se(lf: np.ndarray, f_n: float) -> float:
     """Standard error of the mean friction over :data:`SE_BLOCKS` blocks,
-    over the load, 1 (phenomena.py:18-23)."""
+    over the load, 1."""
     lf = np.asarray(lf, dtype=float)
     n = (len(lf) // SE_BLOCKS) * SE_BLOCKS
     if n < SE_BLOCKS * SE_MIN_PER_BLOCK:
@@ -178,7 +173,7 @@ def block_se(lf: np.ndarray, f_n: float) -> float:
 
 
 def superlubric_margin(lf: np.ndarray) -> float:
-    """|cof_mean| / cof_se (phenomena.py:60), 1. Both divide by the load, so
+    """|cof_mean| / cof_se, 1. Both divide by the load, so
     it is |mean lf| / its block standard error: no load is needed."""
     lf = np.asarray(lf, dtype=float)
     se = block_se(lf, 1.0)
@@ -186,7 +181,7 @@ def superlubric_margin(lf: np.ndarray) -> float:
 
 
 def stick_frac(tipx: np.ndarray, dx: float) -> float:
-    """Share of samples whose tip advance is under ``STICK_DX * dx``, 1 (features.py:71)."""
+    """Share of samples whose tip advance is under ``STICK_DX * dx``, 1."""
     return float((np.diff(np.asarray(tipx, dtype=float)) < STICK_DX * dx).mean())
 
 
@@ -195,14 +190,14 @@ def _advance(x: np.ndarray) -> float:
 
 
 def sheet_carried(comx: np.ndarray, tipx: np.ndarray, a: float) -> float:
-    """Top-layer advance / tip advance, 1 (features.py:70); NaN when the tip
+    """Top-layer advance / tip advance, 1; NaN when the tip
     advanced no more than ``a``."""
     adv = _advance(np.asarray(tipx, dtype=float))
     return _advance(np.asarray(comx, dtype=float)) / adv if abs(adv) > a else NAN
 
 
 def il_slip_frac(comx_l1: np.ndarray, comx_l2: np.ndarray, tipx: np.ndarray, a: float) -> float:
-    """Layer-2-over-layer-1 slip / tip advance, 1 (features.py:83-86)."""
+    """Layer-2-over-layer-1 slip / tip advance, 1."""
     adv = _advance(np.asarray(tipx, dtype=float))
     slip = np.asarray(comx_l2, dtype=float) - np.asarray(comx_l1, dtype=float)
     return _advance(slip) / adv if abs(adv) > a else NAN
@@ -210,7 +205,7 @@ def il_slip_frac(comx_l1: np.ndarray, comx_l2: np.ndarray, tipx: np.ndarray, a: 
 
 def lattice_periodicity(tipx: np.ndarray, lfx: np.ndarray, a: float) -> float:
     """Share of the detrended lateral-force power (against tip position)
-    within :data:`BAND` of 1/a, 1 (phenomena.py:26-38)."""
+    within :data:`BAND` of 1/a, 1."""
     x, f = np.asarray(tipx, dtype=float), np.asarray(lfx, dtype=float)
     if not np.isfinite(a) or a <= 0 or (x.max() - x.min()) < 2 * a:
         return NAN
@@ -226,7 +221,7 @@ def lattice_periodicity(tipx: np.ndarray, lfx: np.ndarray, a: float) -> float:
 
 
 def ageing(lf: np.ndarray, sigma: float) -> float:
-    """(late - early mean friction) / |mean|, 1 (features.py:62, phenomena.py:58);
+    """(late - early mean friction) / |mean|, 1;
     NaN when the mean is under ``sigma_th / 10``."""
     lf = np.asarray(lf, dtype=float)
     mean = abs(lf.mean())
@@ -236,7 +231,7 @@ def ageing(lf: np.ndarray, sigma: float) -> float:
 
 
 def e_int_rel(e_int: np.ndarray, f_n: float, a: float) -> float:
-    """Mean tip-sheet interaction energy / (F_N a), 1 (features.py:129):
+    """Mean tip-sheet interaction energy / (F_N a), 1:
     E eV, F_N nN, a A."""
     return float(np.mean(e_int)) * EV_TO_NN_A / (f_n * a)
 
@@ -271,7 +266,7 @@ def _finite(value: Any) -> Optional[float]:
 
 def load_scale(row: Any) -> Tuple[float, str]:
     """``(F_N nN, source)``: the achieved load, else the requested force
-    (scales.py:63). A pressure run has no force: NaN."""
+. A pressure run has no force: NaN."""
     achieved = _finite(getattr(row, 'load_achieved', None))
     if achieved is not None:
         return achieved, 'provenance'

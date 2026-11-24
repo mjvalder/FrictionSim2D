@@ -1,27 +1,26 @@
 """Does the tip stick-slip at the lattice period? One row per AFM run.
 
-Port of ``ML_taxonomy/scripts/s39_stickslip_v2.py`` (``measure`` :146-169)
-and of taxlib's slip count (``taxlib/plausibility.py`` ``slip_quantisation``
-:51-73), which s39 merges in as ``slips_per_period_taxlib`` (:214-215).
+Method as in ML_taxonomy's ``s39_stickslip_v2.py`` and its taxlib slip count
+(``slip_quantisation``), merged in as ``slips_per_period_taxlib``.
 
 The tip rings on its spring after every slip; the ring period is the
 strongest bounded component of the cubic-detrended ``raw_tipx`` spectrum, and
 ``raw_lfx``, ``raw_tipx`` and ``E_int_tip_sheet`` are averaged over one ring
-period before anything else (s39:6-10).
+period before anything else.
 
 1. Lateral-force period: the smoothed, quadratic-detrended force binned on
    the tip's furthest-reached displacement; the first clear peak of its
-   autocorrelation after it first falls below 0 (s39:12-17).
+   autocorrelation after it first falls below 0.
 2. Slips: smoothed-force drops larger than :data:`SLIP_K` robust sd during
-   which the tip advances >= :data:`MIN_SLIP_A` lattice periods (s39:18-22).
+   which the tip advances >= :data:`MIN_SLIP_A` lattice periods.
 3. Energy oscillation: the peak-to-trough of the smoothed ``E_int_tip_sheet``
-   inside each whole lattice period of tip travel, averaged (s39:23-26).
+   inside each whole lattice period of tip travel, averaged.
 
 ``slips_per_period_taxlib`` counts tip-advance jumps on the window tier
 (taxlib's ``tipx``), with taxlib's own lattice ``a`` (param ``taxlib_a``,
-the materials database ``lat_a`` of taxlib_adapter.py:46-51; ``a_x`` when not
-given). s39's ``pes_*`` and ``cof`` columns (:217-220) are joins with other
-tables and are not carried (spec §5.2: no cross-type joins).
+the materials database ``lat_a``; ``a_x`` when not
+given). s39's ``pes_*`` and ``cof`` columns are joins with other
+tables and are not carried (no cross-type joins).
 """
 from __future__ import annotations
 
@@ -40,24 +39,24 @@ __all__ = ['BIN_A', 'LOCK', 'MIN_OVERLAP', 'MIN_SLIP_A', 'RING', 'R_CLEAR', 'SLI
            'StickSlip', 'StickSlipParams', 'TAXLIB_SLIP_K', 'measure', 'on_displacement',
            'period_from_acf', 'ring_period', 'slips', 'slips_per_period_taxlib']
 
-#: Displacement bin of the lateral-force autocorrelation (s39:50, A).
+#: Displacement bin of the lateral-force autocorrelation (A).
 BIN_A = 0.05
-#: A of overlapping travel behind every autocorrelation lag (s39:51).
+#: A of overlapping travel behind every autocorrelation lag.
 MIN_OVERLAP = 3.0
-#: An autocorrelation peak at least this high is a clear period (s39:52).
+#: An autocorrelation peak at least this high is a clear period.
 R_CLEAR = 0.3
-#: A clear period within this ratio of a_x is locked to the lattice (s39:53, :221).
+#: A clear period within this ratio of a_x is locked to the lattice.
 LOCK = (0.8, 1.25)
-#: Bounds on the tip's ring period (s39:54, raw samples).
+#: Bounds on the tip's ring period.
 RING = (30, 150)
-#: A slip drops the smoothed force by this many robust sd (s39:55).
+#: A slip drops the smoothed force by this many robust sd.
 SLIP_K = 1.5
-#: ... while the tip advances by at least this many lattice periods (s39:56).
+#: ... while the tip advances by at least this many lattice periods.
 MIN_SLIP_A = 0.3
 #: taxlib: a window sample slips when the tip advances by more than the drive
-#: step plus this many robust sd of its own jitter (plausibility.py:18).
+#: step plus this many robust sd of its own jitter.
 TAXLIB_SLIP_K = 5.0
-#: taxlib: a slip event covers at least this many lattice periods (plausibility.py:19).
+#: taxlib: a slip event covers at least this many lattice periods.
 TAXLIB_MIN_SLIP_A = 0.3
 #: The drop reasons of a run without the tiers s39 reads (s39:212 keeps a
 #: run only if it has both).
@@ -68,14 +67,14 @@ UNMEASURABLE = 'stick_slip_unmeasurable'
 
 
 def detrend(f: np.ndarray, order: int = 2) -> np.ndarray:
-    """``f`` less its polynomial fit in sample index (s39:63-65)."""
+    """``f`` less its polynomial fit in sample index."""
     i = np.arange(len(f), dtype=float)
     return f - np.polyval(np.polyfit(i, f, order), i)
 
 
 def ring_period(x: np.ndarray, bounds: Tuple[float, float] = RING) -> float:
     """Dominant oscillation period (samples) of the cubic-detrended tip
-    position, within ``bounds`` (s39:68-75)."""
+    position, within ``bounds``."""
     i = np.arange(len(x), dtype=float)
     y = x - np.polyval(np.polyfit(i, x, 3), i)
     p = np.abs(np.fft.rfft(y * np.hanning(len(y)))) ** 2
@@ -87,7 +86,7 @@ def ring_period(x: np.ndarray, bounds: Tuple[float, float] = RING) -> float:
 def on_displacement(x: np.ndarray, f: np.ndarray,
                     bin_a: float = BIN_A) -> Tuple[np.ndarray, np.ndarray]:
     """``f`` binned on the furthest-reached displacement; empty bins (slips)
-    interpolated (s39:78-87)."""
+    interpolated."""
     s = np.maximum(np.maximum.accumulate(x - x[0]), 0.0)
     edges = np.arange(0.0, s[-1] + bin_a, bin_a)
     k = np.clip(np.digitize(s, edges) - 1, 0, len(edges) - 1)
@@ -100,7 +99,7 @@ def on_displacement(x: np.ndarray, f: np.ndarray,
 
 def lag_acf(y: np.ndarray, max_lag: int) -> np.ndarray:
     """Pearson r(lag) for lag = 0..max_lag samples, each lag on its own
-    overlap (s39:90-98)."""
+    overlap."""
     r = np.full(max_lag + 1, np.nan)
     r[0] = 1.0
     for k in range(1, max_lag + 1):
@@ -113,7 +112,7 @@ def lag_acf(y: np.ndarray, max_lag: int) -> np.ndarray:
 def period_from_acf(grid: np.ndarray, y: np.ndarray, min_overlap: float = MIN_OVERLAP,
                     r_clear: float = R_CLEAR) -> Tuple[float, float, bool]:
     """``(period A, r at the peak, clear?)`` from the displacement
-    autocorrelation (s39:101-117)."""
+    autocorrelation."""
     step = grid[1] - grid[0] if len(grid) > 1 else BIN_A
     max_lag = int((grid[-1] - grid[0] - min_overlap) / step)
     if max_lag < 4:
@@ -134,7 +133,7 @@ def period_from_acf(grid: np.ndarray, y: np.ndarray, min_overlap: float = MIN_OV
 def slips(fs: np.ndarray, xs: np.ndarray, a: float, k: float = SLIP_K,
           min_slip_a: float = MIN_SLIP_A) -> Tuple[np.ndarray, np.ndarray, float]:
     """``(drops, tip advances, threshold)``: smoothed-force drops > ``k`` x
-    robust scatter with a tip slip (s39:120-134)."""
+    robust scatter with a tip slip."""
     det = detrend(fs)
     thr = k * 1.4826 * np.median(np.abs(det - np.median(det)))
     peaks, _ = find_peaks(fs, prominence=thr)
@@ -152,7 +151,7 @@ def slips(fs: np.ndarray, xs: np.ndarray, a: float, k: float = SLIP_K,
 
 def energy_amplitude(x_e: np.ndarray, e: np.ndarray, a: float, w: int) -> Tuple[float, int]:
     """Mean peak-to-trough of E inside each whole lattice period of
-    furthest-reached travel, and the number of periods (s39:137-143)."""
+    furthest-reached travel, and the number of periods."""
     s = np.maximum.accumulate(x_e - x_e[0])
     e = uniform_filter1d(e, max(w, 1), mode='nearest')
     inside = [(s >= i * a) & (s < (i + 1) * a) for i in range(int(s[-1] // a))]
@@ -161,13 +160,13 @@ def energy_amplitude(x_e: np.ndarray, e: np.ndarray, a: float, w: int) -> Tuple[
 
 
 def measure(raw: pd.DataFrame, pa: pd.DataFrame, a: float) -> Dict[str, Any]:
-    """s39's columns of one run (``measure`` :146-169). ``raw``: ``time``,
+    """s39's columns of one run. ``raw``: ``time``,
     ``raw_tipx``, ``raw_lfx``; ``pa``: ``time``, ``E_int_tip_sheet``.
 
-    s39 maps the peratom samples onto the raw ones by ``step * 10`` (:159)
-    and smooths E over ``ring / 10`` of its samples (:160): the two tiers'
+    s39 maps the peratom samples onto the raw ones by ``step * 10``
+    and smooths E over ``ring / 10`` of its samples: the two tiers'
     sampling ratio. Here both are placed by their MD ``time``, and the ratio
-    is the tiers' own (10 for the 260909 campaign: raw every 100 steps,
+    is the tiers' own (10 when raw is every 100 steps,
     peratom every 1000).
     """
     # pylint: disable=too-many-locals
@@ -204,12 +203,12 @@ def measure(raw: pd.DataFrame, pa: pd.DataFrame, a: float) -> Dict[str, Any]:
 
 def slips_per_period_taxlib(tipx: np.ndarray, dx: float, a: float,
                             travel: float) -> Tuple[float, float]:
-    """``(slip_len_a, slips_per_period)`` of taxlib (plausibility.py:51-73) on
+    """``(slip_len_a, slips_per_period)`` of taxlib on
     the window's ``tipx``: a sample slips when the tip advances more than the
     drive step ``dx`` plus :data:`TAXLIB_SLIP_K` robust sd of its jitter;
     consecutive slipping samples make one event, kept when it covers
     >= :data:`TAXLIB_MIN_SLIP_A` ``a``. ``travel`` is taxlib's ``L = dx * N``
-    (scales.py:66)."""
+."""
     dtx = np.diff(np.asarray(tipx, dtype=float))
     jit = 1.4826 * np.median(np.abs(dtx - np.median(dtx)))      # the run's own thermal jitter
     slipping = dtx > dx + TAXLIB_SLIP_K * jit
@@ -251,7 +250,7 @@ class StickSlip(PeriodDepends, Analysis):
         no ``a_x`` (:data:`~.periods.NO_PERIOD`), no raw tier (:data:`NO_RAW`),
         no peratom tier (:data:`NO_PERATOM`), or a trace the measures cannot
         be taken on (:data:`UNMEASURABLE`) is dropped. With no drive step,
-        ``slips_per_period_taxlib`` is NaN (s39 merges it ``how='left'``, :215)."""
+        ``slips_per_period_taxlib`` is NaN (merged ``how='left'``)."""
         rows = window_rows(source, params)
         period = period_map(source, params)
         out: List[Dict[str, Any]] = []

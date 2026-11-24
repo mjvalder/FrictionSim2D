@@ -1,8 +1,7 @@
 """Tip-sheet contact at the loaded state (before sliding) and at the end of the slide.
 
-Port of ``ML_taxonomy/scripts/s40_contact_loaded.py`` (``one`` :101-163), whose
-parsing and contact rule are ``s36_contact_endstates.py``'s (``read`` :30,
-``setup`` :58). One row per run and state: ``load`` reads ``load_<F>N.data``
+Method as in ML_taxonomy's ``s40_contact_loaded.py``, whose parsing and
+contact rule are ``s36_contact_endstates.py``'s. One row per run and state: ``load`` reads ``load_<F>N.data``
 (after loading, before sliding), ``final`` the point's end snapshot
 (``final_f<F>N_a0.data`` at 0 degrees).
 
@@ -20,8 +19,8 @@ Per snapshot:
 3. the unshifted tip x sheet LJ energy within :data:`CUTOFF`, total and per
    contact atom, beside ``E_int_tip_sheet`` at step 0 of the slide.
 
-The tip is the settings' ``tip_all`` group (s40 hard-codes types 4-6); the top
-layer is its highest ``layer_<i>`` group, the sheet all of them (s36:62-67).
+The tip is the settings' ``tip_all`` group (ML_taxonomy hard-codes types 4-6); the top
+layer is its highest ``layer_<i>`` group, the sheet all of them.
 """
 from __future__ import annotations
 
@@ -40,17 +39,17 @@ from .periods import (NO_PERIOD, PeriodDepends, WindowParams, material_key, peri
 __all__ = ['CUTOFF', 'FAR', 'RMIN', 'SUBLAYER_DZ', 'Contact', 'ContactParams', 'anion',
            'contact_metrics', 'lj_energy', 'tip_pairs']
 
-#: LJ cutoff of the tip-sheet energy, as in the runs (s40:51, A).
+#: LJ cutoff of the tip-sheet energy, as in the runs (A).
 CUTOFF = 11.0
-#: Lateral distance from the tip axis beyond which the sheet is far field (s40:52, A).
+#: Lateral distance from the tip axis beyond which the sheet is far field (A).
 FAR = 25.0
-#: Top-layer types within this of the highest far-field level form the top sublayer (s40:53, A).
+#: Top-layer types within this of the highest far-field level form the top sublayer (A).
 SUBLAYER_DZ = 0.5
-#: The LJ minimum over sigma (s40:54).
+#: The LJ minimum over sigma.
 RMIN = 2 ** (1 / 6)
 #: The drop reason of a run whose snapshot of a state is not stored.
 NO_SNAPSHOT = 'no_{state}_snapshot'
-#: The drop reason of a snapshot s40's ``one`` could not read (it returns None, :103-105).
+#: The drop reason of a snapshot s40's ``one`` could not read.
 UNREADABLE = 'contact_unreadable_{state}'
 #: The drop reason of a state whose contact atoms are collinear (or coincide):
 #: their convex hull is flat, and scipy's Qhull raises instead of giving 0.
@@ -58,7 +57,7 @@ DEGENERATE = 'contact_degenerate_{state}'
 
 #: element -> (periodic group, Pauling electronegativity), the ``group`` and
 #: ``en`` columns of ML_taxonomy ``baseline_inputs/descriptors/elemental_properties.csv``
-#: (read at s40:59-60). Neither frictionsim2d/potentials/uff.py (LJ sigma/epsilon only)
+#: Neither frictionsim2d/potentials/uff.py (LJ sigma/epsilon only)
 #: nor frictionsim2d/data/materials (structure files) holds them.
 ELEMENTS: Dict[str, Tuple[int, float]] = {
     'B': (13, 2.04), 'C': (14, 2.55), 'O': (16, 3.44), 'Al': (13, 1.61), 'Si': (14, 1.9),
@@ -80,7 +79,7 @@ _LAYER = re.compile(r'^layer_(\d+)$')
 
 def tip_pairs(text: str, tip: Set[int]) -> Dict[int, Tuple[str, float, float]]:
     """``{sheet type: (element, eps, sigma)}`` of the tip-sheet LJ pairs whose
-    first type range is the tip's (s40:68-71)."""
+    first type range is the tip's."""
     return {t: (el, float(eps), float(sig))
             for first, spec, eps, sig, el in _PAIR.findall(text) if expand_lammps_types(first) & tip
             for t in expand_lammps_types(spec)}
@@ -88,7 +87,7 @@ def tip_pairs(text: str, tip: Set[int]) -> Dict[int, Tuple[str, float, float]]:
 
 def anion(elements: Set[str]) -> str:
     """The element furthest right in the periodic table, Pauling
-    electronegativity breaking ties (s40:151-155): electronegativity alone
+    electronegativity breaking ties: electronegativity alone
     picks the metal in W/Mo/Pt/Ir tellurides (Te 2.1 < W 2.36). An element
     missing from :data:`ELEMENTS` ranks last, as s40's ``.get(el, -1)``."""
     return max(elements, key=lambda el: ELEMENTS.get(el, (-1, -1)))
@@ -96,7 +95,7 @@ def anion(elements: Set[str]) -> str:
 
 def lj_energy(tip: np.ndarray, sheet: np.ndarray, sheet_t: np.ndarray,
               pairs: Dict[int, Tuple[str, float, float]]) -> float:
-    """Unshifted 12-6 LJ summed over tip x sheet pairs within :data:`CUTOFF` (s40:85-98)."""
+    """Unshifted 12-6 LJ summed over tip x sheet pairs within :data:`CUTOFF`."""
     tree = cKDTree(sheet)
     total = 0.0
     for i, nb in enumerate(tree.query_ball_point(tip, CUTOFF)):
@@ -114,7 +113,7 @@ def lj_energy(tip: np.ndarray, sheet: np.ndarray, sheet_t: np.ndarray,
 def contact_metrics(typ: np.ndarray, xyz: np.ndarray, area_xy: float, tip_types: Set[int],
                     top_types: Set[int], sheet_types: Set[int],
                     pairs: Dict[int, Tuple[str, float, float]], a_x: float) -> Dict[str, Any]:
-    """The contact columns of one snapshot (s40 ``one`` :107-163). ``area_xy``
+    """The contact columns of one snapshot. ``area_xy``
     is the box's xy area."""
     # pylint: disable=too-many-locals
     tip = xyz[np.isin(typ, list(tip_types))]
@@ -122,7 +121,7 @@ def contact_metrics(typ: np.ndarray, xyz: np.ndarray, area_xy: float, tip_types:
     top, top_t = xyz[top_m], typ[top_m]
     sheet_m = np.isin(typ, list(sheet_types))
 
-    # the top sublayer from the far field (s40:115-121)
+    # the top sublayer from the far field
     axis = tip[:, :2].mean(axis=0)
     far = np.linalg.norm(top[:, :2] - axis, axis=1) > FAR
     zt = {t: np.median(top[far & (top_t == t), 2]) for t in np.unique(top_t)
@@ -132,14 +131,14 @@ def contact_metrics(typ: np.ndarray, xyz: np.ndarray, area_xy: float, tip_types:
     sub_m = np.isin(top_t, sub_types)
     rho_sub = sub_m.sum() / area_xy
 
-    # 1. contact, the s36 rule (s40:124-128; s36:85-88)
+    # 1. contact, the s36 rule
     d, _ = cKDTree(tip).query(top, k=1)
     lim = np.array([RMIN * pairs[int(t)][2] if int(t) in pairs else np.nan for t in top_t])
     c = top[d < lim]
     area = ConvexHull(c[:, :2]).volume if len(c) >= 3 else 0.0
     dens = (len(c) / area) / rho_sub if area > 0 else np.nan
 
-    # 2. interlocking: contact tip atoms vs the local top-sublayer surface (s40:131-143)
+    # 2. interlocking: contact tip atoms vs the local top-sublayer surface
     dt, it = cKDTree(top).query(tip, k=1)
     sig_near = np.array([pairs[int(t)][2] for t in top_t[it]])
     ctip = tip[dt < RMIN * sig_near]
@@ -155,7 +154,7 @@ def contact_metrics(typ: np.ndarray, xyz: np.ndarray, area_xy: float, tip_types:
             below.append(bool(p[2] < subz[nb].max()))
     h = np.array(hs)
 
-    # 3. tip-sheet LJ energy (s40:146)
+    # 3. tip-sheet LJ energy
     e = lj_energy(tip, xyz[sheet_m], typ[sheet_m], pairs)
 
     els = {el for el, _, _ in pairs.values()}
@@ -174,7 +173,7 @@ def contact_metrics(typ: np.ndarray, xyz: np.ndarray, area_xy: float, tip_types:
 
 def _layers(groups: Dict[str, Set[int]]) -> Tuple[Set[int], Set[int]]:
     """``(top layer types, sheet types)``: the highest ``layer_<i>`` group and
-    the union of them all (s36:62-67 for one or two layers)."""
+    the union of them all."""
     layers = {int(m[1]): types for name, types in groups.items() if (m := _LAYER.match(name))}
     if not layers:
         raise KeyError('no layer_<i> group')
@@ -182,7 +181,7 @@ def _layers(groups: Dict[str, Set[int]]) -> Tuple[Set[int], Set[int]]:
 
 
 def _e_int_step0(frames: Dict[str, pd.DataFrame]) -> float:
-    """``E_int_tip_sheet`` at step 0 of the peratom tier (s40:174-177), NaN
+    """``E_int_tip_sheet`` at step 0 of the peratom tier, NaN
     without that tier, column or step."""
     peratom = frames.get('peratom')
     if peratom is None or 'E_int_tip_sheet' not in peratom or 'time' not in peratom:

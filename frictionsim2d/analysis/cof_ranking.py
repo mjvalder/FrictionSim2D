@@ -1,11 +1,10 @@
 """The materials ranked by their whole-period COF over a load window.
 
-Port of ``ML_taxonomy/scripts/rank_cof_v2.py`` (``main`` :64-114): each
+Method as in ML_taxonomy's ``rank_cof_v2.py``: each
 run's COF is its whole-period mean (:mod:`.periods`); a material's ``cof`` is
 the mean over the window loads, ``se`` their sample SD / sqrt(n). A material
 is ``eligible`` (ranked) only if every window load was run and passes the
-integrity check -- simulation failures alone set it aside (the ruling of
-2026-10-30 in rank_cof_v2's docstring, :13-15).
+integrity check -- simulation failures alone set it aside.
 """
 from __future__ import annotations
 
@@ -23,8 +22,8 @@ from .source import PASS_STATUS
 __all__ = ['NOT_RUN', 'CofRanking', 'WINDOW']
 
 #: Verdicts of a load point with no data to analyse: rank_cof_v2 keeps only
-#: ``~(i0_missing | unobserved)`` (:68), i.e. drops ``no_output``,
-#: ``not_reached``, ``unreadable`` and the frame-less ``halted`` (ingest_v2.py:140-142).
+#: ``~(i0_missing | unobserved)``, i.e. drops ``no_output``,
+#: ``not_reached``, ``unreadable`` and the frame-less ``halted``.
 NOT_RUN = frozenset({'no_output', 'not_reached', 'unreadable', 'halted'})
 
 
@@ -36,7 +35,7 @@ class RankingParams(WindowParams):
     """The window, the slice of the dataset and the tribology index.
 
     ``trib_index`` is rank_cof_v2's JSON (``materials``, ``tribIndex``,
-    ``dev``; :81-82), given as its content so the parameters hash covers it.
+    ``dev``), given as its content so the parameters hash covers it.
     """
 
     layer: int = 2
@@ -50,7 +49,7 @@ class RankingParams(WindowParams):
 
 def _material_row(material: str, loads: Tuple[float, ...], points: pd.DataFrame,
                   runs: Dict[float, Dict[str, Any]], a_x: float) -> Dict[str, Any]:
-    """rank_cof_v2.py:86-102 for one material. ``points``: its rows at the
+    """One material's row. ``points``: its rows at the
     window loads, any verdict; ``runs``: load -> period record of its pass
     runs. A non-pass run is never read, so its ``cof_<L>nN`` is NaN."""
     ran = points[~points['verdict_status'].isin(NOT_RUN)]
@@ -95,7 +94,7 @@ class CofRanking(PeriodDepends, Analysis):
     def compute(self, source, params) -> pd.DataFrame:
         """One row per material of the dataset at ``layer`` and ``angle``:
         the ranked ones by ``cof``, then the excluded ones by name
-        (rank_cof_v2.py:107-110)."""
+."""
         loads = tuple(float(f) for f in params.loads)
         scope = source.all_rows
         scope = scope[(scope['layers'] == params.layer)
