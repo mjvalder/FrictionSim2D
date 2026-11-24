@@ -52,3 +52,19 @@ def test_status_half_is_gone():
         assert not hasattr(_JobManifest, name), name
     for name in ('to_dict', 'from_dict'):
         assert not hasattr(_JobEntry, name), name
+
+
+def test_slide_script_names_carry_speed_force_and_angle(tmp_path):
+    lammps = tmp_path / "afm" / "graphene" / "L1" / "lammps"
+    lammps.mkdir(parents=True)
+    for name in ("slide_5p5ms.in", "slide_f2p5N.in", "slide_am30.in", "slide_a15p5.in", "slide.in"):
+        (lammps / name).write_text("# slide\n", encoding="utf-8")
+
+    jobs = {j.lammps_script: j for j in JobManifest.from_simulation_directory(tmp_path).jobs}
+
+    assert (jobs["slide_5p5ms.in"].speed, jobs["slide_5p5ms.in"].force) == (5.5, 0.0)
+    assert (jobs["slide_f2p5N.in"].force, jobs["slide_f2p5N.in"].speed) == (2.5, 2.0)
+    assert jobs["slide_am30.in"].angle == -30.0
+    assert jobs["slide_a15p5.in"].angle == 15.5
+    assert (jobs["slide.in"].speed, jobs["slide.in"].force, jobs["slide.in"].angle) == (2.0, 0.0, 0.0)
+    assert jobs["slide_f2p5N.in"].job_id == "afm_graphene_L1_slide_f2p5N"

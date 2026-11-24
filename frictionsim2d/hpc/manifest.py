@@ -49,6 +49,30 @@ def _mlip_job_fields(path_str: str) -> Dict[str, Any]:
     }
 
 
+def _slide_parameters(stem: str) -> Dict[str, float]:
+    """``speed``/``force``/``angle`` encoded in a slide script's name.
+
+    Tokens use ``p`` for the decimal point and ``m`` for a negative angle:
+    ``slide_20ms``, ``slide_f5p5N`` (per load), ``slide_am30`` (per angle).
+    """
+    speed = 2.0
+    speed_match = re.match(r"slide_([0-9]+(?:p[0-9]+)?)ms", stem)
+    if speed_match:
+        speed = float(speed_match.group(1).replace('p', '.'))
+    force = 0.0
+    force_match = re.match(r"slide_f([0-9]+(?:p[0-9]+)?)N$", stem)
+    if force_match:
+        force = float(force_match.group(1).replace('p', '.'))
+    angle = 0.0
+    angle_match = re.match(r"slide_a(m?[0-9]+(?:p[0-9]+)?)$", stem)
+    if angle_match:
+        token = angle_match.group(1)
+        sign = -1.0 if token.startswith('m') else 1.0
+        digits = token[1:] if token.startswith('m') else token
+        angle = sign * float(digits.replace('p', '.'))
+    return {'speed': speed, 'force': force, 'angle': angle}
+
+
 @dataclass
 class JobEntry:
     """Single simulation job.
@@ -183,68 +207,35 @@ class JobManifest:
                 'mlip': _mlip_job_fields(path_str),
             })
 
+        def entry(sim_info, script_name=None, **extra) -> JobEntry:
+            tag = f"_{Path(script_name).stem}" if script_name else ""
+            job_id = f"{sim_info['path_str']}{tag}".replace('/', '_').replace('-', '_')
+            return JobEntry(
+                job_id=job_id,
+                simulation_path=str(sim_info['rel_path']),
+                lammps_script=script_name,
+                material=sim_info['material'],
+                layers=sim_info['layers'],
+                **extra,
+                **sim_info['mlip'],
+            )
+
         for sim_info in sim_directories:
             lammps_dir = sim_info['lammps_dir']
             for script_name in sorted(p.name for p in lammps_dir.glob('system*.in')):
-                script_tag = Path(script_name).stem.replace('-', '_')
-                job_id = f"{sim_info['path_str']}_{script_tag}".replace('/', '_').replace('-', '_')
-                manifest.add_job(JobEntry(
-                    job_id=job_id,
-                    simulation_path=str(sim_info['rel_path']),
-                    lammps_script=script_name,
-                    material=sim_info['material'],
-                    layers=sim_info['layers'],
-                    **sim_info['mlip'],
-                ))
+                manifest.add_job(entry(sim_info, script_name))
 
         for sim_info in sim_directories:
             lammps_dir = sim_info['lammps_dir']
             slide_scripts = sorted(p.name for p in lammps_dir.glob('slide*.in'))
             if not slide_scripts:
                 if not list(lammps_dir.glob('system*.in')):
-                    job_id = sim_info['path_str'].replace('/', '_').replace('-', '_')
-                    manifest.add_job(JobEntry(
-                        job_id=job_id,
-                        simulation_path=str(sim_info['rel_path']),
-                        material=sim_info['material'],
-                        layers=sim_info['layers'],
-                        **sim_info['mlip'],
-                    ))
+                    manifest.add_job(entry(sim_info))
                 continue
 
             for script_name in slide_scripts:
-                stem = Path(script_name).stem
-                script_tag = stem.replace('-', '_')
-                job_id = f"{sim_info['path_str']}_{script_tag}".replace('/', '_').replace('-', '_')
-                speed = 2.0
-                speed_match = re.match(r"slide_([0-9]+(?:p[0-9]+)?)ms", stem)
-                if speed_match:
-                    speed = float(speed_match.group(1).replace('p', '.'))
-                # Per-load slide scripts (AFM outer_loop=force): slide_f<load>N.in
-                force = 0.0
-                force_match = re.match(r"slide_f([0-9]+(?:p[0-9]+)?)N$", stem)
-                if force_match:
-                    force = float(force_match.group(1).replace('p', '.'))
-                # Per-angle slide scripts (outer_loop=scan_angle): slide_a<token>.in,
-                # token from format_numeric_token: 'm' negative prefix, 'p' decimal.
-                angle = 0.0
-                angle_match = re.match(r"slide_a(m?[0-9]+(?:p[0-9]+)?)$", stem)
-                if angle_match:
-                    token = angle_match.group(1)
-                    sign = -1.0 if token.startswith('m') else 1.0
-                    digits = token[1:] if token.startswith('m') else token
-                    angle = sign * float(digits.replace('p', '.'))
-                manifest.add_job(JobEntry(
-                    job_id=job_id,
-                    simulation_path=str(sim_info['rel_path']),
-                    lammps_script=script_name,
-                    material=sim_info['material'],
-                    layers=sim_info['layers'],
-                    force=force,
-                    angle=angle,
-                    speed=speed,
-                    **sim_info['mlip'],
-                ))
+                manifest.add_job(entry(sim_info, script_name,
+                                       **_slide_parameters(Path(script_name).stem)))
         return manifest
 
     def __repr__(self) -> str:
