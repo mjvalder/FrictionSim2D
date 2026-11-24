@@ -436,10 +436,8 @@ def test_a_truncated_slide_trace_is_a_truncated_point(aiida_profile_clean, tmp_p
 
 def test_files_over_max_stored_file_mb_are_recorded_not_stored(aiida_profile_clean,
                                                               tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    monkeypatch.setattr('frictionsim2d.core.config.load_settings',   # every byte is over
-                        lambda settings_file=None: SimpleNamespace(
-                            aiida=SimpleNamespace(max_stored_file_mb=0)))
+    monkeypatch.setattr('frictionsim2d.aiida.calcjob.aiida_setting',   # every byte is over
+                        lambda name, default=None, settings_file=None: 0)
     root = tmp_path / 'sim'
     run_dir = make_family_run(root, 'afm', loads=(10.0, 30.0), tiers=('window', 'peratom'),
                               config=slide_config('afm', loads=(10.0, 30.0)))
@@ -611,10 +609,8 @@ def test_a_machine_label_with_another_host_is_reused_with_a_warning(aiida_profil
 
 def _with_settings_machine(monkeypatch, machine):
     """settings.aiida.machine = `machine`, as `aiida_setting` reads it."""
-    from types import SimpleNamespace
-    settings = SimpleNamespace(aiida=SimpleNamespace(machine=machine))
-    monkeypatch.setattr('frictionsim2d.core.config.load_settings',
-                        lambda settings_file=None: settings)
+    monkeypatch.setattr('frictionsim2d.aiida.ingest.aiida_setting',
+                        lambda name, default=None, settings_file=None: machine)
 
 
 def test_settings_aiida_machine_names_the_computer(aiida_profile_clean, tmp_path,
