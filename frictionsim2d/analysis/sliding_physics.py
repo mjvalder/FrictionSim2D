@@ -412,7 +412,7 @@ def join_contact(table: pd.DataFrame, contact: pd.DataFrame) -> pd.DataFrame:
 
 
 @register
-class SlidingPhysics(Analysis):  # pylint: disable=too-few-public-methods
+class SlidingPhysics(Analysis):
     """taxlib's per-run scales and sliding descriptors, plus the shear
     strength from a stored contact result."""
 

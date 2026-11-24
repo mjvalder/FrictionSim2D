@@ -83,7 +83,7 @@ def _material_row(material: str, loads: Tuple[float, ...], points: pd.DataFrame,
 
 
 @register
-class CofRanking(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
+class CofRanking(PeriodDepends, Analysis):
     """Each material's whole-period COF over the load window, and its rank."""
 
     name = 'cof_ranking'

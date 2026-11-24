@@ -167,7 +167,7 @@ class StoreFetcher:
         from aiida import orm
 
         from ..aiida.query import point_frames
-        from ..aiida.steps import _point_frames  # pylint: disable=protected-access
+        from ..aiida.steps import _point_frames
         frames = point_frames(row.calc_uuid, row.node_uuid)
         if 'peratom' in frames:
             return frames

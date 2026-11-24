@@ -76,7 +76,7 @@ class PesLandscapeParams(BaseModel):
 
 
 @register
-class PesLandscape(Analysis):  # pylint: disable=too-few-public-methods
+class PesLandscape(Analysis):
     """Barrier, corrugation, curvature and eta of each PES run's grid."""
 
     name = 'pes_landscape'

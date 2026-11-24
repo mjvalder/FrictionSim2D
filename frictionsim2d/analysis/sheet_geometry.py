@@ -160,7 +160,7 @@ def _material(name: str) -> str:
 
 
 @register
-class SheetGeometry(Analysis):  # pylint: disable=too-few-public-methods
+class SheetGeometry(Analysis):
     """Lattice period and surface geometry of each material's built sheet."""
 
     name = 'sheet_geometry'

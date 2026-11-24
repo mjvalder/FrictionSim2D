@@ -13,7 +13,7 @@ plus ``gap = comz_L2 - comz_L1``) with the point's stored s48 measures
 (``steps.check_integrity`` keeps them under ``measures``), never recomputed.
 ``run_status`` is one row per point: ``run_id, material, layer, force, angle,
 status`` (``run_status_l2.csv``'s columns) plus ``verdict``. ``status`` is the
-run's completion status (:func:`~frictionsim2d.postprocessing.run_status.completion_status`), ``verdict`` the stored
+run's completion status (``run_status.completion_status``), ``verdict`` the stored
 integrity verdict.
 """
 from __future__ import annotations
@@ -79,7 +79,7 @@ def _selected(row: Any, params: TraceParams) -> bool:
 
 
 @register
-class IntegrityTraces(Analysis):  # pylint: disable=too-few-public-methods
+class IntegrityTraces(Analysis):
     """Window-tier traces of every point that has one, failed points included."""
 
     name = 'integrity_traces'
@@ -121,7 +121,7 @@ class IntegrityTraces(Analysis):  # pylint: disable=too-few-public-methods
 
 
 @register
-class RunStatus(Analysis):  # pylint: disable=too-few-public-methods
+class RunStatus(Analysis):
     """The verdict status of every point of the dataset, failed ones included."""
 
     name = 'run_status'

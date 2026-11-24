@@ -30,7 +30,7 @@ IDENTITY_COLUMNS: Dict[str, Tuple[str, ...]] = {
 }
 
 
-class Analysis(ABC):  # pylint: disable=too-few-public-methods
+class Analysis(ABC):
     """One on-demand analysis of a dataset.
 
     Subclasses set the class attributes and implement :meth:`compute`.

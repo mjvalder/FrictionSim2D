@@ -569,7 +569,7 @@ def _grid_note(grid, config: Optional[dict], family: str) -> str:
 class _NpEncoder(json.JSONEncoder):
     """JSON encoder that handles NumPy and pandas types."""
 
-    def default(self, o):  # pylint: disable=arguments-renamed
+    def default(self, o):
         if isinstance(o, np.integer):
             return int(o)
         if isinstance(o, np.floating):

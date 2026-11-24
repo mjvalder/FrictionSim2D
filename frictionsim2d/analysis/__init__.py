@@ -5,8 +5,7 @@ points of one dataset (:class:`~frictionsim2d.analysis.source.RunSource`) and re
 one table, stored as a result (:mod:`frictionsim2d.analysis.store`) and reused while
 its name, version, parameters and dataset are unchanged.
 """
-# pylint: disable=import-outside-toplevel
-# Deliberate: like frictionsim2d/__init__.py, nothing is imported until it is asked for.
+# Like frictionsim2d/__init__.py, nothing is imported until it is asked for.
 from __future__ import annotations
 
 from importlib import import_module

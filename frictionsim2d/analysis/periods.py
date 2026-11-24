@@ -192,7 +192,7 @@ def run_periods(family: str, frames: Dict[str, pd.DataFrame], speed: float,
 
 def material_key(materials: Any) -> str:
     """The material name `sheet_geometry` keys its rows by (s42:138)."""
-    from .sheet_geometry import _material  # pylint: disable=import-outside-toplevel,protected-access
+    from .sheet_geometry import _material  # pylint: disable=import-outside-toplevel
     return _material(material_names(materials)[0])
 
 
@@ -398,7 +398,7 @@ def period_rows(source: Any, rows: pd.DataFrame, period: Dict[str, float]) -> Li
 
 
 @register
-class PeriodSummary(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
+class PeriodSummary(PeriodDepends, Analysis):
     """Per run: the COF, LF and NF over its whole lattice periods.
 
     Summary-shaped: ``id, material, size, layer, force, pressure, angle``

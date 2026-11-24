@@ -197,7 +197,7 @@ class ContactParams(WindowParams):
 
 
 @register
-class Contact(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
+class Contact(PeriodDepends, Analysis):
     """Tip-sheet contact, interlocking and LJ energy of each run's load and
     final snapshots."""
 

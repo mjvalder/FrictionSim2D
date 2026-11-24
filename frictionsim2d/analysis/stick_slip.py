@@ -236,7 +236,7 @@ class StickSlipParams(TaxlibParams, WindowParams):
 
 
 @register
-class StickSlip(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
+class StickSlip(PeriodDepends, Analysis):
     """Ring period, lateral-force period, slips and energy oscillation of
     each run's tip trajectory."""
 
