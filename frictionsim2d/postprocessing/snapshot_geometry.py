@@ -6,7 +6,6 @@ Pure functions; the snapshot itself is read with :func:`.integrity.read_snapshot
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Dict, Set, Tuple
 
 import numpy as np
