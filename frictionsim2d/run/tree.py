@@ -1,15 +1,8 @@
-"""Locating runs in a built simulation tree.
+"""Locating runs in a built simulation tree: one walk, one parser.
 
-One walk, one parser, offered to everything downstream. The AiiDA store was
-the first consumer; `postprocessing/read_data.py`, `postprocessing/pes_scan.py`
-and `postprocessing/indent.py` were moved onto it by the postprocessing rework
-(`docs/superpowers/specs/COMPLETED/2026-09-10-postprocessing-rework-design.md`)
-and no longer carry walkers of their own.
-
-`hpc enrich-provenance` (`run/hpc_dispatch.collect_hpc_simulation_paths`) still
-does, and deliberately: it collects directories that hold a *lammps script*,
-which exist before a run has produced anything, while a run here is one
-`provenance.json`. Do not claim it uses this module until it does.
+``hpc_dispatch.collect_hpc_simulation_paths`` keeps its own walk because it
+collects directories holding a lammps script, which exist before a run has
+produced a ``provenance.json``.
 """
 from __future__ import annotations
 
@@ -41,11 +34,8 @@ class RunLocator:
 def provenance_dir_for(run_dir: Path) -> Path:
     """Where `provenance/` lives for a run.
 
-    The AFM family writes `provenance.json` into the per-layer `L{n}` level
-    (`AFMSimulation.write_inputs` passes `output_dir_layer[n]`) while
-    `provenance/` -- config.json, manifest.json, cif/, potentials/ -- stays at
-    `output_dir_for`'s own directory, one level up. Sheet-like runs have both
-    in the same place.
+    The AFM family writes `provenance.json` into the per-layer `L{n}` level while
+    `provenance/` stays one level up; sheet-like runs have both in one place.
     """
     here = run_dir / 'provenance'
     if here.is_dir():
@@ -54,12 +44,7 @@ def provenance_dir_for(run_dir: Path) -> Path:
 
 
 def _walk_provenance_files(root: Path) -> Iterator[Tuple[str, Path]]:
-    """Every `provenance.json` under `<root>/<model>/`, as `(rel_path, file)`.
-
-    The single traversal :func:`discover_runs` and :func:`unparseable_runs`
-    both build on, so which runs are found and which are skipped can never
-    drift apart into two separate walks.
-    """
+    """Every `provenance.json` under `<root>/<model>/`, as `(rel_path, file)`."""
     root = Path(root)
     for model in MODELS:
         model_dir = root / model

@@ -35,11 +35,16 @@ class TestBlocker:
     def test_the_reason_names_the_setting_to_change(self):
         assert "'Modules'" in hpc_generation_blocker(GlobalSettings())
 
-    def test_the_reason_says_the_other_hpc_settings_do_not_substitute(self):
-        """Filling in scheduler, nodes and walltime looks like enough."""
+    def test_the_reason_names_all_three_environment_settings(self):
         reason = hpc_generation_blocker(GlobalSettings())
-        assert 'substitute' in reason
-        assert 'scheduler' in reason
+        for setting in ("'Modules'", "'Conda environment'", "'env_lines'"):
+            assert setting in reason
+
+    def test_a_conda_env_or_env_lines_alone_unblocks(self):
+        for field, value in (('conda_env', '$HOME/envs/lammps'), ('env_lines', ['module load x'])):
+            settings = GlobalSettings()
+            setattr(settings.hpc, field, value)
+            assert hpc_generation_blocker(settings) is None
 
     def test_configured_modules_are_not_blocked(self):
         assert hpc_generation_blocker(_settings_with_modules()) is None

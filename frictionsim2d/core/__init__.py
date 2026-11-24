@@ -34,10 +34,6 @@ __all__ = [
     "read_config",
     "get_potential_element_order",
     "check_potential_cif_compatibility",
-    "expand_config_sweeps",
-    "collect_hpc_simulation_paths",
-    "generate_hpc_scripts_for_root",
-    "run_simulations",
 ]
 # pylint: enable=undefined-all-variable
 
@@ -69,10 +65,6 @@ _EXPORT_MAP = {
     "check_potential_cif_compatibility": (
         "..potentials.utils", "check_potential_cif_compatibility"
     ),
-    "expand_config_sweeps": ("..run.expand", "expand_config_sweeps"),
-    "collect_hpc_simulation_paths": ("..run.hpc_dispatch", "collect_hpc_simulation_paths"),
-    "generate_hpc_scripts_for_root": ("..run.hpc_dispatch", "generate_hpc_scripts_for_root"),
-    "run_simulations": ("..run.simulate", "run_simulations"),
 }
 
 

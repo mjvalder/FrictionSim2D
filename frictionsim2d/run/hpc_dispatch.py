@@ -1,8 +1,7 @@
 """Driving HPC script generation over a finished output tree.
 
-Split out of frictionsim2d/core/run.py. Named hpc_dispatch rather than hpc so it does not
-read as a second frictionsim2d/hpc/ -- that package generates the scripts, this module
-decides when and over which directories to call it.
+``frictionsim2d/hpc/`` generates the scripts; this module decides when and over
+which directories to call it.
 """
 import logging
 from pathlib import Path
@@ -196,23 +195,16 @@ def generate_scripts_for_tree(
 def hpc_generation_blocker(settings) -> Optional[str]:
     """Why HPC script generation would be skipped, or None if it would run.
 
-    Generation has a precondition that is easy to miss: ``settings.hpc.modules``
-    defaults to unset, and without it nothing is written. Exposing the reason
-    lets a caller say so up front instead of appearing to succeed while
-    producing no scripts.
+    Nothing is written unless one of ``hpc.modules``, ``hpc.conda_env`` or
+    ``hpc.env_lines`` is set.
     """
     hpc = settings.hpc
-    if (not getattr(hpc, 'modules', None)
-            and not getattr(hpc, 'conda_env', None)
-            and not getattr(hpc, 'env_lines', None)):
+    if not hpc.modules and not hpc.conda_env and not hpc.env_lines:
         return (
             "The HPC 'Modules', 'Conda environment' and 'env_lines' settings are all "
-            "empty. One of them gates job-script generation: scheduler, nodes, CPUs and "
-            "walltime are all written into the scripts but none of them substitute "
-            "for saying where LAMMPS comes from. Set the environment modules your cluster loads "
-            "before running, e.g. 'lammps, openmpi', the conda prefix holding "
-            "lmp, e.g. '$HOME/envs/lammps', or explicit env_lines (e.g. an MLIP "
-            "build's 'source .../activate')."
+            "empty. Set one of them so the scripts know where LAMMPS comes from: "
+            "modules, e.g. 'lammps, openmpi'; a conda prefix holding lmp, e.g. "
+            "'$HOME/envs/lammps'; or explicit env_lines."
         )
     return None
 
