@@ -59,11 +59,11 @@ def test_window_args_default_matches_tier_args():
 
 
 def test_title1_carries_schema_units_and_family():
-    from frictionsim2d.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import LF_SCHEMA_CURRENT, parse_lf_schema
     t = _ctx(sim_type='afm')['title1']
     assert t == '# schema=2 lf_units=nN family=afm'
     # the reader must agree with what the writer stamps
-    assert DataReader._parse_lf_schema(t) == DataReader._LF_SCHEMA_CURRENT
+    assert parse_lf_schema(t) == LF_SCHEMA_CURRENT
 
 
 def test_empty_varlist_suppresses_the_fix():

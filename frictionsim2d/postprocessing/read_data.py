@@ -26,7 +26,7 @@ import pandas as pd
 
 from frictionsim2d.core.config import IntegritySettings
 from frictionsim2d.core.observables import FAMILIES, expected_tier_rows, rename_map
-from frictionsim2d.data.models import EV_A_TO_NN
+from frictionsim2d.data.models import EV_A_TO_NN, compute_derived_columns
 
 from .integrity import (SKIP_DETAILS, IntegrityVerdict, check_point,
                         writes_end_snapshot)
@@ -180,16 +180,11 @@ def correct_legacy_lf_schema1(df, filepath, family: str):
     return df
 
 
-def _tier_of(filename: str) -> str:
+def tier_of(filename: str) -> str:
     """`friction_`/`fc_ave_` -> window, `raw_` -> raw, `peratom_` -> peratom."""
     return ('raw' if filename.startswith('raw_')
             else 'peratom' if filename.startswith('peratom_')
             else 'window')
-
-
-#: Public alias. `frictionsim2d.aiida.ingest.load_points` imports this rather than
-#: reaching across packages for a private name.
-tier_of = _tier_of
 
 
 #: Filename patterns (moved out of `DataReader`; the class below keeps
@@ -251,7 +246,7 @@ def read_results_file(filepath: Path, family: str,
     except OSError:
         pass
 
-    tier = _tier_of(Path(filepath).name)
+    tier = tier_of(Path(filepath).name)
 
     if header_cols:
         df = pd.read_csv(filepath, sep=r'\s+', header=None, names=header_cols,
@@ -622,16 +617,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     stores it in a structured format.
     """
 
-    # Aliases: the module-level definitions above are the source of truth.
-    # Kept because audit_lf_units.py:30,42 and eight existing assertions reach
-    # these through the class, and there is no reason to churn them.
-    _LF_SCHEMA1_CORRECTION = LF_SCHEMA1_CORRECTION
-    _LF_SCHEMA_CURRENT = LF_SCHEMA_CURRENT
-    _AFM_FILE_COLUMNS = AFM_FILE_COLUMNS
-    _parse_lf_schema = staticmethod(parse_lf_schema)
-    _branch_column = staticmethod(branch_column)
-    _lateral_columns = staticmethod(lateral_columns)
-    _is_lj_branch = staticmethod(is_lj_branch)
     def __init__(self, results_dir: str = 'results_110725_test', *,
                  skip_fraction: float = 0.2,
                  complete_only: bool = False, integrity: bool = True,
@@ -757,13 +742,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 f'{line} [{point.status}]')
             self.incomplete_materials.setdefault(point.size, set()).add(
                 point.material)
-
-    def runs_by_size(self) -> Dict[str, List[RunFrames]]:
-        """Runs grouped by their `size` token -- one export file per key."""
-        grouped: Dict[str, List[RunFrames]] = {}
-        for run in self.runs:
-            grouped.setdefault(run.size, []).append(run)
-        return grouped
 
     def points_by_size(self) -> Dict[str, List[RunFrames]]:
         """Exported points grouped by `size` (only `complete` ones when
@@ -932,31 +910,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             point.post = post_channels_for(locator, kind, load, angle)
         return point
 
-    def _calculate_derived_quantities(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate lateral force and coefficient of friction.
-
-        Delegates to :func:`~frictionsim2d.data.models.compute_derived_columns` to
-        ensure consistent calculation across the codebase.
-
-        Args:
-            df: DataFrame with at least lfx, lfy, and nf columns.
-
-        Returns:
-            DataFrame with added lateral_force and cof columns.
-        """
-        if 'lfx' in df.columns and 'lfy' in df.columns and 'nf' in df.columns:
-            from ..data.models import compute_derived_columns  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
-
-            lateral_force, cof = compute_derived_columns(
-                np.asarray(df['lfx'].values),
-                np.asarray(df['lfy'].values),
-                np.asarray(df['nf'].values),
-            )
-            df['lateral_force'] = lateral_force
-            df['cof'] = cof
-
-        return df
-
     def _get_output_path(self, filename: str) -> Path:
         """Construct the full path for an output file."""
         return self.output_dir / filename
@@ -1023,7 +976,11 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         for tier, frame in sorted(run.tiers.items()):
             out = frame
             if tier == 'window':
-                out = self._calculate_derived_quantities(frame.copy())
+                out = frame.copy()
+                if {'lfx', 'lfy', 'nf'} <= set(out.columns):
+                    out['lateral_force'], out['cof'] = compute_derived_columns(
+                        np.asarray(out['lfx'].values), np.asarray(out['lfy'].values),
+                        np.asarray(out['nf'].values))
                 out.attrs = dict(frame.attrs)
             tiers[tier] = {
                 'columns': list(out.columns),

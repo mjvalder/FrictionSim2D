@@ -1,7 +1,7 @@
 """Header-driven parser + strict LEGACY_2026 fallback (spec §1.1/§3.2, Task 3)."""
 import pytest
 
-from frictionsim2d.postprocessing.read_data import DataReader, SchemaError
+from frictionsim2d.postprocessing.read_data import DataReader, LF_SCHEMA1_CORRECTION, SchemaError
 
 LEGACY_10 = (
     "# Time-averaged data\n"
@@ -257,8 +257,7 @@ def test_ev_a_to_nn_matches_the_corrector_constant():
     # the templates scale by EV_A_TO_NN; the corrector hard-codes its own
     # copy. If one is ever changed the other must move with it.
     from frictionsim2d.data.models import EV_A_TO_NN
-    from frictionsim2d.postprocessing.read_data import DataReader
-    assert DataReader._LF_SCHEMA1_CORRECTION == EV_A_TO_NN
+    assert LF_SCHEMA1_CORRECTION == EV_A_TO_NN
 
 
 def test_legacy_lj_file_still_corrects_after_react_x_rename(tmp_path):
@@ -283,7 +282,7 @@ def test_legacy_lj_file_still_corrects_after_react_x_rename(tmp_path):
     df = DataReader()._read_dataframe(f, 'sheet')
     assert df.attrs['lf_schema'] == 1
     assert df.attrs['lf_corrected'] is True
-    assert df['lfx'].iloc[0] == 1.0 * DataReader._LF_SCHEMA1_CORRECTION
+    assert df['lfx'].iloc[0] == 1.0 * LF_SCHEMA1_CORRECTION
 
 
 def test_many_body_legacy_file_is_left_alone(tmp_path):
@@ -365,9 +364,9 @@ def test_headerless_sheet_file_raises(tmp_path):
 
 
 def test_sheet_positional_list_is_gone():
-    from frictionsim2d.postprocessing.read_data import DataReader
+    from frictionsim2d.postprocessing.read_data import AFM_FILE_COLUMNS, DataReader
     assert not hasattr(DataReader, '_SHEET_FILE_COLUMNS')
-    assert DataReader._AFM_FILE_COLUMNS[:3] == ['time', 'nf', 'lfx']
+    assert AFM_FILE_COLUMNS[:3] == ['time', 'nf', 'lfx']
 
 
 def test_family_marker_wins_over_path_inference(tmp_path):

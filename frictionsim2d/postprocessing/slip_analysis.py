@@ -19,10 +19,7 @@ class SlipResult:
     """One slip-event analysis of a raw lateral-force trace.
 
     ``mean_interval_samples`` is the mean number of raw samples between
-    consecutive events -- the sawtooth PERIOD in samples. It was called
-    ``asymmetry`` and documented as a rise-time/fall-time ratio, which is not
-    what the code computed: the fall is one sample by construction, so the
-    "ratio" was just the rise, in samples. Renamed rather than reinterpreted.
+    consecutive events -- the sawtooth period in samples.
     """
     n_events: int
     amplitudes: List[float]
@@ -47,25 +44,6 @@ class SlipResult:
                                    if self.amplitudes else 0.0),
             'slip_mean_interval_samples': float(self.mean_interval_samples),
         }
-
-
-def window_stats(raw_df: pd.DataFrame, window_ps: float = 1.0,
-                 dt_ps: float = 0.1) -> pd.DataFrame:
-    """Per-window mean/min/max/std for every channel in the raw trace.
-
-    ``dt_ps`` is the raw sampling interval (100 fs default).
-    """
-    n = max(int(round(window_ps / dt_ps)), 1)
-    grouped = raw_df.groupby(raw_df.index // n)
-    out = {}
-    for col in raw_df.columns:
-        if col == 'time':
-            out['time'] = grouped['time'].first()
-            continue
-        agg = grouped[col].agg(['mean', 'min', 'max', 'std'])
-        for stat in ('mean', 'min', 'max', 'std'):
-            out[f'{col}_{stat}'] = agg[stat]
-    return pd.DataFrame(out).reset_index(drop=True)
 
 
 def detect_slips(raw_df: pd.DataFrame, channel: str = 'raw_lfx',

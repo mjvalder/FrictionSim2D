@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from frictionsim2d.postprocessing.slip_analysis import detect_slips, window_stats
+from frictionsim2d.postprocessing.slip_analysis import detect_slips
 
 
 def _sawtooth(n_teeth=20, pts_per_tooth=50):
@@ -25,13 +25,6 @@ def test_1ps_blockmean_hides_teeth():
     df = _sawtooth(n_teeth=20, pts_per_tooth=10)
     block = df.groupby(df.index // 10).mean()
     assert detect_slips(block).n_events < 5
-
-
-def test_window_stats_reconciles_with_blockmean():
-    df = _sawtooth()
-    ws = window_stats(df, window_ps=1.0)
-    assert abs(ws['raw_lfx_mean'].iloc[0] - df['raw_lfx'][:10].mean()) < 1e-12
-    assert ws['raw_lfx_max'].iloc[0] == df['raw_lfx'][:10].max()
 
 
 def test_flat_trace_has_no_events():

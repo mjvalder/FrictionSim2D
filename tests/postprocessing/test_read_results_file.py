@@ -93,19 +93,6 @@ def test_unknown_family_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match='unknown family'):
         read_results_file(path, 'poke')
-
-
-def test_class_aliases_still_resolve():
-    """Eight existing assertions and audit_lf_units.py reach these via the class."""
-    from frictionsim2d.postprocessing import read_data as rd
-
-    assert DataReader._LF_SCHEMA1_CORRECTION is rd.LF_SCHEMA1_CORRECTION
-    assert DataReader._LF_SCHEMA_CURRENT is rd.LF_SCHEMA_CURRENT
-    assert DataReader._AFM_FILE_COLUMNS is rd.AFM_FILE_COLUMNS
-    assert DataReader._parse_lf_schema('# schema=2') == 2
-    assert DataReader._is_lj_branch([1.0], [2.0]) is True
-
-
 def test_raw_tier_is_picked_from_the_filename_prefix(tmp_path):
     path = tmp_path / 'raw_f30_a0_s2_layer2.txt'
     path.write_text(

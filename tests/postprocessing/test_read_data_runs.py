@@ -347,16 +347,6 @@ def test_a_short_run_is_reported_incomplete(tmp_path):
     assert len(reader.runs) == 2      # incomplete runs are kept, only flagged
 
 
-def test_runs_by_size_groups_and_sorts(tmp_path):
-    make_family_run(tmp_path, 'afm', size=(100.0, 100.0))
-    make_family_run(tmp_path, 'afm', size=(50.0, 50.0))
-
-    grouped = DataReader(results_dir=str(tmp_path)).runs_by_size()
-
-    assert sorted(grouped) == ['100x100y', '50x50y']
-    assert len(grouped['50x50y']) == 1
-
-
 def test_export_writes_one_file_per_size(tmp_path):
     make_family_run(tmp_path, 'afm', size=(100.0, 100.0))
     make_family_run(tmp_path, 'afm', size=(50.0, 50.0))
@@ -645,7 +635,7 @@ def test_the_file_level_parser_survives():
 
     assert callable(rd.DataReader._read_dataframe)
     assert callable(rd.DataReader._registry_sim_type)
-    assert rd.DataReader._LF_SCHEMA1_CORRECTION == 1.602176565
+    assert rd.LF_SCHEMA1_CORRECTION == 1.602176565
 
 
 # --- status column / complete_only ---------------------------------------

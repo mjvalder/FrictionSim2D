@@ -13,7 +13,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from frictionsim2d.postprocessing.read_data import DataReader
+from frictionsim2d.postprocessing.read_data import is_lj_branch, parse_lf_schema
 
 VERDICTS = ('affected', 'unaffected', 'unparseable')
 
@@ -21,13 +21,13 @@ VERDICTS = ('affected', 'unaffected', 'unparseable')
 def classify_file(path) -> str:
     """Return 'affected' | 'unaffected' | 'unparseable' for one results file."""
     try:
-        with open(path, errors='ignore') as fh:
+        with open(path, encoding='utf-8', errors='ignore') as fh:
             head = [next(fh, ''), next(fh, ''), next(fh, '')]
     except OSError:
         return 'unparseable'
     # Parsed as an integer via the reader's own helper, so the audit and the
     # corrector cannot drift: any schema >= 2 is post-fix and already nN.
-    if DataReader._parse_lf_schema(head[0]) >= 2:   # noqa: SLF001
+    if parse_lf_schema(head[0]) >= 2:
         return 'unaffected'
     cols = head[1].lstrip('#').split()
     if 'v_xfrict' not in cols or 'v_sx' not in cols:
@@ -39,8 +39,7 @@ def classify_file(path) -> str:
     try:
         # Same rule as the reader's correction path, by construction.
         return ('affected'
-                if DataReader._is_lj_branch(          # noqa: SLF001
-                    [float(values[ix])], [float(values[isx])])
+                if is_lj_branch([float(values[ix])], [float(values[isx])])
                 else 'unaffected')
     except ValueError:
         return 'unparseable'
