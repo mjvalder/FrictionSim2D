@@ -254,6 +254,10 @@ def _jinja_guard_violations(rel):
             continue
         is_cmd = (s.startswith('comm_style') and 'tiled' in s) or \
                  (s.startswith('balance') and 'rcb' in s)
+        # common/parallel.lmp owns the commands; a call must hand it the key.
+        is_call = 'parallel.emit_' in s and s.startswith('{% call')
+        if is_call and 'mlip_sheet' not in s:
+            bad.append((lineno, s))
         if is_cmd and not any('mlip_sheet' in c for c in stack):
             bad.append((lineno, s))
     return bad
@@ -263,8 +267,8 @@ def _jinja_guard_violations(rel):
 DECOMPOSITION_TEMPLATES = sorted(
     str(p.relative_to(TEMPLATES))
     for p in TEMPLATES.rglob('*.lmp')
-    if any(l.strip().startswith(('comm_style', 'balance'))
-           and ('tiled' in l or 'rcb' in l)
+    if any((l.strip().startswith(('comm_style', 'balance')) and ('tiled' in l or 'rcb' in l))
+           or 'parallel.emit_' in l
            for l in p.read_text(encoding='utf-8').splitlines())
 )
 

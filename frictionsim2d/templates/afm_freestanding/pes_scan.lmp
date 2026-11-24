@@ -1,4 +1,5 @@
 {% import 'common/molecule_ids.lmp' as mol_ids %}
+{% import 'common/parallel.lmp' as parallel %}
 # Freestanding tip-on-slab surface PES scan (self-contained, no substrate).
 # A self-supported N-layer slab of the sheet material: layer_1 is held fixed
 # (the anchor that removes amorphous-substrate noise), the upper layers relax.
@@ -15,14 +16,7 @@ boundary        p p p
 
 neighbor        {{ neighbor_list }} bin
 {{ neigh_modify_command }}
-{% if not mlip_sheet | default(false) %}
-{# comm_style tiled breaks pair_deepmd: it derives a bogus ghost count and
-   tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
-   `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
-   irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
-   run loses nothing by falling back to the default brick decomposition. #}
-comm_style      tiled
-{% endif %}
+{% call parallel.emit_tiled_comm(mlip_sheet | default(false)) %}{% endcall %}
 thermo          {{ thermo }}
 timestep        {{ timestep }}
 
@@ -34,10 +28,7 @@ include         {{ potential_file }}
 {% if needs_molecule_ids %}
 {{ mol_ids.emit_molecule_ids(molecule_groups) -}}
 {% endif %}
-{% if not mlip_sheet | default(false) %}
-{# balance rcb needs comm_style tiled, suppressed above for an MLIP. #}
-balance         1.0 rcb
-{% endif %}
+{% call parallel.emit_balance_rcb(mlip_sheet | default(false)) %}{% endcall %}
 
 min_style       {{ min_style }}
 

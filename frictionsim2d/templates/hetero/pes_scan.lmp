@@ -1,5 +1,6 @@
 {% import 'common/molecule_ids.lmp' as mol_ids %}
 {% import 'common/interlayer_energy.lmp' as il_energy %}
+{% import 'common/parallel.lmp' as parallel %}
 # LAMMPS input script for heterostructure interlayer PES scan
 # Static energy-vs-lateral-position map over the matched interface's MINIMAL
 # in-plane repeat unit -- measured off the assembled stack by
@@ -31,14 +32,7 @@ boundary        p p p
 
 neighbor        {{ neighbor_list }} bin
 {{ neigh_modify_command }}
-{% if not mlip_sheet | default(false) %}
-{# comm_style tiled breaks pair_deepmd: it derives a bogus ghost count and
-   tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
-   `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
-   irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
-   run loses nothing by falling back to the default brick decomposition. #}
-comm_style      tiled
-{% endif %}
+{% call parallel.emit_tiled_comm(mlip_sheet | default(false)) %}{% endcall %}
 
 region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} {{ box_zlo }} {{ box_zhi }} units box
 read_data       {{ data_file }} group all_atoms

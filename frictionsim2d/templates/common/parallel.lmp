@@ -1,0 +1,28 @@
+{#
+  Parallel-decomposition commands, emitted for every non-MLIP deck.
+
+  Tiled communication breaks pair_deepmd: it derives a bogus ghost count and
+  tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
+  `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
+  irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
+  run loses nothing by falling back to the default brick decomposition.
+
+  Call as `{% call parallel.emit_tiled_comm(mlip_sheet | default(false)) %}{% endcall %}`:
+  the block tag lets trim_blocks drop the call line's own newline, so the
+  deck is identical to the inline `{% if %}` block these replace. The
+  `caller` reference in each body is what lets a call block invoke it.
+#}
+{% macro emit_tiled_comm(mlip_sheet) %}
+{% set _unused = caller is defined %}
+{% if not mlip_sheet %}
+comm_style      tiled
+{% endif %}
+{% endmacro %}
+
+{# balance rcb needs comm_style tiled, so it is suppressed for an MLIP too. #}
+{% macro emit_balance_rcb(mlip_sheet) %}
+{% set _unused = caller is defined %}
+{% if not mlip_sheet %}
+balance         1.0 rcb
+{% endif %}
+{% endmacro %}
