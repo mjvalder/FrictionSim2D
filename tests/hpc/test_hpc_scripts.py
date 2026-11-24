@@ -223,3 +223,32 @@ def test_an_explicit_base_dir_roots_the_default_log_directory(tmp_path):
 
     text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
     assert "#PBS -o /work/sim/logs/friction2d_out.txt" in text
+
+
+def _rsync_lines(path: Path) -> list:
+    return [ln for ln in path.read_text(encoding="utf-8").splitlines()
+            if ln.startswith("# rsync")]
+
+
+@pytest.mark.parametrize("host, home, target", [
+    (None, None, "<HPC_HOST>:<HPC_HOME>/"),
+    ("me@hpc", "/home/me/", "me@hpc:/home/me/"),
+])
+def test_submit_files_carry_the_rsync_lines_for_the_host_and_home(
+        tmp_path, host, home, target):
+    out = tmp_path / "hpc"
+    generator = HPCScriptGenerator(_config(hpc_host=host, hpc_home=home))
+    generator.generate_scripts(["mat0/L1"], out)
+    master = _rsync_lines(out / "submit_all.txt")
+
+    manifest = _combined_manifest()
+    for scheduler_dir, method in (("comb", generator.generate_combined_scripts),
+                                  ("two", generator.generate_two_phase_scripts)):
+        method(manifest, tmp_path / scheduler_dir, simulation_root=tmp_path)
+    combined = _rsync_lines(tmp_path / "comb" / "submit_jobs.sh")
+    two_phase = _rsync_lines(tmp_path / "two" / "submit_jobs.sh")
+
+    for lines in (master, combined, two_phase):
+        assert lines[0] == f"# rsync -rvltoD {tmp_path.name} {target}"
+        assert lines[1].endswith(f'--exclude="*" {target}{tmp_path.name} ./')
+        assert '--include="run*.log"' in lines[1]

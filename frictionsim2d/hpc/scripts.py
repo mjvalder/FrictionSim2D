@@ -609,6 +609,18 @@ class HPCScriptGenerator:
         self._write_master_script(output_dir, scripts, scheduler)
         return scripts
 
+    def _rsync_comments(self, sim_root: Path) -> Tuple[str, str]:
+        """The commented-out upload and download ``rsync`` lines for a submit file."""
+        target = (f"{self.config.hpc_host or '<HPC_HOST>'}:"
+                  f"{self.config.hpc_home or '<HPC_HOME>/'}")
+        upload = f'# rsync -rvltoD {sim_root.name} {target}'
+        # run*.log too: the settle loop's RAMP_STATUS lines live only in
+        # those, and `hpc enrich-provenance -r` needs them on this side.
+        download = ('# rsync -avzhP --include="*/" --include="results/***"'
+                    ' --include="visuals/***" --include="run*.log"'
+                    f' --exclude="*" {target}{sim_root.name} ./')
+        return upload, download
+
     def _write_master_script(self, output_dir: Path, scripts: List[Path],
                             scheduler: Literal['pbs', 'slurm']) -> Path:
         """Write master submission instructions.
@@ -621,23 +633,17 @@ class HPCScriptGenerator:
         Returns:
             Path to master script.
         """
-        submit_cmd = 'qsub' if scheduler == 'pbs' else 'sbatch'
+        submit_cmd = _PREFLIGHT_DIALECT[scheduler]['submit_cmd']
         sim_root = output_dir.parent
-        hpc_host = self.config.hpc_host or "<HPC_HOST>"
-        hpc_home = self.config.hpc_home or "<HPC_HOME>/"
-        rsync_target = f"{hpc_host}:{hpc_home}"
+        upload, download = self._rsync_comments(sim_root)
         lines = [
             '# Submit all job arrays',
             '',
             '# Optional: upload simulations to HPC',
-            f'# rsync -rvltoD {sim_root.name} {rsync_target}',
+            upload,
             '',
             '# Optional: download results from HPC',
-            # run*.log too: the settle loop's RAMP_STATUS lines live only in
-            # those, and `hpc enrich-provenance -r` needs them on this side.
-            f'# rsync -avzhP --include="*/" --include="results/***"'
-            f' --include="visuals/***" --include="run*.log"'
-            f' --exclude="*" {rsync_target}{sim_root.name} ./',
+            download,
             '',
             f'cd {sim_root}',
             '',
@@ -796,17 +802,15 @@ class HPCScriptGenerator:
         Returns:
             Path to submission script.
         """
-        submit_cmd = 'qsub' if scheduler == 'pbs' else 'sbatch'
+        submit_cmd = _PREFLIGHT_DIALECT[scheduler]['submit_cmd']
         sim_root = output_dir.parent
-        hpc_host = self.config.hpc_host or "<HPC_HOST>"
-        hpc_home = self.config.hpc_home or "<HPC_HOME>/"
-        rsync_target = f"{hpc_host}:{hpc_home}"
+        upload, download = self._rsync_comments(sim_root)
         lines = [
             '#!/bin/bash',
             '# Combined system+slide submission (single job, no dependency needed)',
             '',
             '# Optional: upload to HPC',
-            f'# rsync -rvltoD {sim_root.name} {rsync_target}',
+            upload,
             '',
             f'cd {sim_root}',
             '',
@@ -815,11 +819,7 @@ class HPCScriptGenerator:
             f'# Monitor with: {"qstat" if scheduler == "pbs" else "squeue"} -u $USER',
             '',
             '# Optional: download results after completion',
-            # run*.log too: the settle loop's RAMP_STATUS lines live only in
-            # those, and `hpc enrich-provenance -r` needs them on this side.
-            f'# rsync -avzhP --include="*/" --include="results/***"'
-            f' --include="visuals/***" --include="run*.log"'
-            f' --exclude="*" {rsync_target}{sim_root.name} ./',
+            download,
         ]
         submit_path = output_dir / 'submit_jobs.sh'
         submit_path.write_text('\n'.join(lines))
@@ -911,18 +911,16 @@ class HPCScriptGenerator:
         Returns:
             Path to submission script.
         """
-        submit_cmd = 'qsub' if scheduler == 'pbs' else 'sbatch'
+        submit_cmd = _PREFLIGHT_DIALECT[scheduler]['submit_cmd']
         monitor_cmd = 'squeue' if scheduler == 'slurm' else 'qstat'
         sim_root = output_dir.parent
-        hpc_host = self.config.hpc_host or "<HPC_HOST>"
-        hpc_home = self.config.hpc_home or "<HPC_HOME>/"
-        rsync_target = f"{hpc_host}:{hpc_home}"
+        upload, download = self._rsync_comments(sim_root)
         lines = [
             '#!/bin/bash',
             '# Two-phase submission: system jobs → slide jobs',
             '',
             '# Optional: upload to HPC',
-            f'# rsync -rvltoD {sim_root.name} {rsync_target}',
+            upload,
             '',
         ]
 
@@ -967,11 +965,7 @@ class HPCScriptGenerator:
         lines.extend([
             '',
             '# Optional: download results after completion',
-            # run*.log too: the settle loop's RAMP_STATUS lines live only in
-            # those, and `hpc enrich-provenance -r` needs them on this side.
-            f'# rsync -avzhP --include="*/" --include="results/***"'
-            f' --include="visuals/***" --include="run*.log"'
-            f' --exclude="*" {rsync_target}{sim_root.name} ./',
+            download,
         ])
 
         submit_path = output_dir / 'submit_jobs.sh'
