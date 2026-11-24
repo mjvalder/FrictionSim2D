@@ -287,10 +287,10 @@ profiles; keep one settings file per cluster and pass it with
 `--settings-file`. Details in [mlip.md](mlip.md) §8.
 
 `hpc.frameworks.mace.backend` is `device` (the default: Kokkos GPU, launch flags
-`-k on g 1 ... -sf kk`) or `host` (CPU, `-sf kk/host`, `hpc.gpu` dropped for that
+`-k on g <hpc.gpu.ngpus> ... -sf kk`) or `host` (CPU, `-sf kk/host`, `hpc.gpu` dropped for that
 group). A device-backend MACE group with `hpc.gpu` unset is an error at script
 generation, not a silent CPU job. The backend does not change physics, so it is
-not part of the run directory name. How a job fits a cluster (cores, GPUs,
+not part of the run directory name. MACE runs one MPI rank per job, so `ngpus > 1` only helps if Kokkos actually uses the extra GPUs. `hpc.mlip_backend` is internal (set from the overlay) and is refused if written in settings.yaml. How a job fits a cluster (cores, GPUs,
 threads) is yours to set in `hpc.num_cpus`, `hpc.gpu` and the overlay's
 `env_lines`; nothing is cluster-specific in code. MACE's float32 style is not an
 HPC setting: it changes results, so it is the sheet key `precision = float32`

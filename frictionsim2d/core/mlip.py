@@ -15,6 +15,7 @@ so both are scoped to full-cell coverage:
 Evidence and the capability matrix are in ``documentation/mlip.md``.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Dict, Sequence
 
@@ -57,15 +58,19 @@ class LauncherSpec:
         """Whether this framework offers a host (CPU) backend besides the device one."""
         return bool(self.host_lmp_flags)
 
-    def flags_for(self, backend: str) -> str:
+    def flags_for(self, backend: str, ngpus: int = 1) -> str:
         """The ``lmp`` flags of ``backend`` (``'device'`` | ``'host'``).
+
+        ``ngpus`` replaces the ``g <n>`` of the device flags (``hpc.gpu.ngpus``).
+        A framework runs one MPI rank per job, so more than one GPU only helps
+        if Kokkos actually spreads work over them.
 
         Raises:
             ValueError: ``host`` for a framework without a host backend, or an
                 unknown backend name.
         """
         if backend == 'device':
-            return self.lmp_flags
+            return re.sub(r'(?<=\s)g \d+(?=\s)', f'g {int(ngpus)}', self.lmp_flags)
         if backend == 'host':
             if not self.has_host_backend:
                 raise ValueError("this framework has no host backend; use backend: device")

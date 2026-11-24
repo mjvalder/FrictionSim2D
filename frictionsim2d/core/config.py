@@ -452,12 +452,22 @@ class HPCSettings(BaseModel):
         ),
     )
     mlip_backend: Literal['device', 'host'] = Field(
-        default='device',
+        default='device', exclude=True,
         description=(
-            "Kokkos backend of this job group's MLIP launcher; populated by "
-            "apply_framework_overlay() from a FrameworkOverlay's backend."
+            "Internal: Kokkos backend of this job group's MLIP launcher, populated "
+            "only by apply_framework_overlay() from hpc.frameworks.<fw>.backend. "
+            "Not user-settable and not dumped."
         ),
     )
+
+    @model_validator(mode='before')
+    @classmethod
+    def _reject_mlip_backend(cls, data):
+        if isinstance(data, dict) and 'mlip_backend' in data:
+            raise ValueError(
+                "hpc.mlip_backend is not a setting; use "
+                "hpc.frameworks.<framework>.backend (device | host).")
+        return data
     lmp_binary: Optional[str] = Field(
         default=None,
         description=(

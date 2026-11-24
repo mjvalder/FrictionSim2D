@@ -507,10 +507,17 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     click.echo(f"📋 Found {len(simulation_paths)} simulations")
 
     preflight = preflight or hpc_config.preflight
-    result = generate_scripts_for_tree(
-        sim_dir, hpc_config, out_dir, simulation_paths,
-        hpc_config.base_dir(sim_dir.name), preflight=preflight,
-    )
+    try:
+        result = generate_scripts_for_tree(
+            sim_dir, hpc_config, out_dir, simulation_paths,
+            hpc_config.base_dir(sim_dir.name), preflight=preflight,
+        )
+    except ValueError as exc:
+        # A refused setting (e.g. a device MACE group without hpc.gpu) names its
+        # own fix; a traceback would only bury it.
+        logger.debug("HPC script generation refused the settings", exc_info=True)
+        click.echo(f"❌ {exc}", err=True)
+        raise click.Abort() from exc
 
     if isinstance(result, dict):
         n_scripts = sum(len(v) for v in result.values())

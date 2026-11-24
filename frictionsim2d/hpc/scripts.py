@@ -322,7 +322,10 @@ class HPCConfig:
         """
         launcher = self.launcher
         command = f"{self.mpi_command} {self.lmp_binary}"
-        flags = launcher.flags_for(self.backend) if launcher is not None else ''
+        flags = ''
+        if launcher is not None:
+            gpu = self.gpu
+            flags = launcher.flags_for(self.backend, gpu.ngpus if gpu is not None else 1)
         if flags:
             command += f" {flags}"
         return command

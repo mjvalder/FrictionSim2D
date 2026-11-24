@@ -202,7 +202,9 @@ elif [ ! -s "$STYLES" ]; then
 else
     TOKENS=$(tr -s '[:space:]' '\n' <<<"$LMPH")
     while read -r kind style; do
-        if grep -qxF "$style" <<<"$TOKENS"; then
+        # A Kokkos-only style (symmetrix/mace/float32) is listed by `lmp -h` only
+        # as <style>/kk and <style>/kk/host; the launcher's -sf kk[/host] selects them.
+        if grep -qxF -e "$style" -e "$style/kk" -e "$style/kk/host" <<<"$TOKENS"; then
             ok "pair_style $style"
         elif [ "$kind" = main ]; then
             bad "pair_style $style is not in this LAMMPS build"

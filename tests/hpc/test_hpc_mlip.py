@@ -273,3 +273,43 @@ def test_framework_overlay_backend_is_validated():
     with pytest.raises(ValueError):
         FrameworkOverlay(backend="cpu")
     assert FrameworkOverlay().backend is None
+
+
+def test_device_gpu_count_follows_hpc_gpu_ngpus():
+    hpc = _gpu_settings()
+    hpc.gpu = GPUSettings(ngpus=2, gpu_type="L40S")
+    gen = HPCScriptGenerator(HPCConfig.from_settings(hpc))
+    cmd = gen._config_for_group((True, "mace"), split=False).to_dict()["launch_command"]
+    assert " -k on g 2 t " in cmd and " g 1 " not in cmd
+    hpc.gpu = GPUSettings()  # ngpus defaults to 1
+    gen = HPCScriptGenerator(HPCConfig.from_settings(hpc))
+    assert " -k on g 1 t " in gen._config_for_group((True, "mace"), split=False).to_dict()["launch_command"]
+
+
+def test_mlip_backend_is_internal_not_user_settable():
+    from pydantic import ValidationError
+    from frictionsim2d.core.config import HPCSettings
+    with pytest.raises(ValidationError, match=r"hpc\.frameworks"):
+        HPCSettings(mlip_backend="host")
+    assert "mlip_backend" not in GlobalSettings().hpc.model_dump()
+
+
+def test_float32_style_passes_the_preflight_style_check(tmp_path):
+    """A float32 deck names `symmetrix/mace/float32`, which `lmp -h` lists only as /kk[/host]."""
+    out = tmp_path / "root" / "hpc"
+    m = _manifest([("afm/mc/L1", True, "mace")])
+    gen = HPCScriptGenerator(HPCConfig.from_settings(_gpu_settings()))
+    gen.generate_combined_scripts(m, out, scheduler="pbs")
+    sh, _ = gen.generate_preflight(out)
+    text = sh.read_text()
+    assert '-e "$style/kk" -e "$style/kk/host"' in text
+    # run the extracted check against a fake `lmp -h` listing
+    snippet = ('TOKENS=$(tr -s "[:space:]" "\\n" <<<"$LMPH")\n'
+               'style=symmetrix/mace/float32\n'
+               'grep -qxF -e "$style" -e "$style/kk" -e "$style/kk/host" <<<"$TOKENS" '
+               '&& echo found || echo missing')
+    for listing, expect in (("symmetrix/mace/float32/kk symmetrix/mace/float32/kk/host", "found"),
+                            ("symmetrix/mace/kk", "missing")):
+        proc = subprocess.run(["bash", "-c", snippet], env={"LMPH": listing, "PATH": "/usr/bin:/bin"},
+                              capture_output=True, text=True)
+        assert proc.stdout.strip() == expect

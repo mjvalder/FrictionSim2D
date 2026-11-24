@@ -599,3 +599,55 @@ def test_no_log_at_all_is_skipped_with_a_reason(runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert result.output.startswith("skipped ")
     assert "no run log in" in result.output
+
+
+# ---------------------------------------------------------------------------
+# A device-backend MACE job without hpc.gpu is refused cleanly (no traceback)
+# ---------------------------------------------------------------------------
+
+def _mace_tree_and_settings(tmp_path: Path):
+    root = tmp_path / "sim_root"
+    lammps = root / "sheetonsheet" / "h-MoS2" / "100x_100y" / "K300" / "pot_mace_m" / "lammps"
+    lammps.mkdir(parents=True)
+    (lammps / "slide.in").write_text("# lammps\n", encoding="utf-8")
+    data = GlobalSettings().model_dump(mode="json")
+    data["hpc"]["modules"] = ["lammps"]
+    data["hpc"]["frameworks"] = {"mace": {"binary": "lmp"}}
+    path = tmp_path / "settings.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return root, path
+
+
+def test_hpc_generate_refuses_device_mace_without_gpu_cleanly(runner, tmp_path):
+    root, settings_file = _mace_tree_and_settings(tmp_path)
+    result = runner.invoke(cli, ["hpc", "generate", str(root),
+                                 "--settings-file", str(settings_file)])
+    assert result.exit_code != 0
+    assert "hpc.gpu" in result.output
+    assert "Traceback" not in result.output
+    assert not isinstance(result.exception, ValueError)
+
+
+def test_run_hpc_scripts_refuses_device_mace_without_gpu_cleanly(
+        runner, tmp_path, monkeypatch):
+    """`run ... --hpc-scripts` reaches the same generator through run_simulations."""
+    from frictionsim2d import cli as cli_mod
+    from frictionsim2d.core.config import load_settings
+    from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root
+
+    root, settings_file = _mace_tree_and_settings(tmp_path)
+
+    def fake_run_simulations(**kwargs):
+        generate_hpc_scripts_for_root(
+            root, load_settings(settings_file=kwargs["settings_file"]))
+        return [], root, [], None
+
+    monkeypatch.setattr(cli_mod, "run_simulations", fake_run_simulations)
+    ini = tmp_path / "x.ini"
+    ini.write_text("[general]\n")
+    result = runner.invoke(cli, ["run", "sheetonsheet", str(ini), "--output-dir",
+                                 str(tmp_path), "--hpc-scripts",
+                                 "--settings-file", str(settings_file)])
+    assert result.exit_code != 0
+    assert "hpc.gpu" in result.output
+    assert not isinstance(result.exception, ValueError)
