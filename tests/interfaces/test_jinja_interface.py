@@ -48,3 +48,12 @@ def test_render_lammps_commands_drops_comments_and_blanks():
     assert commands[0] == 'units metal'
     assert 'read_data sheet.lmp extra/atom/types 2' in commands
     assert all(c == c.strip() and c and not c.startswith('#') for c in commands)
+
+
+def test_render_template_uses_trimmed_blocks_over_the_package_templates():
+    from frictionsim2d.interfaces.jinja import render_template, template_environment
+    context = {'input_path': 'sheet.lmp', 'num_types': 2, 'edge_width': 5.0}
+    text = render_template('common/apply_sheet_edge_types.lmp', context)
+    assert 'read_data sheet.lmp extra/atom/types 2' in text
+    env = template_environment()
+    assert env.trim_blocks and env.lstrip_blocks

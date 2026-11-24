@@ -52,16 +52,25 @@ class PackageLoader(BaseLoader):
             raise TemplateNotFound(template) from exc
 
 
+def template_environment() -> Environment:
+    """A Jinja2 environment over the packaged templates (blocks trimmed)."""
+    return Environment(
+        loader=PackageLoader('frictionsim2d.templates'),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+
+
+def render_template(template: str, context: Dict[str, Any]) -> str:
+    """Render a packaged template with ``context``."""
+    return template_environment().get_template(template).render(context)
+
+
 def render_lammps_commands(template: str, context: Dict[str, Any]) -> List[str]:
     """Render a packaged LAMMPS template into its command lines.
 
     Blank lines and ``#`` comment lines are dropped, the rest stripped.
     """
-    env = Environment(
-        loader=PackageLoader('frictionsim2d.templates'),
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-    rendered = env.get_template(template).render(context)
+    rendered = render_template(template, context)
     lines = (line.strip() for line in rendered.strip().split('\n'))
     return [line for line in lines if line and not line.startswith('#')]

@@ -14,9 +14,8 @@ import json
 from datetime import datetime
 import hashlib
 
-from jinja2 import Environment
 
-from ..interfaces.jinja import PackageLoader
+from ..interfaces.jinja import template_environment
 from ..core.mlip import check_d3_fits_box, get_mlip, is_mlip
 from ..core.utils.paths import get_material_path, get_potential_path
 from ..potentials.manager import stage_model_file
@@ -255,11 +254,7 @@ class SimulationBase(ABC):
         #: once it knows its atoms and cutoff). :meth:`write_file` checks
         #: every ``.in`` deck against it.
         self.z_box: Optional[ZBox] = None
-        self.jinja_env = Environment(
-            loader=PackageLoader('frictionsim2d.templates'),
-            trim_blocks=True,
-            lstrip_blocks=True
-        )
+        self.jinja_env = template_environment()
 
     #: pair_style/pair_coeff prefix for :attr:`shared_potentials_dir`. LAMMPS is
     #: invoked from the simulation root (see ``frictionsim2d/templates/hpc/pbs_combined.j2``),

@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from jinja2 import Environment
 
 from ...core.config import (
     FlakeConfig, GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig)
@@ -53,7 +52,7 @@ from ...lattice.matching import (
 )
 from ...core.mlip import is_mlip, validate_mlip_cell
 from ...potentials.manager import PotentialManager
-from ...interfaces.jinja import PackageLoader
+from ...interfaces.jinja import render_template
 from .components import (
     apply_sheet_edge_types, build_monolayer, calculate_layer_shifts, carve_flake)
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
@@ -1200,12 +1199,8 @@ def assemble_hetero_stack(
         "settings_path": str(include_path),
         "output_path": str(output_path),
     }
-    env = Environment(
-        loader=PackageLoader("frictionsim2d.templates"), trim_blocks=True, lstrip_blocks=True
-    )
-    template = env.get_template("hetero/stack_hetero.lmp")
     script_path = workdir / "stack_hetero.lmp"
-    script_path.write_text(template.render(context), encoding="utf-8")
+    script_path.write_text(render_template("hetero/stack_hetero.lmp", context), encoding="utf-8")
     run_lammps(workdir, script_path)
 
     if not output_path.exists():
