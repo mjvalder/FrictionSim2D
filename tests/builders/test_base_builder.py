@@ -44,7 +44,7 @@ def test_template_rendering(tmp_path, afm_config):
     
     # Render a real template or a mock one if you inject a mock env
     # Testing a real template:
-    context = {'atom_style': 'molecular'}
-    result = builder.render_template('common/init.lmp', context)
-    
-    assert "atom_style      molecular" in result
+    context = {'base_lmp': 'base.data'}
+    result = builder.render_template('common/build_substrate.lmp', context)
+
+    assert "read_data base.data" in result
