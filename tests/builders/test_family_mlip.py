@@ -313,7 +313,7 @@ def test_hetero_virtual_type_is_gated_on_the_drive_method():
 
     The plan called the registration unconditional and a latent bug; it is not.
     ``reserve_virtual_type`` is derived by callers from ``drive_method``
-    (``hetero_slide.py``/``hetero_afm.py``). This pins the contract directly
+    (``sheetonsheet/hetero.py``/``afm/hetero.py``). This pins the contract directly
     on the registration function so it cannot regress
     into the unconditional form the placeholder mechanism assumes.
     """

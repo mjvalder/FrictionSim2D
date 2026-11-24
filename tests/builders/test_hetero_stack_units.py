@@ -26,7 +26,7 @@ def _write_data(path: Path, atoms: Atoms, style: str = "atomic") -> Path:
     return path
 
 
-def _tiled_sheet(nx: int, ny: int, perturb: float = 0.0) -> Atoms:
+def _tiled_sheet(nx: int, ny: int) -> Atoms:
     """An orthogonal two-species sheet tiled ``nx`` x ``ny`` from a 3 x 5 A cell."""
     cell = np.diag([3.0 * nx, 5.0 * ny, 10.0])
     positions, symbols = [], []
@@ -35,10 +35,7 @@ def _tiled_sheet(nx: int, ny: int, perturb: float = 0.0) -> Atoms:
             positions += [(3.0 * i + 0.5, 5.0 * j + 1.0, 5.0),
                           (3.0 * i + 2.0, 5.0 * j + 3.5, 5.0)]
             symbols += ["Mo", "S"]
-    positions = np.array(positions)
-    if perturb:
-        positions[:, 0] += perturb * np.arange(len(positions))
-    return Atoms(symbols, positions=positions, cell=cell, pbc=True)
+    return Atoms(symbols, positions=np.array(positions), cell=cell, pbc=True)
 
 
 def test_detect_inplane_repeat_finds_the_tiling(tmp_path):
@@ -49,7 +46,7 @@ def test_detect_inplane_repeat_finds_the_tiling(tmp_path):
 
 
 def test_detect_inplane_repeat_falls_back_to_the_box_without_a_repeat(tmp_path):
-    path = _write_data(tmp_path / "irregular.data", _tiled_sheet(1, 1, perturb=0.0)
+    path = _write_data(tmp_path / "irregular.data", _tiled_sheet(1, 1)
                        + Atoms("S", positions=[(1.1, 2.3, 5.0)], cell=[3.0, 5.0, 10.0]))
     (px, py), (nx, ny) = detect_inplane_repeat(path)
     assert (nx, ny) == (1, 1)
@@ -119,20 +116,20 @@ def _assemble(tmp_path, stacking="grouped", **kwargs):
 @pytest.mark.parametrize("kwargs, stacking, message", [
     ({}, "zigzag", "hetero_stacking must be"),
     ({"layers": (1, 1, 1), "n_sheets": 3}, "grouped", "exactly two"),
-    ({"layers": (1, 0)}, "grouped", "empty layers"),
     ({"style_b": "charge"}, "grouped", "differing atom_style"),
     ({"cell_b": (3.4, 5.0)}, "grouped", "do not share one in-plane box"),
 ])
 def test_assemble_hetero_stack_guards(tmp_path, kwargs, stacking, message):
-    if kwargs.get("layers") == (1, 0):
-        matched, sheets, spine = _stack_inputs(tmp_path)
-        sheets[1].layers = []
-        with pytest.raises(ValueError, match=message):
-            assemble_hetero_stack(matched, sheets, spine, stacking, SimpleNamespace(),
-                                  tmp_path / "work")
-        return
     with pytest.raises(ValueError, match=message):
         _assemble(tmp_path, stacking, **kwargs)
+
+
+def test_assemble_hetero_stack_rejects_a_sheet_with_no_layers(tmp_path):
+    matched, sheets, spine = _stack_inputs(tmp_path)
+    sheets[1].layers = []
+    with pytest.raises(ValueError, match="empty layers"):
+        assemble_hetero_stack(matched, sheets, spine, "grouped", SimpleNamespace(),
+                              tmp_path / "work")
 
 
 def test_assemble_hetero_stack_mlip_interface_needs_a_lat_c(tmp_path):
@@ -153,3 +150,19 @@ def test_alternating_stacking_interleaves_the_materials(lammps_replay, tmp_path)
     assert groups == ["_m0l0", "_m1l0", "_m0l1", "_m1l1"]
     z = [float(v) for v in re.findall(r"\(z = (-?[\d.]+)\)", script)]
     assert z == sorted(z) and len(set(z)) == 4
+
+
+def test_mlip_interface_spacing_is_the_larger_lat_c(tmp_path, monkeypatch):
+    from frictionsim2d.builders.construction import hetero_stack
+    matched, sheets, spine = _stack_inputs(tmp_path)
+    for sheet, lat_c in zip(sheets, (6.1, 6.6)):
+        sheet.pot_type = "deepmd"
+        sheet.lat_c = lat_c
+    spine.pm.has_mlip = lambda: True
+    spine.pm.write_surrogate_file = lambda path: path
+    monkeypatch.setattr(
+        hetero_stack, "run_lammps",
+        lambda workdir, script: (Path(workdir) / "hetero.data").write_text("x"))
+    settings = SimpleNamespace(geometry=SimpleNamespace(lat_c_default=6.0))
+    stack = assemble_hetero_stack(matched, sheets, spine, "grouped", settings, tmp_path / "work")
+    assert stack.interface_spacing == 6.6

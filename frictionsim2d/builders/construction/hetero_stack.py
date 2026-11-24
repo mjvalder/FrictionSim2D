@@ -630,9 +630,8 @@ def build_twisted_supercells(
     realises the relative twist in the atomic positions while emitting one
     shared orthogonal box. Layer B is first passed through
     :func:`~frictionsim2d.lattice.apply.rotate_layer_to_angle` (the reorientation
-    primitive); a rigid rotation of a periodic monolayer canonicalises to the
-    same on-disk cell, so the twist is carried by the commensurate tiling, not
-    by that write.
+    primitive); it leaves the on-disk cell unchanged (it reorders the atoms), so
+    the twist is carried by the commensurate tiling, not by that write.
 
     Args:
         mono_a_path: LAMMPS data file for layer A's monolayer.
@@ -680,9 +679,9 @@ def build_twisted_supercells(
     ortho = np.asarray(twist.moire_cell, dtype=float)   # canonical, xy tilt 0
 
     # 2. Reorient layer B by the achieved angle (the reorientation primitive; a
-    #    rigid rotation of a periodic cell is a canonical no-op on disk, so the
-    #    twist is carried by supercell_b below, but this keeps the achieved angle
-    #    verified end to end and B's file is the tiling input).
+    #    rigid rotation leaves the on-disk cell and fractional coordinates
+    #    unchanged but reorders the atoms; the twist is carried by supercell_b
+    #    below, and the rotated file is the tiling input).
     mono_b_rot_path = workdir / "b_twist_rotated.lmp"
     rotate_layer_to_angle(str(mono_b_path), achieved, str(mono_b_rot_path))
     mono_b_rot = read_monolayer(mono_b_rot_path)

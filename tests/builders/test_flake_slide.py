@@ -686,7 +686,7 @@ def test_flake_slide_paths_resolve_from_the_simulation_root(tmp_path):
 # less than lj/cut clearance to its own periodic image. A reader who finds this
 # raise could reasonably assume PBC is handled. It is not.
 #
-# No LAMMPS: the raise precedes _run_lammps, and `pm` is only read after it.
+# No LAMMPS: the raise precedes run_lammps, and `pm` is only read after it.
 
 def _write_slab(path, xs, cell_xy):
     """A minimal LAMMPS data file: one atom per x, at z=0, in a cell_xy box."""
