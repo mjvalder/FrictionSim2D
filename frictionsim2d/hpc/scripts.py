@@ -6,13 +6,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from jinja2 import Environment, FileSystemLoader
-
 from .manifest import JobManifest, _mlip_job_fields
 from ..core.config import GlobalSettings, apply_framework_overlay
 from ..core.mlip import get_mlip, is_mlip
-
-TEMPLATES_DIR = Path(__file__).parent.parent / 'templates' / 'hpc'
+from ..interfaces.jinja import template_environment
 
 #: What preflight.sh needs to know about the scheduler it is checking: the
 #: variable holding the submit directory, how the job script spells its array
@@ -403,14 +400,14 @@ class HPCScriptGenerator:
             config: HPC configuration (uses defaults if None).
         """
         self.config = config or HPCConfig.from_settings(_default_hpc_settings())
-        self.jinja_env = Environment(
-            loader=FileSystemLoader(TEMPLATES_DIR),
-            trim_blocks=True,
-            lstrip_blocks=True
-        )
+        self.jinja_env = template_environment()
         # One entry per job script written, for generate_preflight to check.
         self._jobs: List[Dict[str, Any]] = []
         self._log_dir: Optional[str] = None
+
+    def _template(self, name: str):
+        """The packaged ``templates/hpc/<name>`` template."""
+        return self.jinja_env.get_template(f'hpc/{name}')
 
     @staticmethod
     def _manifest_lines(paths: List[str], simulation_root: Path) -> List[str]:
@@ -568,7 +565,7 @@ class HPCScriptGenerator:
         template_name = f"{scheduler}_array.j2"
         script_ext = ".pbs" if scheduler == 'pbs' else ".sh"
         scripts = []
-        template = self.jinja_env.get_template(template_name)
+        template = self._template(template_name)
 
         for key in group_keys:
             paths = grouped[key]
@@ -697,7 +694,7 @@ class HPCScriptGenerator:
 
         simulation_root = Path(simulation_root) if simulation_root else output_dir.parent
         template_name = f"{scheduler}_combined.j2"
-        template = self.jinja_env.get_template(template_name)
+        template = self._template(template_name)
         script_ext = '.pbs' if scheduler == 'pbs' else '.sh'
         scripts: List[Path] = []
 
@@ -784,7 +781,7 @@ class HPCScriptGenerator:
                 ('preflight_sh.j2', 'preflight.sh'),
                 (f'{scheduler}_preflight.j2', _PREFLIGHT_DIALECT[scheduler]['preflight_job'])):
             path = output_dir / file_name
-            path.write_text(self.jinja_env.get_template(template_name).render(context),
+            path.write_text(self._template(template_name).render(context),
                             encoding='utf-8')
             written.append(path)
         written[0].chmod(0o755)
@@ -856,7 +853,7 @@ class HPCScriptGenerator:
         slide_jobs = manifest.get_slide_jobs()
         result = {'system': [], 'slide': []}
         template_name = f"{scheduler}_array.j2"
-        template = self.jinja_env.get_template(template_name)
+        template = self._template(template_name)
         script_ext = '.pbs' if scheduler == 'pbs' else '.sh'
 
         # Same (needs_gpu, framework) split as the other layouts: each group

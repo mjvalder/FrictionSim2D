@@ -46,7 +46,7 @@ def _render(template, config, array_size=3):
     ctx = config.to_dict()
     ctx.update({"array_size": array_size, "manifest_file": "m", "manifest_filename": "m.txt",
                 "base_dir": "$PBS_O_WORKDIR", "log_dir": "logs", "directive_log_dir": "logs"})
-    return gen.jinja_env.get_template(template).render(ctx)
+    return gen.jinja_env.get_template(f"hpc/{template}").render(ctx)
 
 
 def _manifest(specs):

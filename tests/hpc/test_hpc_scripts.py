@@ -293,3 +293,11 @@ def test_slurm_directive_drops_the_submit_dir_prefix_from_log_dir(tmp_path):
 
     text = (tmp_path / "hpc" / "run.sh").read_text(encoding="utf-8")
     assert "#SBATCH --output=joblogs/friction2d_out.txt" in text
+
+
+def test_generator_renders_through_the_shared_template_environment():
+    from frictionsim2d.interfaces.jinja import PackageLoader
+    env = HPCScriptGenerator(_config()).jinja_env
+    assert isinstance(env.loader, PackageLoader)
+    assert env.trim_blocks and env.lstrip_blocks
+    assert not env.keep_trailing_newline
