@@ -249,3 +249,54 @@ def generate_hpc_scripts_for_root(simulation_root: Path, settings) -> Optional[s
         hpc_config.base_dir(simulation_root.name),
     )
     return None
+
+
+def ensure_hpc_settings(hpc_settings) -> None:
+    """Fill the two HPC settings a script cannot do without, never prompting.
+
+    The scheduler defaults to PBS; ``use_tmpdir`` without a scratch directory
+    gets ``$TMPDIR``.
+    """
+    if not getattr(hpc_settings, 'scheduler_type', None):
+        hpc_settings.scheduler_type = 'pbs'
+    if (getattr(hpc_settings, 'use_tmpdir', False)
+            and not getattr(hpc_settings, 'scratch_dir', None)):
+        hpc_settings.scratch_dir = "$TMPDIR"
+
+
+def plan_tree_generation(simulation_root: Path, settings, scheduler: str):
+    """``(hpc_config, simulation_paths)`` for ``hpc generate`` over a tree.
+
+    ``scheduler`` overrides the settings' ``hpc.scheduler_type`` (in place).
+    """
+    ensure_hpc_settings(settings.hpc)
+    settings.hpc.scheduler_type = scheduler
+    hpc_config = HPCConfig.from_settings(settings.hpc)
+    return hpc_config, collect_hpc_simulation_paths(
+        simulation_root, lammps_scripts=hpc_config.lammps_scripts)
+
+
+def generation_report(result, output_dir: Path, scheduler: str,
+                      preflight: bool) -> List[str]:
+    """The lines ``hpc generate`` prints after :func:`generate_scripts_for_tree`.
+
+    A dict ``result`` is the two-phase (system -> slide) layout.
+    """
+    if isinstance(result, dict):
+        submit_file = 'submit_jobs.sh'
+        lines = [f"✅ Generated {sum(len(v) for v in result.values())} two-phase "
+                 f"script(s) in {output_dir}",
+                 "   (system → slide; slide jobs wait for system jobs to finish)"]
+    else:
+        submit_file = 'submit_all.txt'
+        lines = [f"✅ Generated {len(result)} script(s) in {output_dir}"]
+    lines += ["\n📝 Next steps:", f"   1. Review scripts in {output_dir}",
+              "   2. Transfer to HPC cluster"]
+    if preflight:
+        submit_cmd = 'qsub' if scheduler == 'pbs' else 'sbatch'
+        wrapper = f"preflight.{'pbs' if scheduler == 'pbs' else 'slurm'}"
+        lines += [f"   3. From the simulation root: {submit_cmd} {output_dir.name}/{wrapper}",
+                  f"   4. Follow {submit_file}"]
+    else:
+        lines.append(f"   3. Follow {submit_file}")
+    return lines

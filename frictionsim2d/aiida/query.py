@@ -1014,3 +1014,99 @@ def list_simulation_sets(profile: Optional[str] = None) -> List[Dict[str, Any]]:
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
     load_aiida_profile(profile)
     return Friction2DDB().list_sets()
+
+
+# ------------------------------------------------------------ the CLI's views
+
+#: The columns ``aiida query`` leads with: the point, then its verdict.
+QUERY_LEADING = ('set_label', 'rel_path', 'deck_name', 'load', 'load_unit', 'angle',
+                 'speed', 'status', 'reasons', 'verdict_kind', 'provisional',
+                 'thresholds_version')
+#: The ``aiida query`` axes given as a ``--<axis>-min``/``--<axis>-max`` pair.
+QUERY_RANGES = ('force', 'pressure', 'angle', 'speed', 'temperature')
+#: ``aiida list-sets --format table``: (title, row key) per column.
+_SET_COLUMNS = (('Label', 'label'), ('Model', 'model'), ('Runs', 'n_runs'),
+                ('Results', 'n_results'), ('Materials', 'materials'),
+                ('Host', 'source_host'), ('UUID', 'uuid'))
+_SET_CSV_KEYS = ['label', 'model', 'created', 'n_runs', 'n_results',
+                 'materials', 'git_commit', 'source_host', 'uuid', 'pk']
+
+
+def verdict_first(df):
+    """``df`` with :data:`QUERY_LEADING` (those present) first."""
+    leading = [c for c in QUERY_LEADING if c in df.columns]
+    return df[leading + [c for c in df.columns if c not in leading]]
+
+
+def query_filters(materials: Sequence[str] = (), limit: Optional[int] = None,
+                  order_by: Optional[str] = None, **opts: Any) -> Dict[str, Any]:
+    """``aiida query``'s options as :meth:`Friction2DDB.query` arguments.
+
+    ``opts`` holds ``family``, ``model``, ``set_label``, ``potential``,
+    ``layers`` and a ``<axis>_min``/``<axis>_max`` pair per
+    :data:`QUERY_RANGES`; each pair becomes ``<axis>_range`` (None when both are).
+    """
+    def span(axis):
+        low, high = opts.get(f'{axis}_min'), opts.get(f'{axis}_max')
+        return (low, high) if low is not None or high is not None else None
+    return {'materials': list(materials) if materials else None,
+            **{key: opts.get(key) for key in ('family', 'model', 'set_label',
+                                              'potential', 'layers')},
+            **{f'{axis}_range': span(axis) for axis in QUERY_RANGES},
+            'limit': limit, 'order_by': order_by}
+
+
+def open_query(profile: Optional[str], set_label: Optional[str]):
+    """``(db, set labels)`` for ``aiida query``; the labels only when ``set_label``."""
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+    load_aiida_profile(profile)
+    db = Friction2DDB()
+    return db, (db.get_available_conditions()['set_labels'] if set_label else [])
+
+
+def query_lines(results, output_format: str, output: Optional[str]) -> Iterable[str]:
+    """The lines ``aiida query`` prints for ``results``, lazily.
+
+    ``output`` (csv and json only) is written instead of printing the rows.
+    """
+    yield f"📊 Found {results.total_count} results"
+    shown_rows = getattr(results, 'rows', None)
+    if shown_rows is not None and len(shown_rows) < results.total_count:
+        yield f"Showing {len(shown_rows)} of {results.total_count}"
+    if output_format == 'json':
+        if output:
+            results.export_json(Path(output))
+            yield f"✅ Saved to {output}"
+        else:  # the rows, as table and csv print them
+            yield results.to_dataframe().to_json(orient='records', indent=2,
+                                                 default_handler=str)
+        return
+    df = verdict_first(results.to_dataframe())
+    if output_format == 'table':
+        yield "\n" + df.to_string(index=False)
+    elif output:
+        df.to_csv(output, index=False)
+        yield f"✅ Saved to {output}"
+    else:
+        yield df.to_csv(index=False)
+
+
+def render_sets(rows: List[Mapping[str, Any]], output_format: str) -> str:
+    """``aiida list-sets`` output: ``table``, ``json`` or ``csv``."""
+    if output_format == 'json':
+        return json.dumps(rows, indent=2)
+    if output_format == 'csv':
+        import csv  # pylint: disable=import-outside-toplevel
+        import io  # pylint: disable=import-outside-toplevel
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=_SET_CSV_KEYS, extrasaction='ignore')
+        writer.writeheader()
+        writer.writerows(rows)
+        return buffer.getvalue().rstrip()
+    widths = [max(len(title), *(len(str(row.get(key, ''))) for row in rows))
+              for title, key in _SET_COLUMNS]
+    sep_line = '  '.join('-' * width for width in widths)
+    lines = ['  '.join(title.ljust(w) for (title, _), w in zip(_SET_COLUMNS, widths)), sep_line]
+    lines += ['  '.join(str(row.get(key, '')).ljust(w) for (_, key), w in zip(_SET_COLUMNS, widths))
+              for row in rows]
+    return '\n'.join(lines + [sep_line, f"\nTotal sets: {len(rows)}"])

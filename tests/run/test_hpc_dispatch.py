@@ -146,3 +146,25 @@ def test_slide_in_is_satisfied_by_any_slide_deck(tmp_path):
     root = _lammps_dir(tmp_path, "slide_f2N.in")
 
     assert hpc_dispatch.collect_hpc_simulation_paths(root, ["slide.in"]) == ["afm/m/L1"]
+
+
+def test_ensure_hpc_settings_fills_only_what_is_missing():
+    settings = GlobalSettings().hpc
+    settings.scheduler_type, settings.use_tmpdir, settings.scratch_dir = '', True, None
+    hpc_dispatch.ensure_hpc_settings(settings)
+    assert (settings.scheduler_type, settings.scratch_dir) == ('pbs', '$TMPDIR')
+    settings.scheduler_type, settings.scratch_dir = 'slurm', '/scratch'
+    hpc_dispatch.ensure_hpc_settings(settings)
+    assert (settings.scheduler_type, settings.scratch_dir) == ('slurm', '/scratch')
+
+
+def test_generation_report_names_the_submit_file_of_each_layout(tmp_path):
+    out = tmp_path / 'hpc'
+    two_phase = hpc_dispatch.generation_report({'system': [1, 2], 'slide': [3]}, out,
+                                               'pbs', preflight=False)
+    assert two_phase[0] == f"✅ Generated 3 two-phase script(s) in {out}"
+    assert two_phase[-1] == "   3. Follow submit_jobs.sh"
+    single = hpc_dispatch.generation_report([1], out, 'slurm', preflight=True)
+    assert single[0] == f"✅ Generated 1 script(s) in {out}"
+    assert single[-2:] == ["   3. From the simulation root: sbatch hpc/preflight.slurm",
+                           "   4. Follow submit_all.txt"]

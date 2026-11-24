@@ -618,6 +618,29 @@ def load_plot_document(path: Path) -> PlotDocument:
     return document
 
 
+def write_starter_document(path: Path, data_dirs: List[str]) -> Path:
+    """Write a valid two-plot document (lf and cof against load) to ``path``.
+
+    ``data_dirs`` are resolved; none gives the placeholder ``./my_run``.
+    """
+    dirs = [str(Path(d).resolve()) for d in data_dirs] or ['./my_run']
+    document = PlotDocument(
+        data_dirs=dirs, labels=[Path(d).name for d in dirs],
+        plots=[
+            # plot_type is passed explicitly so exclude_unset keeps it: the
+            # Literal default would be dropped from the dump, and the written
+            # document would then fail its own discriminator.
+            SummaryPlot(plot_type='summary', x_axis='force', y_axis='lf',
+                        filename='lf_vs_load.png', add_linear_fit=True),
+            SummaryPlot(plot_type='summary', x_axis='force', y_axis='cof',
+                        filename='cof_vs_load.png'),
+        ])
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(document.model_dump_json(indent=2, exclude_unset=True), encoding='utf-8')
+    return target
+
+
 def _model_rows(model) -> List[str]:
     rows = []
     for name, info in model.model_fields.items():

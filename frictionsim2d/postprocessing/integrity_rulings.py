@@ -209,3 +209,48 @@ def apply_rulings(points: Iterable, rulings: Dict[str, Ruling],
             point.integrity = rule_verdict(
                 replace(point.integrity, status=original), ruling)[0]
     return warnings
+
+
+def load_integrity_settings(path: Optional[Path]):
+    """`IntegritySettings` from the ``integrity:`` mapping of YAML ``path``,
+    else (``path`` None) from the user's settings.
+
+    Raises:
+        ValueError: ``path`` is unreadable or holds no ``integrity:`` mapping.
+    """
+    # pylint: disable=import-outside-toplevel
+    from ..core.config import IntegritySettings, load_settings
+    if path is None:
+        return load_settings().integrity
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = yaml.safe_load(handle) or {}
+        block = data.get('integrity', {}) if isinstance(data, dict) else None
+        if not isinstance(block, dict):
+            raise ValueError('expected an `integrity:` mapping')
+        return IntegritySettings(**block)
+    except (OSError, yaml.YAMLError, ValueError, TypeError) as exc:
+        raise ValueError(f'cannot read integrity settings {path}: {exc}') from exc
+
+
+def integrity_report(reader) -> List[str]:
+    """``postprocess read``'s integrity lines for a `DataReader`: the tally,
+    a ruling stub per quarantined point, the overrides, the warnings."""
+    failed = [p for p in reader.points if p.status == 'failed_integrity']
+    held = [p for p in reader.points if p.status == 'quarantined']
+    lines = [f"Integrity: {len(failed)} failed, {len(held)} quarantined "
+             f"(thresholds v{reader.integrity_settings.version})"]
+    for point in held:
+        reason = ' '.join(str(point.status_detail or '').split())
+        lines.append(f'- point: "{point_id(point, reader.results_dir)}"\n'
+                     f'  ruling:   # pass or fail -- {reason}')
+    overridden = [p for p in reader.points
+                  if p.integrity is not None and p.integrity.overridden]
+    lines.append(f"Overrides: {len(overridden)}")
+    for point in overridden:
+        note = ': '.join(part for part in (point.integrity.date,
+                                           ' '.join(point.integrity.note.split()))
+                         if part)
+        lines.append(f"- {point_id(point, reader.results_dir)}: "
+                     f"{point.integrity.original_status} -> {point.status} ({note})")
+    return lines + [f"Warning: {warning}" for warning in reader.ruling_warnings]

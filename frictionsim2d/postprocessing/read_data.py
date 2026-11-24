@@ -1103,6 +1103,15 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                         len(runs), size, path)
         return written
 
+    def found_line(self) -> str:
+        """``Found N load point(s) (status=count, ...) across M size(s).``"""
+        counts: Dict[str, int] = {}
+        for point in self.points:
+            counts[point.status] = counts.get(point.status, 0) + 1
+        summary = ', '.join(f'{k}={v}' for k, v in sorted(counts.items()) if v)
+        return (f"Found {len(self.points)} load point(s) ({summary}) "
+                f"across {len({p.size for p in self.points})} size(s).")
+
     def export_issue_reports(self) -> None:
         """Export reports on incomplete files and materials to text files."""
         if self.incomplete_files:

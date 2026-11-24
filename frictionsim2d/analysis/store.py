@@ -31,7 +31,8 @@ except ImportError:  # pragma: no cover - the aiida tier skips without it
         return func
 
 __all__ = ['ANALYSIS_GROUP_PREFIX', 'find_result_node', 'params_hash', 'record_analysis',
-           'result_node', 'select_result_node', 'store_result', 'table_from_csv']
+           'result_node', 'select_result_node', 'store_result', 'stored_result',
+           'table_from_csv']
 
 _CSV_NAME = 'table.csv'
 
@@ -235,6 +236,24 @@ def select_result_node(name: str, dataset: str, params: Optional[Mapping[str, An
     raise LookupError(f'no stored {name} over {dataset} under {asked}; stored under: '
                       f'{"; ".join(sorted(sets))} -- name those params, or run: '
                       f'FrictionSim2D analyse run {name} {dataset}')
+
+
+def stored_result(name: str, dataset: str, params: Optional[Mapping[str, Any]] = None):
+    """:func:`select_result_node`, or ``LookupError`` saying what to do.
+
+    Raises:
+        LookupError: nothing stored under ``params`` (the message names the
+            params stored instead, or the ``analyse run`` line), or a bad
+            parameter.
+    """
+    try:
+        node = select_result_node(name, dataset, params)
+    except (LookupError, ValueError) as exc:
+        raise LookupError(str(exc.args[0] if exc.args else exc)) from exc
+    if node is None:
+        raise LookupError(f"no stored result of {name} over {dataset}; "
+                          f"run: FrictionSim2D analyse run {name} {dataset}")
+    return node
 
 
 def result_node(name: str, dataset: str, params: Optional[dict] = None, *,

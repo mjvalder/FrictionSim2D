@@ -1,6 +1,6 @@
 """Command Line Interface for FrictionSim2D.
 
-Unified CLI for simulation execution, HPC script generation, and AiiDA integration.
+Click glue only: each command parses its options, calls its package, prints.
 """
 # pylint: disable=import-outside-toplevel
 # Deliberate: every subcommand imports its dependencies lazily so `FrictionSim2D --help`
@@ -8,15 +8,18 @@ Unified CLI for simulation execution, HPC script generation, and AiiDA integrati
 
 import logging
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, NoReturn, Tuple
 import click
 
 from .core.config import load_settings, settings_origin, _global_settings_path
 from .run.hpc_dispatch import (
-    collect_hpc_simulation_paths,
+    ensure_hpc_settings,
     generate_scripts_for_tree,
+    generation_report,
     hpc_generation_blocker,
+    plan_tree_generation,
 )
 from .run.simulate import run_simulations
 
@@ -28,15 +31,33 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _ensure_hpc_settings(hpc_settings) -> None:
-    """Ensure minimal HPC settings are set without interactive prompts."""
-    # Scheduler type and scratch directory are the only required values.
-    if not getattr(hpc_settings, 'scheduler_type', None):
-        hpc_settings.scheduler_type = 'pbs'
+def _raise_abort(message: str, exc: Exception) -> NoReturn:
+    click.echo(message, err=True)
+    raise click.Abort() from exc
 
-    if (getattr(hpc_settings, 'use_tmpdir', False)
-            and not getattr(hpc_settings, 'scratch_dir', None)):
-        hpc_settings.scratch_dir = "$TMPDIR"
+
+@contextmanager
+def _failing(log: str, message: str, plain: tuple = ()):
+    """Turn any error inside into ``❌ {message}: {exc}`` (logged) and an abort.
+
+    An exception of ``plain`` prints as ``❌ {exc}``, unlogged; a
+    ``click.ClickException`` passes through.
+    """
+    try:
+        yield
+    except click.ClickException:
+        raise
+    except plain as exc:
+        _raise_abort(f"❌ {exc}", exc)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception(log)
+        _raise_abort(f"❌ {message}: {exc}", exc)
+
+
+def _echo_lines(lines) -> None:
+    """Echo ``(text, to_stderr)`` pairs."""
+    for text, err in lines:
+        click.echo(text, err=err)
 
 
 def _run_simulation(model: str, config_file: str, output_dir: str,
@@ -49,30 +70,17 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
     from .builders.construction.amorphous import AmorphousMissing
     try:
         created_simulations, simulation_root, configs_to_run, _ = run_simulations(
-            config_file=config_file,
-            model=model,
-            settings_file=settings_file,
-            output_root=Path(output_dir),
-            ensure_hpc_settings=_ensure_hpc_settings,
-            generate_hpc=generate_hpc,
-            **extra,
-        )
+            config_file=config_file, model=model, settings_file=settings_file,
+            output_root=Path(output_dir), ensure_hpc_settings=ensure_hpc_settings,
+            generate_hpc=generate_hpc, **extra)
     except AmorphousMissing as exc:
-        # Not a crash and not a config error: the message names the block that
-        # is missing and the `run quench --for` line that creates its job.
+        # Names the missing block and the `run quench --for` line that makes it.
         click.echo(str(exc), err=True)
         raise SystemExit(1) from exc
     except (ValueError, FileNotFoundError) as exc:
-        # A rejected config is a user error, not a crash: expansion refusals
-        # (`run/expand.py`), the runtime sweep-ordering check, and pydantic's
-        # ValidationError (a ValueError subclass) all land here, and every one
-        # of them already carries a message naming what to change. Without this
-        # the user got a bare traceback and no CLI output at all, while
-        # `hpc generate` right below reports its own refusals properly. The
-        # catch stays narrow -- an unexpected error still surfaces its
-        # traceback -- and the exception is logged so nothing is lost.
-        # debug, not exception: the message is echoed below, and logging the
-        # traceback at ERROR would print the very thing this replaces.
+        # A rejected config (expansion refusals, sweep ordering, pydantic's
+        # ValidationError) is a user error whose message names the fix; an
+        # unexpected error still surfaces its traceback.
         logger.debug("Simulation generation rejected the config", exc_info=True)
         click.echo(f"❌ {exc}", err=True)
         raise click.Abort() from exc
@@ -80,19 +88,37 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
     if simulation_root is None:
         click.echo("✅ all amorphous blocks present: nothing to quench.")
         return None
-
     click.echo(f"📋 Found {len(configs_to_run)} simulation configurations")
-
-    click.echo(
-        f"\n✅ Generation complete: {len(created_simulations)}/"
-        f"{len(configs_to_run)} successful"
-    )
+    click.echo(f"\n✅ Generation complete: {len(created_simulations)}/"
+               f"{len(configs_to_run)} successful")
     click.echo(f"📂 Output directory: {simulation_root.absolute()}")
     if len(created_simulations) < len(configs_to_run):
-        # A build that failed (logged above) must fail the command, or a
-        # script chaining `run` and `hpc generate` carries on as if it worked.
+        # A failed build fails the command, or `run && hpc generate` carries on.
         raise SystemExit(1)
     return simulation_root
+
+
+def _options(*options):
+    """One decorator applying ``options`` in the order listed."""
+    def decorate(func):
+        for option in reversed(options):
+            func = option(func)
+        return func
+    return decorate
+
+
+#: ``--settings-file``, ``--output-dir`` and ``--hpc-scripts`` of every ``run`` command.
+_run_options = _options(
+    click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                 default=None, help='Path to a settings.yaml file for this run only.'),
+    click.option('--output-dir', '-o', default='simulation_output',
+                 help='Output directory for generated files'),
+    click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
+                 help='Generate HPC scripts for the simulation root'))
+
+#: ``--profile`` of the commands that load an existing AiiDA profile.
+_profile_option = click.option('--profile', default=None,
+                               help='AiiDA profile name (default: configured default profile)')
 
 # =============================================================================
 # MAIN CLI GROUP
@@ -113,67 +139,25 @@ def run_group():
     """Run friction simulations."""
 
 
-@run_group.command('afm')
-@click.argument('config_file', type=click.Path(exists=True))
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help='Path to a settings.yaml file for this run only.')
-@click.option('--output-dir', '-o', default='simulation_output',
-              help='Output directory for generated files')
-@click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
-                            help='Generate HPC scripts for the simulation root')
-def run_afm(config_file: str, settings_file: Optional[Path], output_dir: str,
-            generate_hpc: bool):
-    """Generate AFM simulation files.
+#: (command, model, help) of the ``run`` commands that differ only in their model.
+_RUN_COMMANDS = (
+    ('afm', 'afm', """Generate AFM simulation files.
 
     Creates all necessary LAMMPS input files, structures, and potentials
     for tip-on-substrate friction simulations.
 
     Example:
         FrictionSim2D run afm afm_config.ini -o ./afm_output
-    """
-    _run_simulation(
-        'afm', config_file, output_dir, generate_hpc,
-        settings_file=settings_file
-    )
-
-@run_group.command('sheetonsheet')
-@click.argument('config_file', type=click.Path(exists=True))
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-          default=None,
-          help='Path to a settings.yaml file for this run only.')
-@click.option('--output-dir', '-o', default='simulation_output',
-              help='Output directory for generated files')
-@click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
-        help='Generate HPC scripts for the simulation root')
-def run_sheetonsheet(config_file: str, settings_file: Optional[Path], output_dir: str,
-             generate_hpc: bool):
-    """Generate sheet-on-sheet simulation files.
+    """),
+    ('sheetonsheet', 'sheetonsheet', """Generate sheet-on-sheet simulation files.
 
     Creates all necessary LAMMPS input files for 4-layer sheet-on-sheet
     friction simulations.
 
     Example:
         FrictionSim2D run sheetonsheet sheet_config.ini -o ./sheet_output
-    """
-    _run_simulation(
-        'sheetonsheet', config_file, output_dir, generate_hpc,
-        settings_file=settings_file
-    )
-
-
-@run_group.command('pes-sheet')
-@click.argument('config_file', type=click.Path(exists=True))
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help='Path to a settings.yaml file for this run only.')
-@click.option('--output-dir', '-o', default='simulation_output',
-              help='Output directory for generated files')
-@click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
-              help='Generate HPC scripts for the simulation root')
-def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: str,
-                  generate_hpc: bool):
-    """Generate sheet-on-sheet interlayer PES scan files.
+    """),
+    ('pes-sheet', 'pes_sheet', """Generate sheet-on-sheet interlayer PES scan files.
 
     Builds a frozen bilayer and writes a cheap, static lateral grid-scan of the
     interlayer potential-energy surface (corrugation barrier) instead of a
@@ -181,25 +165,8 @@ def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: s
 
     Example:
         FrictionSim2D run pes-sheet examples/pes_sheet_config.ini -o ./pes_output
-    """
-    _run_simulation(
-        'pes_sheet', config_file, output_dir, generate_hpc,
-        settings_file=settings_file
-    )
-
-
-@run_group.command('pes-tip')
-@click.argument('config_file', type=click.Path(exists=True))
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help='Path to a settings.yaml file for this run only.')
-@click.option('--output-dir', '-o', default='simulation_output',
-              help='Output directory for generated files')
-@click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
-              help='Generate HPC scripts for the simulation root')
-def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str,
-                generate_hpc: bool):
-    """Generate tip-on-sheet (AFM) surface PES scan files.
+    """),
+    ('pes-tip', 'pes_tip', """Generate tip-on-sheet (AFM) surface PES scan files.
 
     Builds and indents the AFM tip + sheet + substrate stack to a low load
     exactly as the sliding sim, then writes a static lateral grid-scan of the
@@ -207,25 +174,9 @@ def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str
 
     Example:
         FrictionSim2D run pes-tip examples/pes_tip_config.ini -o ./pes_output
-    """
-    _run_simulation(
-        'pes_tip', config_file, output_dir, generate_hpc,
-        settings_file=settings_file
-    )
-
-
-@run_group.command('indent')
-@click.argument('config_file', type=click.Path(exists=True))
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help='Path to a settings.yaml file for this run only.')
-@click.option('--output-dir', '-o', default='simulation_output',
-              help='Output directory for generated files')
-@click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
-              help='Generate HPC scripts for the simulation root')
-def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
-               generate_hpc: bool):
-    """Generate AFM indentation ("indent") simulation files: hold + pull-off retract.
+    """),
+    ('indent', 'indent',
+     """Generate AFM indentation ("indent") simulation files: hold + pull-off retract.
 
     The standard AFM build + indentation ramp (system.in) to each load in
     [general] force, then per load a damped finite-T hold followed by a
@@ -238,11 +189,23 @@ def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
 
     Example:
         FrictionSim2D run indent examples/indent_config.ini -o ./indent_output --hpc-scripts
-    """
-    _run_simulation(
-        'indent', config_file, output_dir, generate_hpc,
-        settings_file=settings_file
-    )
+    """),
+)
+
+
+def _add_run_command(name: str, model: str, doc: str) -> None:
+    def command(config_file: str, settings_file: Optional[Path], output_dir: str,
+                generate_hpc: bool):
+        _run_simulation(model, config_file, output_dir, generate_hpc,
+                        settings_file=settings_file)
+    command.__doc__ = doc
+    command.__name__ = f"run_{model}"
+    run_group.command(name)(click.argument('config_file', type=click.Path(exists=True))(
+        _run_options(command)))
+
+
+for _name, _model, _doc in _RUN_COMMANDS:
+    _add_run_command(_name, _model, _doc)
 
 
 @run_group.command('quench')
@@ -250,13 +213,7 @@ def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
 @click.option('--for', 'for_config', type=click.Path(exists=True, dir_okay=False),
               default=None,
               help='A friction config: make one member per amorphous block it is missing.')
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help='Path to a settings.yaml file for this run only.')
-@click.option('--output-dir', '-o', default='simulation_output',
-              help='Output directory for generated files')
-@click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
-              help='Generate HPC scripts for the simulation root')
+@_run_options
 @click.option('--local', 'run_local', is_flag=True,
               help='Then run every member here with serial lmp (hours) and import the blocks.')
 @click.option('--force', is_flag=True,
@@ -299,23 +256,9 @@ def _report_quench_import(root: Path, replace: bool, source: str) -> None:
     """Import a quench root, echo the outcome, exit 1 on anything left out."""
     from .builders.construction.amorphous import import_quench_root
     report = import_quench_root(root, replace=replace, source=source)
-    for path in report.imported:
-        click.echo(f"✅ imported {path}")
-    for path in report.unchanged:
-        click.echo(f"= already in the library: {path}")
-    for message in report.warnings:
-        click.echo(f"⚠️  {message}")
-    for member, reason in report.refused:
-        click.echo(f"❌ refused {member}: {reason}", err=True)
-    for member, reason in report.incomplete:
-        click.echo(f"❌ incomplete {member}: {reason}", err=True)
-    if report.refused or report.incomplete:
+    _echo_lines(report.lines())
+    if not report.ok:
         raise SystemExit(1)
-
-
-def _raise_abort(message: str, exc: Exception) -> NoReturn:
-    click.echo(message, err=True)
-    raise click.Abort() from exc
 
 
 # =============================================================================
@@ -343,15 +286,12 @@ def settings_show(settings_file: Optional[Path], origin: bool):
         FrictionSim2D settings show
         FrictionSim2D settings show --origin
     """
-    import yaml  # noqa: PLC0415
+    from .core.config import effective_settings_yaml
     if origin:
         src = settings_origin(settings_file=settings_file)
-        if src:
-            click.echo(f"# Settings loaded from: {src}")
-        else:
-            click.echo("# Settings loaded from: hardcoded defaults (no settings.yaml found)")
-    effective = load_settings(settings_file=settings_file)
-    click.echo(yaml.dump(effective.model_dump(), default_flow_style=False))
+        click.echo(f"# Settings loaded from: {src}" if src else
+                   "# Settings loaded from: hardcoded defaults (no settings.yaml found)")
+    click.echo(effective_settings_yaml(settings_file))
 
 
 @settings_group.command('init')
@@ -372,22 +312,11 @@ def settings_init(global_: bool, force: bool):
         FrictionSim2D settings init                # create per-run file
         FrictionSim2D settings init --global       # first-time machine setup
     """
-    import yaml  # noqa: PLC0415
-
+    from .core.config import write_effective_settings
     target = _global_settings_path() if global_ else Path('settings.yaml')
-
     if target.exists() and not force:
-        click.confirm(
-            f"'{target}' already exists. Overwrite?",
-            abort=True,
-        )
-
-    effective = load_settings()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        yaml.safe_dump(effective.model_dump(), sort_keys=False),
-        encoding='utf-8',
-    )
+        click.confirm(f"'{target}' already exists. Overwrite?", abort=True)
+    write_effective_settings(target)
     click.echo(f"✅ Created '{target}'")
     if global_:
         click.echo("   Edit this file to set HPC, database, and other machine-level defaults.")
@@ -417,7 +346,7 @@ def settings_reset(global_: bool):
         click.echo(f"ℹ️  No settings file found at '{target}'")
 
 # =============================================================================
-# HPC COMMANDS
+# GUI AND HPC COMMANDS
 # =============================================================================
 
 @cli.group('gui', invoke_without_command=True)
@@ -435,20 +364,16 @@ def gui_group(ctx, run_check: bool, verbose: bool):
     """
     if ctx.invoked_subcommand is not None:
         return
-
     from .gui import GUI_AVAILABLE, INSTALL_HINT  # noqa: PLC0415
-
     if not GUI_AVAILABLE:
         click.echo("GUI dependencies are not available.", err=True)
         click.echo(INSTALL_HINT, err=True)
         raise click.Abort()
-
     if run_check:
         from .gui.diagnostics import run_checks  # noqa: PLC0415
         report = run_checks()
         click.echo(report.render())
         ctx.exit(0 if report.ok else 1)
-
     from .gui import main as gui_main  # noqa: PLC0415
     ctx.exit(gui_main(tuple(), verbose=verbose))
 
@@ -473,133 +398,38 @@ def hpc_group():
 def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
                  scheduler: str, output_dir: Optional[str], preflight: bool):
     """Generate HPC submission scripts for existing simulations.
-    
+
     Scans simulation directory and creates PBS or SLURM job scripts.
-    
+
     Example:
         FrictionSim2D hpc generate ./afm_output --scheduler pbs
     """
-    from .hpc.scripts import HPCConfig
-
     sim_dir = Path(simulation_dir)
     out_dir = Path(output_dir) if output_dir else sim_dir / 'hpc'
     out_dir.mkdir(parents=True, exist_ok=True)
-
     click.echo(f"🖥️  Generating {scheduler.upper()} scripts for: {sim_dir}")
-
     settings = load_settings(settings_file=settings_file)
-    _ensure_hpc_settings(settings.hpc)
-    settings.hpc.scheduler_type = scheduler  # CLI --scheduler overrides the settings default
-    hpc_config = HPCConfig.from_settings(settings.hpc)
-
-    simulation_paths = collect_hpc_simulation_paths(
-        sim_dir, lammps_scripts=hpc_config.lammps_scripts)
-
+    hpc_config, simulation_paths = plan_tree_generation(sim_dir, settings, scheduler)
     if not simulation_paths:
         click.echo("❌ No simulation directories found", err=True)
         raise click.Abort()
-
     blocker = hpc_generation_blocker(settings)
     if blocker is not None:
         click.echo(f"❌ {blocker}", err=True)
         raise click.Abort()
-
     click.echo(f"📋 Found {len(simulation_paths)} simulations")
-
     preflight = preflight or hpc_config.preflight
     try:
         result = generate_scripts_for_tree(
             sim_dir, hpc_config, out_dir, simulation_paths,
-            hpc_config.base_dir(sim_dir.name), preflight=preflight,
-        )
+            hpc_config.base_dir(sim_dir.name), preflight=preflight)
     except ValueError as exc:
-        # A refused setting (e.g. a device MACE group without hpc.gpu) names its
-        # own fix; a traceback would only bury it.
+        # A refused setting (e.g. a device MACE group without hpc.gpu) names its fix.
         logger.debug("HPC script generation refused the settings", exc_info=True)
         click.echo(f"❌ {exc}", err=True)
         raise click.Abort() from exc
-
-    if isinstance(result, dict):
-        n_scripts = sum(len(v) for v in result.values())
-        submit_file = 'submit_jobs.sh'
-        click.echo(f"✅ Generated {n_scripts} two-phase script(s) in {out_dir}")
-        click.echo("   (system → slide; slide jobs wait for system jobs to finish)")
-    else:
-        n_scripts = len(result)
-        submit_file = 'submit_all.txt'
-        click.echo(f"✅ Generated {n_scripts} script(s) in {out_dir}")
-    click.echo("\n📝 Next steps:")
-    click.echo(f"   1. Review scripts in {out_dir}")
-    click.echo("   2. Transfer to HPC cluster")
-    if preflight:
-        submit_cmd = 'qsub' if scheduler == 'pbs' else 'sbatch'
-        wrapper = f"preflight.{'pbs' if scheduler == 'pbs' else 'slurm'}"
-        click.echo(f"   3. From the simulation root: "
-                   f"{submit_cmd} {out_dir.name}/{wrapper}")
-        click.echo(f"   4. Follow {submit_file}")
-    else:
-        click.echo(f"   3. Follow {submit_file}")
-
-
-def _resolve_run_log(sim_dir: Path) -> Tuple[Optional[Path], str]:
-    """Pick the log to enrich from when the caller named only a run directory.
-
-    Prefers ``lammps/run_system.log``: ``system*.in`` is the only phase that
-    prints RAMP_STATUS, and that is the name the job scripts derive for it.
-    Falls back to a lone ``run*.log`` whatever it is called, because an
-    unambiguous directory needs no naming convention to be usable -- a
-    slide-only run, a log saved by hand, a future template that names its
-    phases differently. It is a tolerance, not a compatibility shim: no
-    released layout uses another name. Several logs with no ``run_system.log``
-    among them is the one case worth refusing, since picking the wrong one
-    would quietly record the wrong run's settle result.
-
-    Returns ``(log_path, '')`` or ``(None, reason)``.
-    """
-    lammps_dir = Path(sim_dir) / 'lammps'
-    preferred = lammps_dir / 'run_system.log'
-    if preferred.is_file():
-        return preferred, ''
-    candidates = sorted(p for p in lammps_dir.glob('run*.log') if p.is_file())
-    if len(candidates) == 1:
-        return candidates[0], ''
-    if not candidates:
-        return None, f"no run log in {lammps_dir}"
-    names = ', '.join(p.name for p in candidates)
-    return None, (f"{len(candidates)} run logs and none named run_system.log "
-                  f"({names}) -- name one explicitly")
-
-
-def _enrich_one_run(sim_dir: Path, log_path: Optional[Path],
-                    enrich) -> Tuple[str, str]:
-    """Enrich one run directory. Returns (outcome, detail).
-
-    ``outcome`` is one of 'enriched', 'unchanged', 'skipped'. Nothing raises:
-    every failure becomes a 'skipped' with a reason, because the caller must
-    never report a completed simulation as failed over a provenance nicety.
-    """
-    if log_path is None:
-        log_path, why = _resolve_run_log(sim_dir)
-        if log_path is None:
-            return 'skipped', why
-
-    record_path = Path(sim_dir) / 'provenance.json'
-    # Snapshot rather than trust the return value: the function returns the
-    # record path both when it merged fields and when the log held none, and
-    # only the on-disk bytes distinguish those.
-    before = (record_path.read_text(encoding='utf-8', errors='ignore')
-              if record_path.is_file() else None)
-
-    result = enrich(sim_dir, log_path)
-    if result is None:
-        return 'skipped', (f"no readable provenance.json, or no log at "
-                           f"{log_path}")
-    if result.read_text(encoding='utf-8', errors='ignore') == before:
-        # Byte-identity, not "the log was empty": a real LAMMPS log always
-        # carries at least the version banner, so the usual way to land here
-        # is a repeat pass over a tree already swept.
-        return 'unchanged', f"already up to date with {log_path.name}"
-    return 'enriched', f"from {log_path.name}"
+    for line in generation_report(result, out_dir, scheduler, preflight):
+        click.echo(line)
 
 
 @hpc_group.command('enrich-provenance')
@@ -642,42 +472,17 @@ def hpc_enrich_provenance(sim_dir: Path, log_path: Optional[Path],
       FrictionSim2D hpc enrich-provenance -r ./simulation_20260908_101500
       FrictionSim2D hpc enrich-provenance ./afm/h_MoS2/L1
     """
-    # Lazy, like every other subcommand's imports here: keeps `--help` and the
-    # unrelated groups off this module's (ASE-bearing) import path.
-    from .builders.utils.post_run import enrich_provenance_post_run
-
+    from .builders.utils.post_run import enrich_one_run, enrich_tree
     if recursive and log_path is not None:
         raise click.UsageError(
             "--recursive sweeps a whole tree and resolves each run's log "
             "itself; it cannot also take a single LOG_PATH.")
-
     if not recursive:
-        outcome, detail = _enrich_one_run(sim_dir, log_path,
-                                          enrich_provenance_post_run)
+        outcome, detail = enrich_one_run(sim_dir, log_path)
         click.echo(f"{outcome} {sim_dir}: {detail}")
         return
-
-    # Reuse the shared discovery helper (the same one `hpc generate` and
-    # `run --hpc-scripts` use) rather than a second bespoke walk -- a
-    # divergent copy is exactly what the C2-1 refactor removed. Passing an
-    # empty script list takes its "any directory with a lammps/*.in" branch,
-    # which is what a post-run sweep wants: every run directory, whatever its
-    # scripts were named.
-    rel_paths = (collect_hpc_simulation_paths(sim_dir, lammps_scripts=[])
-                 if sim_dir.is_dir() else [])
-    if not rel_paths:
-        click.echo(f"No simulation directories under {sim_dir}; "
-                   f"nothing to enrich.")
-        return
-
-    tally = {'enriched': 0, 'unchanged': 0, 'skipped': 0}
-    for rel in rel_paths:
-        outcome, detail = _enrich_one_run(sim_dir / rel, None,
-                                          enrich_provenance_post_run)
-        tally[outcome] += 1
-        click.echo(f"{outcome} {rel}: {detail}")
-    click.echo(f"{tally['enriched']} enriched, {tally['unchanged']} unchanged, "
-               f"{tally['skipped']} skipped.")
+    for line in enrich_tree(sim_dir):
+        click.echo(line)
 
 
 # =============================================================================
@@ -717,32 +522,14 @@ def quench_list(material: Optional[str], as_json: bool):
     Example:
         FrictionSim2D quench list Si
     """
-    import json as _json
-    from .builders.construction.amorphous import CONDITION_FIELDS, scan_blocks
-    rows = []
-    for block in scan_blocks(material):
-        rows.append({
-            'file': block.path.name, 'root': block.root, 'path': str(block.path),
-            'key8': block.key.key8 if block.key else None,
-            'unkeyed': block.unkeyed_reason,
-            'box': list(block.box) if block.box else None,
-            'natoms': block.meta.get('natoms'),
-            **{name: getattr(block.key, name) if block.key else block.meta.get(name)
-               for name in CONDITION_FIELDS},
-        })
+    import json
+    from .builders.construction.amorphous import block_line, block_rows
+    rows = block_rows(material)
     if as_json:
-        click.echo(_json.dumps(rows, indent=2))
+        click.echo(json.dumps(rows, indent=2))
         return
-    if not rows:
-        click.echo("No amorphous blocks found.")
-        return
-    for row in rows:
-        box = 'x'.join(f'{v:.1f}' for v in row['box']) + ' A' if row['box'] else 'no box'
-        key = row['key8'] or f"unkeyed ({row['unkeyed']})"
-        conditions = ', '.join(f"{name}={row[name]}" for name in CONDITION_FIELDS
-                               if row[name] is not None)
-        click.echo(f"{row['file']}  {row['root']}  {key}  {box}  "
-                   f"natoms={row['natoms']}  {conditions}")
+    for line in [block_line(row) for row in rows] or ["No amorphous blocks found."]:
+        click.echo(line)
 
 
 # =============================================================================
@@ -775,7 +562,6 @@ def aiida_preflight():
 def aiida_status():
     """Check AiiDA installation and profile status."""
     click.echo("✅ AiiDA is installed")
-
     try:
         from aiida.manage.configuration import load_profile  # type: ignore[import-untyped]
         profile = load_profile()
@@ -793,28 +579,21 @@ _store_settings_file_option = click.option(
                        '(~/.config/FrictionSim2D/settings.yaml).')
 
 
-def _integrity_option(func):
-    """Repeatable ``--integrity KEY=VALUE`` (``margins.RULE=VALUE`` for a margin)."""
-    return click.option(
-        '--integrity', 'integrity', multiple=True, metavar='KEY=VALUE',
-        help='Override one integrity threshold of the settings, e.g. '
-             '--integrity hole_bonds=2 --integrity margins.hole=0.1 (none turns '
-             'a threshold off). Repeatable.')(func)
-
-
-def _parse_integrity(pairs) -> Optional[dict]:
-    """The ``--integrity`` pairs as overrides, validated; None when none given."""
-    from .core.config import (  # noqa: PLC0415
-        IntegritySettings, integrity_overrides, merged_integrity)
-
-    if not pairs:
-        return None
+def _parse_integrity(_ctx, _param, pairs) -> Optional[dict]:
+    """``--integrity`` callback: the pairs as validated overrides, None when none."""
+    from .core.config import checked_integrity_overrides  # noqa: PLC0415
     try:
-        overrides = integrity_overrides(pairs)
-        merged_integrity(IntegritySettings().model_dump(mode='json'), overrides)
+        return checked_integrity_overrides(pairs)
     except ValueError as exc:       # pydantic's ValidationError is one
         raise click.BadParameter(str(exc), param_hint='--integrity') from exc
-    return overrides
+
+
+#: Repeatable ``--integrity KEY=VALUE`` (``margins.RULE=VALUE`` for a margin).
+_integrity_option = click.option(
+    '--integrity', 'integrity', multiple=True, metavar='KEY=VALUE', callback=_parse_integrity,
+    help='Override one integrity threshold of the settings, e.g. '
+         '--integrity hole_bonds=2 --integrity margins.hole=0.1 (none turns '
+         'a threshold off). Repeatable.')
 
 
 def _store_profile(profile: Optional[str], settings_file: Optional[Path]) -> Optional[str]:
@@ -833,15 +612,14 @@ def _store_profile(profile: Optional[str], settings_file: Optional[Path]) -> Opt
               help='Machine (Computer) the runs were produced on (default: '
                    "settings.aiida.machine, else each run's settings.hpc.hpc_host, "
                    "else 'localhost').")
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @_store_settings_file_option
 @_integrity_option
 @click.option('--dry-run', is_flag=True,
               help='Print what would be imported; create nothing.')
 def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disable=too-many-arguments
                  machine: Optional[str], profile: Optional[str],
-                 settings_file: Optional[Path], integrity: tuple, dry_run: bool):
+                 settings_file: Optional[Path], integrity: Optional[dict], dry_run: bool):
     """Import a simulation tree into AiiDA: one CalcJob per LAMMPS deck.
 
     SIMULATION_FOLDER is the ``simulation_XXXXXXXX`` directory produced by one
@@ -856,19 +634,11 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
         FrictionSim2D aiida import ./simulation_20260421_173546 --integrity ejected_atoms=3
     """
     from .aiida.ingest import SetRootMismatch, import_root  # noqa: PLC0415
-
-    overrides = _parse_integrity(integrity)
-    try:
+    with _failing("Import failed", "Import failed", plain=SetRootMismatch):
         report = import_root(simulation_folder, label=label, machine=machine,
                              profile=_store_profile(profile, settings_file),
                              dry_run=dry_run, settings_file=settings_file,
-                             integrity=overrides)
-    except SetRootMismatch as exc:
-        _raise_abort(f"❌ {exc}", exc)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Import failed")
-        _raise_abort(f"❌ Import failed: {exc}", exc)
-
+                             integrity=integrity)
     click.echo(report.render())
     if not report.clean():
         raise SystemExit(1)
@@ -885,9 +655,8 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
               help='Drop every ruling of this rulings file (or directory) from the '
                    "set's ruling ledger, e.g. a pending one whose file is gone for "
                    'good. The file need not exist.')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
-def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-many-arguments
+@_profile_option
+def aiida_rule(label: str, rulings_path: Optional[Path],
                withdraw_pending: Optional[Path], profile: Optional[str]):
     """Apply a rulings file to the set LABEL: a pass or fail ruling per
     quarantined point (or, with ``override: true`` and a note, per any point).
@@ -904,24 +673,19 @@ def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-
         FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/260421.yaml
     """
     from .aiida.steps import apply_rulings  # noqa: PLC0415
-
-    try:
+    with _failing("Rulings failed", f"Rulings for set {label!r} failed"):
         report = apply_rulings(label, rulings_path,
                                withdraw_pending=withdraw_pending, profile=profile)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Rulings failed")
-        _raise_abort(f"❌ Rulings for set {label!r} failed: {exc}", exc)
     click.echo(report.render())
 
 
 @aiida_group.command('recheck')
 @click.argument('label')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @_store_settings_file_option
 @_integrity_option
 def aiida_recheck(label: str, profile: Optional[str], settings_file: Optional[Path],
-                  integrity: tuple):
+                  integrity: Optional[dict]):
     """Re-check the set LABEL under the current integrity settings.
 
     Every live point whose verdict was checked with another integrity
@@ -935,22 +699,16 @@ def aiida_recheck(label: str, profile: Optional[str], settings_file: Optional[Pa
         FrictionSim2D aiida recheck 260421-afm --integrity hole_bonds=2.5
     """
     from .aiida.steps import recheck_set  # noqa: PLC0415
-
-    overrides = _parse_integrity(integrity)
-    try:
-        report = recheck_set(label, settings_file=settings_file, integrity=overrides,
+    with _failing("Recheck failed", f"Recheck of set {label!r} failed"):
+        report = recheck_set(label, settings_file=settings_file, integrity=integrity,
                              profile=_store_profile(profile, settings_file))
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Recheck failed")
-        _raise_abort(f"❌ Recheck of set {label!r} failed: {exc}", exc)
     click.echo(report.render())
     if report.failures:
         raise SystemExit(1)
 
 
 @aiida_group.command('reindex')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 def aiida_reindex(profile: Optional[str]):
     """Recompute every friction2d index extra (block, schema, file and
     folder hashes; run, deck and token extras) from the stored nodes.
@@ -959,19 +717,14 @@ def aiida_reindex(profile: Optional[str]):
     """
     from .aiida import load_aiida_profile  # noqa: PLC0415
     from .aiida.store import reindex  # noqa: PLC0415
-
-    try:
+    with _failing("Reindex failed", "Reindex failed"):
         load_aiida_profile(profile)
         touched = reindex()
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Reindex failed")
-        _raise_abort(f"❌ Reindex failed: {exc}", exc)
     click.echo(f"reindexed {touched} node(s)")
 
 
 @aiida_group.command('verify')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 def aiida_verify(profile: Optional[str]):
     """Check the store's content hashes: a hash held by more than one node,
     or a hash extra that disagrees with its node's content.
@@ -980,13 +733,9 @@ def aiida_verify(profile: Optional[str]):
     """
     from .aiida import load_aiida_profile  # noqa: PLC0415
     from .aiida.store import verify  # noqa: PLC0415
-
-    try:
+    with _failing("Verify failed", "Verify failed"):
         load_aiida_profile(profile)
         report = verify()
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Verify failed")
-        _raise_abort(f"❌ Verify failed: {exc}", exc)
     click.echo(report.render())
     if not report.ok:
         raise SystemExit(1)
@@ -994,8 +743,7 @@ def aiida_verify(profile: Optional[str]):
 
 @aiida_group.command('postprocess')
 @click.argument('label')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @_store_settings_file_option
 def aiida_postprocess(label: str, profile: Optional[str], settings_file: Optional[Path]):
     """Summarise every point of the set LABEL whose latest verdict is complete.
@@ -1007,15 +755,10 @@ def aiida_postprocess(label: str, profile: Optional[str], settings_file: Optiona
         FrictionSim2D aiida postprocess 260421-afm
     """
     from .aiida.steps import postprocess_group as summarise_set  # noqa: PLC0415
-
     warnings: list = []
-    try:
-        made = summarise_set(label, warnings=warnings,
-                                 profile=_store_profile(profile, settings_file),
-                                 settings_file=settings_file)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Postprocess failed")
-        _raise_abort(f"❌ Postprocess of set {label!r} failed: {exc}", exc)
+    with _failing("Postprocess failed", f"Postprocess of set {label!r} failed"):
+        made = summarise_set(label, warnings=warnings, settings_file=settings_file,
+                             profile=_store_profile(profile, settings_file))
     click.echo(f"set {label!r}: {made} new summar{'y' if made == 1 else 'ies'}")
     for line in warnings:
         click.echo(f"  WARNING {line}")
@@ -1024,8 +767,7 @@ def aiida_postprocess(label: str, profile: Optional[str], settings_file: Optiona
 @aiida_group.command('dataset')
 @click.argument('name')
 @click.argument('labels', nargs=-1, required=True)
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @_store_settings_file_option
 def aiida_dataset(name: str, labels: Tuple[str, ...], profile: Optional[str],
                   settings_file: Optional[Path]):
@@ -1038,15 +780,10 @@ def aiida_dataset(name: str, labels: Tuple[str, ...], profile: Optional[str],
         FrictionSim2D aiida dataset mos2-loads 260421-afm 260512-afm
     """
     from .aiida.steps import build_dataset  # noqa: PLC0415
-
     warnings: list = []
-    try:
-        table = build_dataset(name, list(labels), warnings=warnings,
-                              profile=_store_profile(profile, settings_file),
-                              settings_file=settings_file)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Dataset failed")
-        _raise_abort(f"❌ Dataset {name!r} failed: {exc}", exc)
+    with _failing("Dataset failed", f"Dataset {name!r} failed"):
+        table = build_dataset(name, list(labels), warnings=warnings, settings_file=settings_file,
+                              profile=_store_profile(profile, settings_file))
     click.echo(f"dataset {name!r} ({table.uuid}): {len(table['rows'])} row(s) "
                f"from {', '.join(labels)}")
     for line in warnings:
@@ -1054,8 +791,7 @@ def aiida_dataset(name: str, labels: Tuple[str, ...], profile: Optional[str],
 
 
 @aiida_group.command('list-sets')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @click.option('--format', 'output_format', type=click.Choice(['table', 'json', 'csv']),
               default='table', help='Output format')
 def aiida_list_sets(profile: Optional[str], output_format: str):
@@ -1065,69 +801,17 @@ def aiida_list_sets(profile: Optional[str], output_format: str):
         FrictionSim2D aiida list-sets
         FrictionSim2D aiida list-sets --format json
     """
-    from .aiida.query import list_simulation_sets  # noqa: PLC0415
-
-    try:
+    from .aiida.query import list_simulation_sets, render_sets  # noqa: PLC0415
+    with _failing("Failed to list simulation sets", "List failed"):
         rows = list_simulation_sets(profile=profile)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Failed to list simulation sets")
-        _raise_abort(f"❌ List failed: {exc}", exc)
-
-    if not rows:
-        click.echo("No simulation sets found in the current AiiDA profile.")
-        return
-
-    if output_format == 'json':
-        import json
-        click.echo(json.dumps(rows, indent=2))
-        return
-
-    if output_format == 'csv':
-        import csv  # noqa: PLC0415
-        import io  # noqa: PLC0415
-        keys = ['label', 'model', 'created', 'n_runs', 'n_results',
-                'materials', 'git_commit', 'source_host', 'uuid', 'pk']
-        buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=keys, extrasaction='ignore')
-        writer.writeheader()
-        writer.writerows(rows)
-        click.echo(buffer.getvalue().rstrip())
-        return
-
-    headers = [
-        ('Label', 'label'),
-        ('Model', 'model'),
-        ('Runs', 'n_runs'),
-        ('Results', 'n_results'),
-        ('Materials', 'materials'),
-        ('Host', 'source_host'),
-        ('UUID', 'uuid'),
-    ]
-    widths = []
-    for title, key in headers:
-        max_value_width = max(len(str(row.get(key, ''))) for row in rows)
-        widths.append(max(len(title), max_value_width))
-
-    header_line = '  '.join(title.ljust(widths[idx]) for idx, (title, _) in enumerate(headers))
-    sep_line = '  '.join('-' * widths[idx] for idx in range(len(headers)))
-    click.echo(header_line)
-    click.echo(sep_line)
-    for row in rows:
-        click.echo(
-            '  '.join(
-                str(row.get(key, '')).ljust(widths[idx])
-                for idx, (_, key) in enumerate(headers)
-            )
-        )
-    click.echo(sep_line)
-    click.echo(f"\nTotal sets: {len(rows)}")
+    click.echo(render_sets(rows, output_format) if rows else
+               "No simulation sets found in the current AiiDA profile.")
 
 
 @aiida_group.command('export-results')
 @click.argument('set_label')
 @click.argument('output_dir', type=click.Path(path_type=Path))
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 def aiida_export_results(set_label: str, output_dir: Path, profile: Optional[str]):
     """Write a stored set back out as an ordinary simulation tree.
 
@@ -1137,13 +821,8 @@ def aiida_export_results(set_label: str, output_dir: Path, profile: Optional[str
         FrictionSim2D aiida export-results 260421-afm ~/exported/260421-afm
     """
     from .aiida.export import export_results  # noqa: PLC0415
-
-    try:
+    with _failing("Export failed", "Export failed"):
         written = export_results(set_label, output_dir, profile=profile)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Export failed")
-        _raise_abort(f"❌ Export failed: {exc}", exc)
-
     click.echo(f"✅ Wrote {len(written)} file(s) to {Path(output_dir).absolute()}")
 
 
@@ -1153,10 +832,9 @@ def aiida_export_results(set_label: str, output_dir: Path, profile: Optional[str
               help='Root directory to write the simulation tree into (default: cwd)')
 @click.option('--hpc-scripts', is_flag=True, default=False,
               help='Generate HPC job-submission scripts after rebuilding')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 def aiida_rebuild(set_label: str, output_dir: Path, hpc_scripts: bool,
-                   profile: Optional[str]):
+                  profile: Optional[str]):
     """Regenerate a set's LAMMPS inputs from the store.
 
     Exports each run's stored config.json and the set's settings.yaml, then
@@ -1166,15 +844,10 @@ def aiida_rebuild(set_label: str, output_dir: Path, hpc_scripts: bool,
         FrictionSim2D aiida rebuild 260421-afm -o ~/rebuild_test --hpc-scripts
     """
     from .aiida.export import rebuild_set  # noqa: PLC0415
-
     failures: list = []
-    try:
+    with _failing("Rebuild failed", "Rebuild failed"):
         created, root = rebuild_set(set_label, output_dir, profile=profile,
                                     generate_hpc=hpc_scripts, failures=failures)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Rebuild failed")
-        _raise_abort(f"❌ Rebuild failed: {exc}", exc)
-
     if failures:
         click.echo(f"❌ Rebuilt {len(created)} run(s) → {Path(root).absolute()}; "
                    f"{len(failures)} failed:", err=True)
@@ -1186,8 +859,7 @@ def aiida_rebuild(set_label: str, output_dir: Path, hpc_scripts: bool,
 
 @aiida_group.command('delete')
 @click.argument('set_label')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @click.confirmation_option(
     prompt='This will permanently delete the simulation set and all linked nodes. Continue?'
 )
@@ -1202,19 +874,14 @@ def aiida_delete(set_label: str, profile: Optional[str]):
         FrictionSim2D aiida delete 260312-force_rebomos
     """
     from .aiida.steps import delete_simulation_set  # noqa: PLC0415
-
     click.echo(f"🗑️  Deleting simulation set '{set_label}'…")
-    try:
+    with _failing("Delete failed", "Delete failed"):
         n = delete_simulation_set(set_label, profile=profile)
         click.echo(f"✅ Deleted {n} nodes for set '{set_label}'.")
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Delete failed")
-        _raise_abort(f"❌ Delete failed: {exc}", exc)
 
 
 @aiida_group.command('clear')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @click.confirmation_option(
     prompt='This will permanently delete all FrictionSim2D nodes. Continue?'
 )
@@ -1229,26 +896,10 @@ def aiida_clear(profile: Optional[str]):
         FrictionSim2D aiida clear
     """
     from .aiida.steps import clear_all_nodes  # noqa: PLC0415
-
     click.echo("🗑️  Deleting all FrictionSim2D nodes…")
-    try:
+    with _failing("Clear failed", "Clear failed"):
         n = clear_all_nodes(profile=profile)
         click.echo(f"✅ Deleted {n} nodes.")
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Clear failed")
-        _raise_abort(f"❌ Clear failed: {exc}", exc)
-
-
-#: The columns ``aiida query`` leads with: the point, then its verdict.
-_QUERY_LEADING = ('set_label', 'rel_path', 'deck_name', 'load', 'load_unit', 'angle',
-                  'speed', 'status', 'reasons', 'verdict_kind', 'provisional',
-                  'thresholds_version')
-
-
-def _verdict_first(df):
-    """``df`` with :data:`_QUERY_LEADING` (those present) first."""
-    leading = [c for c in _QUERY_LEADING if c in df.columns]
-    return df[leading + [c for c in df.columns if c not in leading]]
 
 
 @aiida_group.command('query')
@@ -1277,18 +928,8 @@ def _verdict_first(df):
 @click.option('--format', 'output_format', type=click.Choice(['table', 'csv', 'json']),
               default='table', help='Output format')
 @click.option('--output', '-o', type=click.Path(), help='Save to file')
-@click.option('--profile', default=None,
-                            help='AiiDA profile name (default: configured default profile)')
-def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
-        materials: Tuple[str, ...], family: Optional[str], model: Optional[str],
-        set_label: Optional[str], potential: Optional[str], layers: Optional[int],
-        force_min: Optional[float], force_max: Optional[float],
-        pressure_min: Optional[float], pressure_max: Optional[float],
-        angle_min: Optional[float], angle_max: Optional[float],
-        speed_min: Optional[float], speed_max: Optional[float],
-        temperature_min: Optional[float], temperature_max: Optional[float],
-        limit: Optional[int], order_by: Optional[str], output_format: str,
-        output: Optional[str], profile: Optional[str]):
+@_profile_option
+def aiida_query(output_format: str, output: Optional[str], profile: Optional[str], **filters):
     """Query the store's points: one row per live point, its verdict first.
 
     Each row leads with the point (set, run, deck, load, angle, speed), then
@@ -1300,71 +941,19 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
         FrictionSim2D aiida query --material h-MoS2 --layers 2 --format csv
         FrictionSim2D aiida query --set-label 251113-afm --format table
     """
-    from .aiida import load_aiida_profile
-    from .aiida.query import Friction2DDB
-
-    def _range(lo, hi):
-        return (lo, hi) if lo is not None or hi is not None else None
-
-    try:
-        load_aiida_profile(profile)
-        db = Friction2DDB()
-        available = db.get_available_conditions()['set_labels'] if set_label else []
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("AiiDA query setup failed")
-        _raise_abort(f"❌ Query failed: {exc}", exc)
-
+    from .aiida.query import open_query, query_filters, query_lines
+    set_label = filters['set_label']
+    with _failing("AiiDA query setup failed", "Query failed"):
+        db, available = open_query(profile, set_label)
     if set_label and set_label not in available:
         raise click.ClickException(
             f"No set found with label '{set_label}'. Available: {available}")
-
-    query_kwargs = {
-        'materials': list(materials) if materials else None,
-        'family': family, 'model': model, 'set_label': set_label,
-        'potential': potential, 'layers': layers,
-        'force_range': _range(force_min, force_max),
-        'pressure_range': _range(pressure_min, pressure_max),
-        'angle_range': _range(angle_min, angle_max),
-        'speed_range': _range(speed_min, speed_max),
-        'temperature_range': _range(temperature_min, temperature_max),
-        'limit': limit, 'order_by': order_by,
-    }
+    query_kwargs = query_filters(**filters)
     shown = {k: v for k, v in query_kwargs.items() if v is not None}
     click.echo(f"🔍 Querying database with filters: {shown}")
-    try:
-        results = db.query(**query_kwargs)
-        click.echo(f"📊 Found {results.total_count} results")
-        shown_rows = getattr(results, 'rows', None)
-        if shown_rows is not None and len(shown_rows) < results.total_count:
-            click.echo(f"Showing {len(shown_rows)} of {results.total_count}")
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("AiiDA query failed")
-        _raise_abort(f"❌ Query failed: {exc}", exc)
-
-    try:
-        if output_format == 'table':
-            df = _verdict_first(results.to_dataframe())
-            click.echo("\n" + df.to_string(index=False))
-        elif output_format == 'csv':
-            df = _verdict_first(results.to_dataframe())
-            if output:
-                df.to_csv(output, index=False)
-                click.echo(f"✅ Saved to {output}")
-            else:
-                click.echo(df.to_csv(index=False))
-        elif output_format == 'json':
-            if output:
-                results.export_json(Path(output))
-                click.echo(f"✅ Saved to {output}")
-            else:
-                # The rows, like `--format table/csv` print -- not just the
-                # query parameters.
-                click.echo(results.to_dataframe().to_json(
-                    orient='records', indent=2, default_handler=str))
-
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("AiiDA query failed")
-        _raise_abort(f"❌ Query failed: {exc}", exc)
+    with _failing("AiiDA query failed", "Query failed"):
+        for line in query_lines(db.query(**query_kwargs), output_format, output):
+            click.echo(line)
 
 
 @aiida_group.command('setup')
@@ -1384,22 +973,17 @@ def aiida_setup(create_profile: Optional[str], postgres: bool):
         FrictionSim2D aiida setup --create-profile friction2d
     """
     from .aiida.profile import full_setup  # noqa: PLC0415
-
     click.echo("🔧 Running AiiDA first-time setup ...")
-    try:
+    with _failing("AiiDA setup failed", "Setup failed"):
         full_setup(profile_name=create_profile or 'friction2d', use_postgres=postgres)
         click.echo("✅ AiiDA setup complete")
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("AiiDA setup failed")
-        _raise_abort(f"❌ Setup failed: {exc}", exc)
 
 
 @aiida_group.command('export')
 @click.argument('set_label')
 @click.option('--output', '-o', type=click.Path(path_type=Path),
               default='friction2d.aiida', help='Output archive path')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @click.option('--force', is_flag=True,
               help='Write even when live points have no integrity verdict')
 @click.option('--include-peratom', is_flag=True,
@@ -1419,15 +1003,10 @@ def aiida_export(set_label: str, output: Path, profile: Optional[str],
         FrictionSim2D aiida export 260421-afm -o ~/transfer/260421-afm.aiida
     """
     from .aiida.export import export_archive  # noqa: PLC0415
-
     click.echo(f"📦 Exporting set {set_label!r} to {output} ...")
-    try:
+    with _failing("AiiDA export failed", "Export failed"):
         path = export_archive(set_label, output, profile=profile, force=force,
-                              include_peratom=include_peratom,
-                              keep_hpc_paths=keep_hpc_paths)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("AiiDA export failed")
-        _raise_abort(f"❌ Export failed: {exc}", exc)
+                              include_peratom=include_peratom, keep_hpc_paths=keep_hpc_paths)
     click.echo(f"✅ Archive written: {path.absolute()}")
 
 
@@ -1444,13 +1023,9 @@ def aiida_import_archive(archive_path: Path, profile: Optional[str]):
         FrictionSim2D aiida import-archive ~/transfer/260421-afm.aiida
     """
     from .aiida.export import import_archive  # noqa: PLC0415
-
     click.echo(f"📥 Importing archive: {archive_path} ...")
-    try:
+    with _failing("AiiDA import-archive failed", "Import failed"):
         n_new = import_archive(archive_path, profile=profile)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("AiiDA import-archive failed")
-        _raise_abort(f"❌ Import failed: {exc}", exc)
     click.echo(f"✅ Imported {n_new} new node(s)")
 
 
@@ -1461,49 +1036,6 @@ def aiida_import_archive(archive_path: Path, profile: Optional[str]):
 @cli.group('postprocess')
 def postprocess_group():
     """Read, analyse and plot simulation results."""
-
-
-def _integrity_thresholds(path):
-    """`IntegritySettings` from `path`, else from the user's settings."""
-    import yaml  # noqa: PLC0415
-    from .core.config import IntegritySettings  # noqa: PLC0415
-    if path is None:
-        return load_settings().integrity
-    try:
-        with open(path, encoding='utf-8') as handle:
-            data = yaml.safe_load(handle) or {}
-        block = data.get('integrity', {}) if isinstance(data, dict) else None
-        if not isinstance(block, dict):
-            raise ValueError('expected an `integrity:` mapping')
-        return IntegritySettings(**block)
-    except (OSError, yaml.YAMLError, ValueError, TypeError) as exc:
-        raise click.ClickException(
-            f'cannot read integrity settings {path}: {exc}') from exc
-
-
-def _echo_integrity(reader) -> None:
-    """The integrity tally, a ruling stub per quarantined point, warnings."""
-    from .postprocessing.integrity_rulings import point_id  # noqa: PLC0415
-    failed = [p for p in reader.points if p.status == 'failed_integrity']
-    held = [p for p in reader.points if p.status == 'quarantined']
-    click.echo(f"Integrity: {len(failed)} failed, {len(held)} quarantined "
-               f"(thresholds v{reader.integrity_settings.version})")
-    for point in held:
-        reason = ' '.join(str(point.status_detail or '').split())
-        click.echo(f'- point: "{point_id(point, reader.results_dir)}"\n'
-                   f'  ruling:   # pass or fail -- {reason}')
-    overridden = [p for p in reader.points
-                  if p.integrity is not None and p.integrity.overridden]
-    click.echo(f"Overrides: {len(overridden)}")
-    for point in overridden:
-        note = ': '.join(part for part in (point.integrity.date,
-                                           ' '.join(point.integrity.note.split()))
-                         if part)
-        click.echo(f"- {point_id(point, reader.results_dir)}: "
-                   f"{point.integrity.original_status} -> {point.status}"
-                   f" ({note})")
-    for warning in reader.ruling_warnings:
-        click.echo(f"Warning: {warning}")
 
 
 @postprocess_group.command('read')
@@ -1532,31 +1064,28 @@ def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float,
     sheetonsheet/, indent/, pes_tip/, pes_sheet/.
     """
     from .postprocessing import DataReader  # noqa: PLC0415
-
+    from .postprocessing.integrity_rulings import (  # noqa: PLC0415
+        integrity_report, load_integrity_settings)
     thresholds = None
     if not no_integrity:
-        thresholds = _integrity_thresholds(integrity_settings_path)
+        try:
+            thresholds = load_integrity_settings(integrity_settings_path)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
     reader = DataReader(results_dir=results_dir, skip_fraction=skip_fraction,
-                        complete_only=complete_only,
-                        integrity=not no_integrity,
+                        complete_only=complete_only, integrity=not no_integrity,
                         integrity_settings=thresholds)
     reader.export_issue_reports()
     if not reader.points:
         click.echo(f"No runs found under {results_dir}.", err=True)
         return
-    counts: dict = {}
-    for point in reader.points:
-        counts[point.status] = counts.get(point.status, 0) + 1
-    summary = ', '.join(f'{k}={v}' for k, v in sorted(counts.items()) if v)
-    click.echo(f"Found {len(reader.points)} load point(s) ({summary}) "
-               f"across {len({p.size for p in reader.points})} size(s).")
-    if reader.integrity_settings is not None:
-        _echo_integrity(reader)
+    click.echo(reader.found_line())
+    for line in integrity_report(reader) if reader.integrity_settings is not None else []:
+        click.echo(line)
     if do_export:
-        for path in reader.export_full_data_to_json():
-            click.echo(f"✅ {path}")
-        for path in reader.export_summary_csv():
-            click.echo(f"✅ {path}")
+        for export in (reader.export_full_data_to_json, reader.export_summary_csv):
+            for path in export():
+                click.echo(f"✅ {path}")
     click.echo("Postprocessing complete.")
 
 
@@ -1583,79 +1112,39 @@ def postprocess_plot(plot_config, output_dir, settings, preset, validate,
 
     PLOT_CONFIG is a plot document (see documentation/postprocessing.md).
     """
-    import copy  # noqa: PLC0415
-    import json  # noqa: PLC0415
-
-    from .postprocessing.plot_config import (load_plot_document,  # noqa: PLC0415
-                                             schema_markdown)
-
+    from .postprocessing.plot_config import (  # noqa: PLC0415
+        load_plot_document, schema_markdown, write_starter_document)
     if show_schema:
         click.echo(schema_markdown())
         return
-
     if init_path:
-        from .postprocessing.plot_config import (PlotDocument,  # noqa: PLC0415
-                                                 SummaryPlot)
-
-        dirs = [str(Path(d).resolve()) for d in init_data_dirs] or ['./my_run']
-        document = PlotDocument(
-            data_dirs=dirs,
-            labels=[Path(d).name for d in dirs],
-            plots=[
-                # plot_type is passed explicitly so exclude_unset keeps it:
-                # the Literal default would be dropped from the dump, and the
-                # written document would then fail its own discriminator.
-                SummaryPlot(plot_type='summary', x_axis='force', y_axis='lf',
-                            filename='lf_vs_load.png', add_linear_fit=True),
-                SummaryPlot(plot_type='summary', x_axis='force', y_axis='cof',
-                            filename='cof_vs_load.png'),
-            ])
-        target = Path(init_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            document.model_dump_json(indent=2, exclude_unset=True),
-            encoding='utf-8')
+        target = write_starter_document(Path(init_path), list(init_data_dirs))
         click.echo(f"✅ {target}")
         click.echo(f"Edit it, then: FrictionSim2D postprocess plot {target} "
                    f"--preset publication")
         return
-
     if not plot_config:
         raise click.UsageError(
             "PLOT_CONFIG is required. Start one with "
             "`postprocess plot --init plots.json --data-dir <run>`, "
             "or print the schema with --schema.")
-
     try:
         document = load_plot_document(Path(plot_config))
     except Exception as exc:  # pylint: disable=broad-except
         raise click.ClickException(str(exc)) from exc
-
-    from .postprocessing.plot_style import DEFAULT_SETTINGS, merge_settings  # noqa: PLC0415
-    from .postprocessing.presets import load_preset  # noqa: PLC0415
-
-    plot_settings = copy.deepcopy(DEFAULT_SETTINGS)
-    if preset:
-        try:
-            merge_settings(plot_settings, load_preset(preset))
-        except KeyError as exc:
-            raise click.ClickException(str(exc)) from exc
-    if settings:
-        with open(settings, 'r', encoding='utf-8') as fh:
-            merge_settings(plot_settings, json.load(fh))
-
+    from .postprocessing.plot_style import plot_settings  # noqa: PLC0415
+    try:
+        style = plot_settings(preset, settings)
+    except KeyError as exc:
+        raise click.ClickException(str(exc)) from exc
     if validate:
         click.echo(f"OK: {len(document.plots)} plot(s), "
                    f"{len(document.data_dirs)} dataset(s).")
         return
-
     from .postprocessing import Plotter  # noqa: PLC0415
-
-    plotter = Plotter(
-        document.data_dirs, document.labels, output_dir, plot_settings,
-        dataset_display_labels=document.dataset_display_labels,
-        series_color_map=document.series_color_map,
-    )
+    plotter = Plotter(document.data_dirs, document.labels, output_dir, style,
+                      dataset_display_labels=document.dataset_display_labels,
+                      series_color_map=document.series_color_map)
     for spec in document.plots:
         plotter.generate_plot(spec)
     for path in plotter.written:
@@ -1683,7 +1172,6 @@ def postprocess_pes_scan(run_root: Path, data_dir: Path, grid_dir: Optional[Path
             --data-dir data --grid-dir outputs/pes_scan
     """
     from .postprocessing import pes_scan as pes  # noqa: PLC0415
-
     kinds = ['sheet', 'tip'] if kind == 'both' else [kind]
     written = pes.run(run_root, data_dir, grid_dir=grid_dir, kinds=kinds)
     if not written:
@@ -1719,7 +1207,6 @@ def postprocess_indent(run_root: Path, out_dir: Path, data_dir: Optional[Path]):
             --out-dir outputs/poke_sims --data-dir data
     """
     from .postprocessing import indent as indent_pp  # noqa: PLC0415
-
     written = indent_pp.run(run_root, out_dir, data_dir=data_dir)
     if not written:
         click.echo(f"No indent results found under {run_root}.", err=True)
@@ -1732,58 +1219,10 @@ def postprocess_indent(run_root: Path, out_dir: Path, data_dir: Optional[Path]):
 # COMPARE
 # =============================================================================
 
-_SIDECAR_PREFIX = 'sidecar:'
-
-
-def _sidecar_dir(path: Path) -> Optional[Path]:
-    """The export sidecar ``path`` is or holds: ``path`` itself when it has
-    a ``schema-*.json``, else its one ``*.params`` child that has; None when
-    neither (several such children raise ``ValueError``)."""
-    if not path.is_dir():
-        return None
-    if any(path.glob('schema-*.json')):
-        return path
-    found = sorted(d for d in path.glob('*.params')
-                   if d.is_dir() and any(d.glob('schema-*.json')))
-    if len(found) > 1:
-        raise ValueError(f'{path} holds several sidecars ({", ".join(d.name for d in found)}); '
-                         f'name one')
-    return found[0] if found else None
-
-
-def _compare_side(ref: str, profile: Optional[str], rtol: float, atol: float):
-    """Blocks of one ``compare`` argument.
-
-    ``sidecar:<path>`` is an export sidecar (its directory, a directory
-    holding one, or one deck's JSON in it). Unprefixed, a directory is a
-    sidecar only when it is or holds one (:func:`_sidecar_dir`); anything
-    else is a store reference, so a folder that happens to share a group's
-    name never shadows the group.
-    """
-    from .aiida.compare import load_blocks_from_sidecar  # noqa: PLC0415
-    if ref.startswith(_SIDECAR_PREFIX):
-        path = Path(ref[len(_SIDECAR_PREFIX):])
-        if path.is_file():
-            return load_blocks_from_sidecar(path, rtol=rtol, atol=atol)
-        found = _sidecar_dir(path)
-        if found is None:
-            raise LookupError(f'{path} is not an export sidecar: no schema-*.json in '
-                              f'it or in a *.params directory under it')
-        return load_blocks_from_sidecar(found, rtol=rtol, atol=atol)
-    found = _sidecar_dir(Path(ref))
-    if found is not None:
-        return load_blocks_from_sidecar(found, rtol=rtol, atol=atol)
-    from .aiida import load_aiida_profile  # noqa: PLC0415
-    from .aiida.compare import load_blocks  # noqa: PLC0415
-    load_aiida_profile(profile)
-    return load_blocks(ref, rtol=rtol, atol=atol)
-
-
 @cli.command('compare')
 @click.argument('a')
 @click.argument('b')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 @click.option('--rtol', type=float, default=1e-6, show_default=True,
               help='Relative tolerance for derived values.')
 @click.option('--atol', type=float, default=1e-9, show_default=True,
@@ -1803,20 +1242,11 @@ def compare_cmd(a: str, b: str, profile: Optional[str], rtol: float, atol: float
     Example:
         FrictionSim2D compare 260421-afm 260512-afm
     """
-    from .core.compare import compare_blocks  # noqa: PLC0415
-
-    try:
-        left = _compare_side(a, profile, rtol, atol)
-        right = _compare_side(b, profile, rtol, atol)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Compare failed")
-        _raise_abort(f"❌ Compare failed: {exc}", exc)
-    report = compare_blocks(left.blocks, right.blocks,
-                            units=left.units, units_b=right.units,
-                            derived_a=left.derived, derived_b=right.derived,
-                            defaults=left.defaults, defaults_b=right.defaults,
-                            kinds={**right.kinds, **left.kinds}, rtol=rtol, atol=atol)
-    click.echo(report.render())
+    from .aiida.compare import compare_loaded, load_side  # noqa: PLC0415
+    with _failing("Compare failed", "Compare failed"):
+        left = load_side(a, profile, rtol, atol)
+        right = load_side(b, profile, rtol, atol)
+    click.echo(compare_loaded(left, right, rtol, atol).render())
 
 
 # =============================================================================
@@ -1828,67 +1258,39 @@ def analyse_group():
     """Run and read the on-demand analyses of a dataset in the AiiDA store."""
 
 
-def _parse_params(analysis, pairs: Tuple[str, ...]) -> dict:
-    """``k=v`` pairs, validated by the analysis's ``Params`` model.
-
-    Raises:
-        click.UsageError: a malformed pair, an unknown name or a bad value,
-            each naming the parameter.
-    """
-    fields = analysis.Params.model_fields
-    values = {}
-    for pair in pairs:
-        key, sep, value = pair.partition('=')
-        if not sep or not key:
-            raise click.UsageError(f"--param {pair!r}: expected NAME=VALUE")
-        if key not in fields:
-            raise click.UsageError(f"--param {key}: {analysis.name} has no such parameter "
-                                   f"(known: {', '.join(sorted(fields)) or 'none'})")
-        values[key] = value
+def _params(name: str, pairs: Tuple[str, ...]) -> dict:
+    """``--param`` pairs of analysis ``name``, validated; a usage error if not."""
+    from .analysis.base import parse_params  # noqa: PLC0415
     try:
-        model = analysis.Params(**values)
+        return parse_params(name, pairs)
     except ValueError as exc:
-        errors = getattr(exc, 'errors', lambda: [])()
-        detail = '; '.join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in errors)
-        raise click.UsageError(f"--param {detail or exc}") from exc
-    return {key: getattr(model, key) for key in values}
+        raise click.UsageError(str(exc)) from exc
 
 
-def _analysis_or_abort(name: str):
-    from .analysis.base import get_analysis  # noqa: PLC0415
-    try:
-        return get_analysis(name)
-    except KeyError as exc:
-        raise click.UsageError(str(exc.args[0])) from exc
-
-
-def _stored_or_abort(name: str, dataset: str, profile: Optional[str], params=None):
-    """The newest stored result node of ``name`` over ``dataset`` under
-    exactly ``params`` (none: the defaults)."""
+def _stored(name: str, dataset: str, profile: Optional[str], pairs: Tuple[str, ...]):
+    """The stored result node of ``name`` over ``dataset`` under ``pairs``."""
     from .aiida import load_aiida_profile  # noqa: PLC0415
-    from .analysis import store  # noqa: PLC0415
+    from .analysis.store import stored_result  # noqa: PLC0415
+    params = _params(name, pairs)
     load_aiida_profile(profile)
     try:
-        node = store.select_result_node(name, dataset, params)
-    except (LookupError, ValueError) as exc:
-        raise click.ClickException(str(exc.args[0] if exc.args else exc)) from exc
-    if node is None:
-        raise click.ClickException(f"no stored result of {name} over {dataset}; "
-                                   f"run: FrictionSim2D analyse run {name} {dataset}")
-    return node
+        return stored_result(name, dataset, params)
+    except LookupError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+#: ``--param`` of ``analyse show`` and ``analyse export``.
+_stored_param_option = click.option(
+    '--param', 'params', multiple=True, metavar='NAME=VALUE',
+    help='Parameter the result was run with (repeatable; default: the defaults).')
 
 
 @analyse_group.command('list')
 def analyse_list():
     """List the registered analyses."""
-    # catalogue registers the analyses on import.
-    from .analysis import base, catalogue  # noqa: PLC0415,F401  # pylint: disable=unused-import
-    if not base.ANALYSES:
-        click.echo("no analyses registered")
-        return
-    for name in sorted(base.ANALYSES):
-        cls = base.ANALYSES[name]
-        click.echo(f"{name}\t{cls.version}\t{cls.level}\t{','.join(sorted(cls.families))}")
+    from .analysis.base import catalogue_lines  # noqa: PLC0415
+    for line in catalogue_lines() or ["no analyses registered"]:
+        click.echo(line)
 
 
 @analyse_group.command('run')
@@ -1897,22 +1299,16 @@ def analyse_list():
 @click.option('--param', 'params', multiple=True, metavar='NAME=VALUE',
               help='Analysis parameter (repeatable).')
 @click.option('--force', is_flag=True, help='Recompute even if a result is stored.')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_profile_option
 def analyse_run(name: str, dataset: str, params: Tuple[str, ...], force: bool,
                 profile: Optional[str]):
     """Run analysis NAME over DATASET (or reuse its stored result)."""
     from .aiida import load_aiida_profile  # noqa: PLC0415
     from .analysis import store  # noqa: PLC0415
-    values = _parse_params(_analysis_or_abort(name), params)
-    try:
+    values = _params(name, params)
+    with _failing("Analysis failed", "Analysis failed"):
         load_aiida_profile(profile)
         node = store.result_node(name, dataset, values, force=force)
-    except click.ClickException:
-        raise
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Analysis failed")
-        _raise_abort(f"❌ Analysis failed: {exc}", exc)
     extras = node.base.extras.all
     click.echo(f"rows: {extras.get('n_rows', 0)}")
     click.echo(f"dropped: {extras.get('n_dropped', 0)}")
@@ -1923,17 +1319,14 @@ def analyse_run(name: str, dataset: str, params: Tuple[str, ...], force: bool,
 @click.argument('name')
 @click.argument('dataset')
 @click.option('--rows', default=10, show_default=True, help='Rows of the table to print.')
-@click.option('--param', 'params', multiple=True, metavar='NAME=VALUE',
-              help='Parameter the result was run with (repeatable; default: the defaults).')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_stored_param_option
+@_profile_option
 def analyse_show(name: str, dataset: str, rows: int, params: Tuple[str, ...],
                  profile: Optional[str]):
     """Print the stored result of NAME over DATASET: metadata and head."""
     import io  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
-    node = _stored_or_abort(name, dataset, profile,
-                            _parse_params(_analysis_or_abort(name), params))
+    node = _stored(name, dataset, profile, params)
     click.echo(f"uuid: {node.uuid}")
     for key, value in sorted(node.base.extras.all.items()):
         click.echo(f"{key}: {value}")
@@ -1945,15 +1338,12 @@ def analyse_show(name: str, dataset: str, rows: int, params: Tuple[str, ...],
 @click.argument('name')
 @click.argument('dataset')
 @click.argument('out', type=click.Path(dir_okay=False, path_type=Path))
-@click.option('--param', 'params', multiple=True, metavar='NAME=VALUE',
-              help='Parameter the result was run with (repeatable; default: the defaults).')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
+@_stored_param_option
+@_profile_option
 def analyse_export(name: str, dataset: str, out: Path, params: Tuple[str, ...],
                    profile: Optional[str]):
     """Write the stored result of NAME over DATASET to OUT (CSV)."""
-    node = _stored_or_abort(name, dataset, profile,
-                            _parse_params(_analysis_or_abort(name), params))
+    node = _stored(name, dataset, profile, params)
     out.write_bytes(node.get_content(mode='rb'))
     click.echo(f"wrote {out}")
 

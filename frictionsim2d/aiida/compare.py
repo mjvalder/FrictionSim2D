@@ -20,8 +20,8 @@ from ..core.compare import DEFAULT_ATOL, DEFAULT_RTOL, merge_varying
 from .layout import is_superseded
 from .block_schema import version_key
 
-__all__ = ['LoadedBlocks', 'block_name', 'load_blocks', 'load_blocks_from_sidecar',
-           'schema_tables']
+__all__ = ['LoadedBlocks', 'block_name', 'compare_loaded', 'load_blocks',
+           'load_blocks_from_sidecar', 'load_side', 'schema_tables', 'sidecar_dir']
 
 _NAMED_PER_ENTRY = ('material', 'potential')
 
@@ -240,3 +240,58 @@ def load_blocks_from_sidecar(path: Path, *, rtol: float = DEFAULT_RTOL,
         raise LookupError(f'no deck sidecars under {path}')
     loaded = [_loaded_from_sidecar_file(f, root) for f in files]
     return loaded[0] if len(loaded) == 1 else _merge(loaded, rtol=rtol, atol=atol)
+
+
+#: The ``compare`` prefix that makes a reference an export sidecar.
+SIDECAR_PREFIX = 'sidecar:'
+
+
+def sidecar_dir(path: Path) -> Optional[Path]:
+    """The export sidecar ``path`` is or holds: ``path`` itself when it has
+    a ``schema-*.json``, else its one ``*.params`` child that has; None when
+    neither (several such children raise ``ValueError``)."""
+    if not path.is_dir():
+        return None
+    if any(path.glob('schema-*.json')):
+        return path
+    found = sorted(d for d in path.glob('*.params')
+                   if d.is_dir() and any(d.glob('schema-*.json')))
+    if len(found) > 1:
+        raise ValueError(f'{path} holds several sidecars ({", ".join(d.name for d in found)}); '
+                         f'name one')
+    return found[0] if found else None
+
+
+def load_side(ref: str, profile: Optional[str], rtol: float, atol: float) -> LoadedBlocks:
+    """Blocks of one ``compare`` argument.
+
+    ``sidecar:<path>`` is an export sidecar (its directory, a directory
+    holding one, or one deck's JSON in it). Unprefixed, a directory is a
+    sidecar only when it is or holds one (:func:`sidecar_dir`); anything
+    else is a store reference, so a folder that happens to share a group's
+    name never shadows the group.
+    """
+    if ref.startswith(SIDECAR_PREFIX):
+        path = Path(ref[len(SIDECAR_PREFIX):])
+        if path.is_file():
+            return load_blocks_from_sidecar(path, rtol=rtol, atol=atol)
+        found = sidecar_dir(path)
+        if found is None:
+            raise LookupError(f'{path} is not an export sidecar: no schema-*.json in '
+                              f'it or in a *.params directory under it')
+        return load_blocks_from_sidecar(found, rtol=rtol, atol=atol)
+    found = sidecar_dir(Path(ref))
+    if found is not None:
+        return load_blocks_from_sidecar(found, rtol=rtol, atol=atol)
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+    load_aiida_profile(profile)
+    return load_blocks(ref, rtol=rtol, atol=atol)
+
+
+def compare_loaded(left: LoadedBlocks, right: LoadedBlocks, rtol: float, atol: float):
+    """:func:`frictionsim2d.core.compare.compare_blocks` of two loaded sides."""
+    from ..core.compare import compare_blocks  # pylint: disable=import-outside-toplevel
+    return compare_blocks(left.blocks, right.blocks, units=left.units, units_b=right.units,
+                          derived_a=left.derived, derived_b=right.derived,
+                          defaults=left.defaults, defaults_b=right.defaults,
+                          kinds={**right.kinds, **left.kinds}, rtol=rtol, atol=atol)

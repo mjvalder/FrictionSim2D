@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, FrozenSet, Literal, Optional, Tuple, Type
+from typing import (TYPE_CHECKING, Any, ClassVar, Dict, FrozenSet, Iterable, List, Literal,
+                    Optional, Tuple, Type)
 
 from pydantic import BaseModel
 
@@ -17,8 +18,8 @@ if TYPE_CHECKING:  # pragma: no cover
 
     from .source import RunSource
 
-__all__ = ['ANALYSES', 'IDENTITY_COLUMNS', 'Analysis', 'check_identity', 'get_analysis',
-           'identity_columns', 'register']
+__all__ = ['ANALYSES', 'IDENTITY_COLUMNS', 'Analysis', 'catalogue_lines', 'check_identity',
+           'get_analysis', 'identity_columns', 'parse_params', 'register']
 
 Level = Literal['run', 'run_state', 'material']
 
@@ -106,3 +107,42 @@ def get_analysis(name: str) -> Type[Analysis]:
         return ANALYSES[name]
     except KeyError:
         raise KeyError(f'no analysis named {name!r} (known: {sorted(ANALYSES)})') from None
+
+
+def catalogue_lines() -> List[str]:
+    """``name<TAB>version<TAB>level<TAB>families`` per registered analysis."""
+    import_module('.catalogue', __package__)  # registers every analysis
+    return [f"{name}\t{cls.version}\t{cls.level}\t{','.join(sorted(cls.families))}"
+            for name, cls in sorted(ANALYSES.items())]
+
+
+def parse_params(name: str, pairs: Iterable[str]) -> Dict[str, Any]:
+    """``NAME=VALUE`` pairs, validated by analysis ``name``'s ``Params`` model.
+
+    Only the named parameters are returned, as the model converted them.
+
+    Raises:
+        ValueError: an unknown analysis, a malformed pair, an unknown
+            parameter or a bad value; the message names it.
+    """
+    try:
+        analysis = get_analysis(name)
+    except KeyError as exc:
+        raise ValueError(str(exc.args[0])) from exc
+    fields = analysis.Params.model_fields
+    values = {}
+    for pair in pairs:
+        key, sep, value = pair.partition('=')
+        if not sep or not key:
+            raise ValueError(f"--param {pair!r}: expected NAME=VALUE")
+        if key not in fields:
+            raise ValueError(f"--param {key}: {analysis.name} has no such parameter "
+                             f"(known: {', '.join(sorted(fields)) or 'none'})")
+        values[key] = value
+    try:
+        model = analysis.Params(**values)
+    except ValueError as exc:
+        errors = getattr(exc, 'errors', lambda: [])()
+        detail = '; '.join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in errors)
+        raise ValueError(f"--param {detail or exc}") from exc
+    return {key: getattr(model, key) for key in values}

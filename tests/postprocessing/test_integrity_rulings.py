@@ -203,3 +203,26 @@ def test_decide_with_override(status, ruling, expect):
 
 def test_decide_refuses_without_override():
     assert decide('complete', Ruling(ruling='fail', note='n')) [0] is None
+
+
+def test_load_integrity_settings_reads_the_mapping_or_says_why(tmp_path):
+    from frictionsim2d.postprocessing.integrity_rulings import load_integrity_settings
+    good = tmp_path / 'good.yaml'
+    good.write_text('integrity:\n  hole_bonds: 2.5\n', encoding='utf-8')
+    assert load_integrity_settings(good).hole_bonds == 2.5
+    bad = tmp_path / 'bad.yaml'
+    bad.write_text('integrity: 3\n', encoding='utf-8')
+    with pytest.raises(ValueError, match=r'cannot read integrity settings .*bad.yaml: '
+                                         r'expected an `integrity:` mapping'):
+        load_integrity_settings(bad)
+
+
+def test_integrity_report_stubs_a_ruling_per_quarantined_point(tmp_path):
+    from frictionsim2d.postprocessing.integrity_rulings import integrity_report
+    _quarantined_tree(tmp_path)
+    reader = DataReader(str(tmp_path))
+    lines = integrity_report(reader)
+    assert lines[0].startswith('Integrity: 0 failed, 1 quarantined (thresholds v')
+    assert lines[1].startswith(f'- point: "{_id(tmp_path, 30.0, reader)}"\n  ruling:   #')
+    assert lines[-1] == 'Overrides: 0'
+    assert reader.found_line().startswith('Found 2 load point(s) (complete=1, quarantined=1)')

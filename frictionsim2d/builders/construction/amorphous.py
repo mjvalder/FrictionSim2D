@@ -339,6 +339,27 @@ def scan_blocks(material: Optional[str] = None) -> List[Block]:
     return blocks
 
 
+def block_rows(material: Optional[str] = None) -> List[Dict[str, Any]]:
+    """One JSON-able row per block of :func:`scan_blocks` (``quench list``)."""
+    return [{'file': block.path.name, 'root': block.root, 'path': str(block.path),
+             'key8': block.key.key8 if block.key else None,
+             'unkeyed': block.unkeyed_reason,
+             'box': list(block.box) if block.box else None,
+             'natoms': block.meta.get('natoms'),
+             **{name: getattr(block.key, name) if block.key else block.meta.get(name)
+                for name in CONDITION_FIELDS}}
+            for block in scan_blocks(material)]
+
+
+def block_line(row: Mapping[str, Any]) -> str:
+    """One :func:`block_rows` row as a table line."""
+    box = 'x'.join(f'{v:.1f}' for v in row['box']) + ' A' if row['box'] else 'no box'
+    key = row['key8'] or f"unkeyed ({row['unkeyed']})"
+    conditions = ', '.join(f"{name}={row[name]}" for name in CONDITION_FIELDS
+                           if row[name] is not None)
+    return f"{row['file']}  {row['root']}  {key}  {box}  natoms={row['natoms']}  {conditions}"
+
+
 def find_block(key: QuenchKey, min_dims: Sequence[float]) -> Optional[Path]:
     """The block keyed ``key`` with a box of at least ``min_dims`` (x, y, z, A).
 
@@ -1009,6 +1030,20 @@ class QuenchImportReport:
     refused: List[Tuple[Path, str]] = field(default_factory=list)
     incomplete: List[Tuple[Path, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        """Nothing refused and nothing incomplete."""
+        return not (self.refused or self.incomplete)
+
+    def lines(self) -> List[Tuple[str, bool]]:
+        """``(text, to_stderr)`` per line of the CLI report."""
+        return ([(f"✅ imported {path}", False) for path in self.imported]
+                + [(f"= already in the library: {path}", False) for path in self.unchanged]
+                + [(f"⚠️  {message}", False) for message in self.warnings]
+                + [(f"❌ refused {member}: {reason}", True) for member, reason in self.refused]
+                + [(f"❌ incomplete {member}: {reason}", True)
+                   for member, reason in self.incomplete])
 
 
 def _log_finished(log: Path) -> Optional[str]:

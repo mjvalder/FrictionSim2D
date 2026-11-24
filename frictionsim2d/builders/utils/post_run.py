@@ -2,7 +2,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -96,3 +96,73 @@ def enrich_provenance_post_run(output_root: Path,
 
     write_provenance(output_root, record)
     return prov_path
+
+
+def resolve_run_log(sim_dir: Path) -> Tuple[Optional[Path], str]:
+    """The log to enrich from when only a run directory is named.
+
+    ``lammps/run_system.log`` first (``system*.in`` is the only phase that
+    prints RAMP_STATUS, and the job scripts name its log so), else a lone
+    ``run*.log`` whatever it is called. Several logs and no
+    ``run_system.log`` is refused: picking the wrong one would quietly record
+    the wrong run's settle result.
+
+    Returns ``(log_path, '')`` or ``(None, reason)``.
+    """
+    lammps_dir = Path(sim_dir) / 'lammps'
+    preferred = lammps_dir / 'run_system.log'
+    if preferred.is_file():
+        return preferred, ''
+    candidates = sorted(p for p in lammps_dir.glob('run*.log') if p.is_file())
+    if len(candidates) == 1:
+        return candidates[0], ''
+    if not candidates:
+        return None, f"no run log in {lammps_dir}"
+    names = ', '.join(p.name for p in candidates)
+    return None, (f"{len(candidates)} run logs and none named run_system.log "
+                  f"({names}) -- name one explicitly")
+
+
+def enrich_one_run(sim_dir: Path, log_path: Optional[Path] = None,
+                   enrich=enrich_provenance_post_run) -> Tuple[str, str]:
+    """Enrich one run directory: ``(outcome, detail)``.
+
+    ``outcome`` is 'enriched', 'unchanged' or 'skipped'. Nothing raises: a
+    completed simulation is never reported as failed over a provenance nicety.
+    """
+    if log_path is None:
+        log_path, why = resolve_run_log(sim_dir)
+        if log_path is None:
+            return 'skipped', why
+    record_path = Path(sim_dir) / 'provenance.json'
+    # The on-disk bytes, not the return value, tell a merge from a log with
+    # nothing to merge: the record path is returned either way.
+    before = (record_path.read_text(encoding='utf-8', errors='ignore')
+              if record_path.is_file() else None)
+    result = enrich(sim_dir, log_path)
+    if result is None:
+        return 'skipped', f"no readable provenance.json, or no log at {log_path}"
+    if result.read_text(encoding='utf-8', errors='ignore') == before:
+        # A real log always has the version banner: this is a repeat pass.
+        return 'unchanged', f"already up to date with {log_path.name}"
+    return 'enriched', f"from {log_path.name}"
+
+
+def enrich_tree(root: Path) -> Iterator[str]:
+    """Enrich every run directory under ``root``: one line each, then a tally.
+
+    Discovery is ``hpc generate``'s, with no script names: every directory
+    holding a ``lammps/*.in``.
+    """
+    from ...run.hpc_dispatch import collect_hpc_simulation_paths  # pylint: disable=import-outside-toplevel
+    rel_paths = collect_hpc_simulation_paths(root, lammps_scripts=[]) if root.is_dir() else []
+    if not rel_paths:
+        yield f"No simulation directories under {root}; nothing to enrich."
+        return
+    tally = {'enriched': 0, 'unchanged': 0, 'skipped': 0}
+    for rel in rel_paths:
+        outcome, detail = enrich_one_run(root / rel)
+        tally[outcome] += 1
+        yield f"{outcome} {rel}: {detail}"
+    yield (f"{tally['enriched']} enriched, {tally['unchanged']} unchanged, "
+           f"{tally['skipped']} skipped.")

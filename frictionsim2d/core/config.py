@@ -372,6 +372,21 @@ def merged_integrity(base: Mapping[str, Any], overrides: Optional[Mapping[str, A
     return IntegritySettings(**merged).model_dump(mode='json')
 
 
+def checked_integrity_overrides(pairs: Sequence[str]) -> Optional[Dict[str, Any]]:
+    """:func:`integrity_overrides` of ``pairs``, validated against the
+    defaults; None when there are no pairs (``--integrity``).
+
+    Raises:
+        ValueError: A malformed pair, an unknown key, or a value that does not
+            validate (pydantic's ``ValidationError`` is a ``ValueError``).
+    """
+    if not pairs:
+        return None
+    overrides = integrity_overrides(pairs)
+    merged_integrity(IntegritySettings().model_dump(mode='json'), overrides)
+    return overrides
+
+
 class GPUSettings(BaseModel):
     """GPU resources requested for a job.
 
@@ -1595,6 +1610,21 @@ def settings_origin(settings_file: Optional[Union[str, Path]] = None) -> Optiona
         if data is None or data:
             return path
     return None
+
+
+def effective_settings_yaml(settings_file: Optional[Union[str, Path]] = None) -> str:
+    """:func:`load_settings` as YAML (``settings show``)."""
+    return yaml.dump(load_settings(settings_file=settings_file).model_dump(),
+                     default_flow_style=False)
+
+
+def write_effective_settings(target: Path) -> Path:
+    """Write the effective settings (``load_settings()``) to ``target`` as YAML,
+    making its directory (``settings init``)."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(load_settings().model_dump(), sort_keys=False),
+                      encoding='utf-8')
+    return target
 
 
 def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:

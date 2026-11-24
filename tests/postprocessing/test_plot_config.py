@@ -201,3 +201,24 @@ def test_unknown_key_still_rejected():
         PlotDocument.model_validate({
             'data_dirs': [], 'labels': [],
             'plots': [{'plot_type': 'summary', '_sorce': 'x'}]})
+
+
+def test_the_starter_document_loads_back(tmp_path):
+    from frictionsim2d.postprocessing.plot_config import write_starter_document
+    target = write_starter_document(tmp_path / 'sub' / 'plots.json', [str(tmp_path)])
+    document = load_plot_document(target)
+    assert document.data_dirs == [str(tmp_path.resolve())]
+    assert [p.y_axis for p in document.plots] == ['lf', 'cof']
+    placeholder = json.loads(write_starter_document(tmp_path / 'p.json', []).read_text())
+    assert placeholder['data_dirs'] == ['./my_run']
+
+
+def test_plot_settings_merges_preset_then_file(tmp_path):
+    from frictionsim2d.postprocessing.plot_style import DEFAULT_SETTINGS, plot_settings
+    overlay = tmp_path / 's.json'
+    overlay.write_text(json.dumps({'figure': {'dpi': 77}}), encoding='utf-8')
+    merged = plot_settings('publication', overlay)
+    assert merged['figure']['dpi'] == 77 and DEFAULT_SETTINGS['figure']['dpi'] != 77
+    assert plot_settings() == DEFAULT_SETTINGS
+    with pytest.raises(KeyError):
+        plot_settings('no-such-preset')

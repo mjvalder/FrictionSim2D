@@ -333,3 +333,28 @@ def test_enrichment_keeps_a_legacy_stamp(tmp_path):
     after = json.loads(prov.read_text(encoding="utf-8"))
     assert after["run_uuid"] == stamped["run_uuid"]
     assert after["run_uuid_stamped_at"] == stamped["run_uuid_stamped_at"]
+
+
+def test_resolve_run_log_prefers_run_system_then_a_lone_log(tmp_path):
+    from frictionsim2d.builders.utils.post_run import resolve_run_log
+    lammps = tmp_path / 'lammps'
+    lammps.mkdir()
+    assert resolve_run_log(tmp_path) == (None, f"no run log in {lammps}")
+    (lammps / 'run_slide.log').write_text('x')
+    assert resolve_run_log(tmp_path) == (lammps / 'run_slide.log', '')
+    (lammps / 'run_other.log').write_text('x')
+    log, why = resolve_run_log(tmp_path)
+    assert log is None and 'none named run_system.log' in why
+    (lammps / 'run_system.log').write_text('x')
+    assert resolve_run_log(tmp_path) == (lammps / 'run_system.log', '')
+
+
+def test_enrich_tree_reports_each_run_and_a_tally(tmp_path):
+    from frictionsim2d.builders.utils.post_run import enrich_tree
+    assert list(enrich_tree(tmp_path / 'nope')) == [
+        f"No simulation directories under {tmp_path / 'nope'}; nothing to enrich."]
+    (tmp_path / 'afm' / 'm' / 'L1' / 'lammps').mkdir(parents=True)
+    (tmp_path / 'afm' / 'm' / 'L1' / 'lammps' / 'system.in').write_text('')
+    lines = list(enrich_tree(tmp_path))
+    assert lines[0].startswith('skipped afm/m/L1: no run log')
+    assert lines[-1] == "0 enriched, 0 unchanged, 1 skipped."

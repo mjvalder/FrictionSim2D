@@ -76,3 +76,35 @@ def test_mixed_family_dataset_is_refused():
 def test_given_family_must_match_the_rows():
     with pytest.raises(ValueError, match='afm'):
         RunSource(_rows(('p1', 'afm', 'complete')), 'sheetonsheet', SimpleNamespace())
+
+
+def test_parse_params_validates_names_and_values(registry):
+    class _Typed(_analysis('typed')):
+        class Params(BaseModel):
+            """One integer."""
+            n: int = 1
+    _Typed.name = 'typed'
+    register(_Typed)
+    assert base.parse_params('typed', ['n=3']) == {'n': 3}
+    assert base.parse_params('typed', []) == {}
+    for pairs, match in ((['n'], 'expected NAME=VALUE'), (['m=1'], 'no such parameter'),
+                         (['n=x'], '--param n:')):
+        with pytest.raises(ValueError, match=match):
+            base.parse_params('typed', pairs)
+    with pytest.raises(ValueError, match='no analysis named'):
+        base.parse_params('nope', [])
+    assert any(line.startswith('typed\t1\trun\tafm') for line in base.catalogue_lines())
+
+
+def test_stored_result_says_what_to_run(monkeypatch):
+    pytest.importorskip('aiida')
+    from frictionsim2d.analysis import store
+    monkeypatch.setattr(store, 'select_result_node', lambda *a: None)
+    with pytest.raises(LookupError, match='run: FrictionSim2D analyse run probe paper'):
+        store.stored_result('probe', 'paper')
+
+    def _refuse(*_args):
+        raise ValueError('probe has no parameter q')
+    monkeypatch.setattr(store, 'select_result_node', _refuse)
+    with pytest.raises(LookupError, match='no parameter q'):
+        store.stored_result('probe', 'paper', {'q': 1})

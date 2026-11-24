@@ -411,3 +411,25 @@ def test_local_run_continues_past_a_failed_member(tmp_path, monkeypatch):
     monkeypatch.setattr(amorphous, 'run_lmp_serial', flaky)
     done, failed = amorphous.run_quench_root_local(root)
     assert len(ran) == 2 and len(done) == 1 and len(failed) == 1
+
+
+def test_quench_import_report_lines_send_failures_to_stderr(tmp_path):
+    report = amorphous.QuenchImportReport()
+    assert report.ok and report.lines() == []
+    report.imported.append(tmp_path / 'a.lmp')
+    report.warnings.append('odd box')
+    report.incomplete.append((tmp_path / 'm', 'no log'))
+    assert not report.ok
+    assert report.lines() == [(f"✅ imported {tmp_path / 'a.lmp'}", False),
+                              ("⚠️  odd box", False),
+                              (f"❌ incomplete {tmp_path / 'm'}: no log", True)]
+
+
+def test_block_line_shows_box_key_and_the_set_conditions():
+    row = {'file': 'amor_Si.lmp', 'root': 'user', 'key8': None, 'unkeyed': 'no sidecar',
+           'box': [10.0, 20.04, 12.0], 'natoms': 500,
+           **{name: None for name in amorphous.CONDITION_FIELDS}}
+    row[amorphous.CONDITION_FIELDS[0]] = 4000
+    assert amorphous.block_line(row) == (
+        f"amor_Si.lmp  user  unkeyed (no sidecar)  10.0x20.0x12.0 A  natoms=500  "
+        f"{amorphous.CONDITION_FIELDS[0]}=4000")

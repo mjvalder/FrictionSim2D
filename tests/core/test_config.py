@@ -1387,3 +1387,20 @@ def test_margin_keys_match_the_integrity_rules():
     from frictionsim2d.postprocessing.integrity import MARGIN_KEYS
 
     assert config._MARGIN_KEYS == MARGIN_KEYS  # pylint: disable=protected-access
+
+
+def test_checked_integrity_overrides_validates_against_the_defaults():
+    from frictionsim2d.core.config import checked_integrity_overrides
+    assert checked_integrity_overrides(()) is None
+    assert checked_integrity_overrides(['hole_bonds=2']) == {'hole_bonds': 2}
+    with pytest.raises(ValueError):
+        checked_integrity_overrides(['isolated_atoms=many'])
+
+
+def test_write_effective_settings_round_trips(tmp_path, monkeypatch):
+    from frictionsim2d.core.config import effective_settings_yaml, write_effective_settings
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'none'))
+    target = write_effective_settings(tmp_path / 'deep' / 'settings.yaml')
+    assert load_settings(settings_file=target) == GlobalSettings()
+    assert effective_settings_yaml(target) == yaml.dump(GlobalSettings().model_dump(),
+                                                        default_flow_style=False)

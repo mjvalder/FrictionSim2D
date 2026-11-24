@@ -377,7 +377,7 @@ def test_a_sheet_run_is_enriched_after_the_run_instead_of_skipped(tmp_path):
     LAMMPS produced a result is the point of the field.
     """
     from frictionsim2d.builders.utils.post_run import enrich_provenance_post_run
-    from frictionsim2d.cli import _enrich_one_run
+    from frictionsim2d.builders.utils.post_run import enrich_one_run
 
     run_dir, _slide, _b = _build_homogeneous(tmp_path)
     assert _record(run_dir).lammps_version is None, "build time: not yet known"
@@ -386,7 +386,7 @@ def test_a_sheet_run_is_enriched_after_the_run_instead_of_skipped(tmp_path):
     log.write_text("LAMMPS (2 Aug 2023 - Update 3)\nStep Temp\n0 300\n",
                    encoding="utf-8")
 
-    outcome, detail = _enrich_one_run(run_dir, None, enrich_provenance_post_run)
+    outcome, detail = enrich_one_run(run_dir, None, enrich_provenance_post_run)
     assert outcome == "enriched", (outcome, detail)
     assert _record(run_dir).lammps_version == "2 Aug 2023 - Update 3"
 
@@ -395,10 +395,10 @@ def test_a_sheet_run_with_no_log_is_reported_not_crashed(tmp_path):
     """The sweep must never report a completed simulation as failed over a
     provenance nicety."""
     from frictionsim2d.builders.utils.post_run import enrich_provenance_post_run
-    from frictionsim2d.cli import _enrich_one_run
+    from frictionsim2d.builders.utils.post_run import enrich_one_run
 
     run_dir, _slide, _b = _build_homogeneous(tmp_path)
-    outcome, detail = _enrich_one_run(run_dir, None, enrich_provenance_post_run)
+    outcome, detail = enrich_one_run(run_dir, None, enrich_provenance_post_run)
     assert outcome == "skipped"
     assert "no run log" in detail
 

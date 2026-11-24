@@ -33,6 +33,27 @@ def merge_settings(base: dict, overlay: dict) -> None:
             base[key] = value
 
 
+def plot_settings(preset=None, settings_path=None) -> dict:
+    """`DEFAULT_SETTINGS`, then the shipped ``preset``, then the JSON file
+    ``settings_path``, merged in that order (a fresh copy).
+
+    Raises:
+        KeyError: no shipped preset of that name.
+    """
+    # pylint: disable=import-outside-toplevel
+    import copy
+    import json
+
+    from .presets import load_preset
+    settings = copy.deepcopy(DEFAULT_SETTINGS)
+    if preset:
+        merge_settings(settings, load_preset(preset))
+    if settings_path:
+        with open(settings_path, 'r', encoding='utf-8') as handle:
+            merge_settings(settings, json.load(handle))
+    return settings
+
+
 @dataclasses.dataclass
 class StickSlipPSD:
     """Frequency-domain results from stick-slip FFT analysis."""
