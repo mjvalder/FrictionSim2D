@@ -67,3 +67,8 @@ def format_dimension_token(value: Any) -> str:
     if numeric.is_integer():
         return str(int(numeric))
     return f"{numeric:g}"
+
+
+def material_id(name: str) -> str:
+    """Map a directory/material name to the ML merge id (``h-MoS2`` -> ``h_MoS2``)."""
+    return name.replace("-", "_").replace("/", "__")

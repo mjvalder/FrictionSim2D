@@ -172,8 +172,6 @@ def compute_time_series_hash(
 # RunSummary: the one summary function on the store path
 # ---------------------------------------------------------------------------
 
-_PES_KIND = {'pes_tip': 'tip', 'pes_sheet': 'sheet'}
-
 #: The three roles a slide summary needs, in `compute_friction_stats` order.
 _SLIDE_ROLES = ('normal_load', 'lateral_force_x', 'lateral_force_y')
 
@@ -266,13 +264,14 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
     summary = RunSummary(skip_fraction=skip_fraction, ntimesteps=int(len(window)))
 
     if family in PES_FAMILIES:
-        from ..postprocessing.pes_scan import grid_descriptors  # pylint: disable=import-outside-toplevel
+        from ..postprocessing.pes_scan import (  # pylint: disable=import-outside-toplevel
+            KIND_BY_FAMILY, grid_descriptors)
         # A PES grid has no COF at all -- the ten stats stay None, and
         # is_complete stays True because the grid IS this family's complete
         # result. Consumers filter on `mean_cof is not None`, not is_complete.
         summary.extras.update(
             {k: _finite(v) for k, v in
-             grid_descriptors(window, _PES_KIND[family]).items()})
+             grid_descriptors(window, KIND_BY_FAMILY[family]).items()})
         summary.time_series_hash = compute_time_series_hash(
             window['energy_eV'].to_numpy(dtype=float), np.zeros(1), np.zeros(1))
         return summary

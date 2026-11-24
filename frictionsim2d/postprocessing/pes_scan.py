@@ -1,7 +1,8 @@
 """PES-scan descriptor extraction.
 
 Reduces the raw ``results/pes_scan.csv`` energy/force grids produced by the
-static PES scans (:mod:`frictionsim2d.builders.afm.pes_tip / sheetonsheet.pes_sheet`) to a handful of per-material
+static PES scans (:mod:`frictionsim2d.builders.afm.pes_tip`,
+:mod:`frictionsim2d.builders.sheetonsheet.pes_sheet`) to a handful of per-material
 scalar descriptors — the corrugation-barrier quantities the friction literature
 relies on (Prandtl–Tomlinson) — and writes:
 
@@ -34,20 +35,17 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from ..core.utils.tokens import material_id
+
 logger = logging.getLogger(__name__)
 
 EPS = 1e-12
 
-#: Top-level run directory name -> scan kind.
-KIND_BY_TOPDIR = {"pes_sheet": "sheet", "pes_tip": "tip"}
+#: PES family -> scan kind.
+KIND_BY_FAMILY = {"pes_sheet": "sheet", "pes_tip": "tip"}
 
 
-def material_id(name: str) -> str:
-    """Map a sheet file-stem/dir name to the ML merge id (``h-MoS2`` -> ``h_MoS2``)."""
-    return name.replace("-", "_")
-
-
-def _grid_from_frame(df: pd.DataFrame) -> Tuple[np.ndarray, float, float]:
+def grid_from_frame(df: pd.DataFrame) -> Tuple[np.ndarray, float, float]:
     """Pivot a (dx|x, dy|y, energy) frame into an (Ny, Nx) grid + axis steps.
 
     Missing grid points are filled with the grid mean so barrier/curvature stay
@@ -66,7 +64,7 @@ def _grid_from_frame(df: pd.DataFrame) -> Tuple[np.ndarray, float, float]:
     return grid, dx, dy
 
 
-def _channel_barrier(grid: np.ndarray, axis: int) -> float:
+def channel_barrier(grid: np.ndarray, axis: int) -> float:
     """Easiest straight-line sliding barrier along ``axis`` (peak above the min).
 
     Sliding straight along an axis at fixed transverse offset traverses a 1D
@@ -86,7 +84,7 @@ def _curvature_at_min(grid: np.ndarray, dx: float, dy: float) -> float:
     stiffness K (eV/Å²).
     """
     ny, nx = grid.shape
-    iy, ix = np.unravel_index(int(np.argmin(grid)), grid.shape)
+    iy, ix = (int(v) for v in np.unravel_index(int(np.argmin(grid)), grid.shape))
     e0 = grid[iy, ix]
     cxx = (grid[iy, (ix + 1) % nx] - 2 * e0 + grid[iy, (ix - 1) % nx]) / (dx * dx + EPS)
     cyy = (grid[(iy + 1) % ny, ix] - 2 * e0 + grid[(iy - 1) % ny, ix]) / (dy * dy + EPS)
@@ -95,11 +93,11 @@ def _curvature_at_min(grid: np.ndarray, dx: float, dy: float) -> float:
 
 def grid_descriptors(df: pd.DataFrame, kind: str) -> Dict[str, float]:
     """Compute the scalar PES descriptors for one material's grid frame."""
-    grid, dx, dy = _grid_from_frame(df)
+    grid, dx, dy = grid_from_frame(df)
     e = grid.ravel()
     barrier_u = float(e.max() - e.min())
-    barrier_a = _channel_barrier(grid, axis=1)   # slide along x (a)
-    barrier_b = _channel_barrier(grid, axis=0)   # slide along y (b)
+    barrier_a = channel_barrier(grid, axis=1)   # slide along x (a)
+    barrier_b = channel_barrier(grid, axis=0)   # slide along y (b)
     curv = _curvature_at_min(grid, dx, dy)
     # PT friction parameter eta = 2 pi^2 U / (K a^2); a = shorter surface period.
     a = min(dx * grid.shape[1], dy * grid.shape[0])
@@ -129,7 +127,7 @@ def grid_descriptors(df: pd.DataFrame, kind: str) -> Dict[str, float]:
 
 
 #: Scan kind -> the family a PES run's provenance.json declares.
-FAMILY_BY_KIND = {"sheet": "pes_sheet", "tip": "pes_tip"}
+FAMILY_BY_KIND = {kind: family for family, kind in KIND_BY_FAMILY.items()}
 
 
 def discover_grids(run_root: Path, kind: str) -> List[Tuple[str, Path]]:

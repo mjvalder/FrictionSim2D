@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from . import indent
 
 
-def __getattr__(name: str):
+def __getattr__(name: str):  # pylint: disable=import-outside-toplevel
     """Lazily expose heavy symbols to reduce import-time overhead."""
     if name == 'DataReader':
         from .read_data import DataReader as _DataReader

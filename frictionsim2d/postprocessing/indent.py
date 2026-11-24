@@ -1,45 +1,20 @@
-"""Indent-simulation delivery: penetration (hold) + adhesion (retract) in one pass.
+"""Indent-simulation delivery: penetration (hold) and adhesion (retract) in one pass.
 
-Each AFM indentation ("indent") run (:mod:`frictionsim2d.builders.afm.indent`) writes, per
-``(material, layer, load)``, both:
+Each AFM indent run (:mod:`frictionsim2d.builders.afm.indent`) writes, per
+``(material, layer, load)``, a hold file ``results/friction_f<load>_a0_s<speed>_layer<N>.txt``
+(read by :class:`~frictionsim2d.postprocessing.read_data.DataReader`) and a retract curve
+``results/indent_f<load>N_l<layer>.csv`` (``step, z_tip, fz_tip, fx_tip, fy_tip, pe``).
 
-    - the 10-column hold file ``results/friction_f<load>_a0_s<speed>_layer<N>.txt``
-      (same layout as the sliding campaign — so the campaign reader
-      :class:`~frictionsim2d.postprocessing.read_data.DataReader` parses it unchanged), and
-    - the force–distance retract curve ``results/indent_f<load>N_l<layer>.csv``
-      (columns ``step, z_tip, fz_tip, fx_tip, fy_tip, pe``).
+:func:`run` reduces a run root to three outputs:
 
-This module reduces a run root to the recipe hand-back for **both** contact
-descriptor sets (``POKE_SIM_RECIPE.md``), subsuming the former separate poke and
-adhesion delivery modules:
+    - ``<out_dir>/output_indent_f<load>_s<seed>.json``: the penetration, one file per
+      (load, seed batch), in the campaign schema.
+    - ``<data_dir>/indent_features.csv``: one row per ``(material, layer, load)`` of
+      adhesion descriptors (:func:`retract_features`), merge key ``material``.
+    - ``<out_dir>/indent_manifest.csv``: one row per condition with the velocity
+      ``seed``, ``hold_steps``, ``z_step``, ``n_steps`` and a best-effort ``wall_time``.
 
-    Penetration (from the hold files):
-      - ``<out_dir>/output_indent_f<load>_s<seed>.json`` — one file per (load, seed
-        batch) in the exact nested campaign schema, so the ML side reduces each
-        leaf exactly as the campaign (``pen_mean = mean(tip_z − com_z)``).
-
-    Adhesion (from the retract curves):
-      - ``<data_dir>/indent_features.csv`` — one row per ``(material, layer, load)``
-        with ``pulloff_force``, ``work_of_adhesion``, ``contact_stiffness`` (+
-        supporting columns), merge key ``material`` (underscored id).
-      - ``<out_dir>/indent/<material>_l<layer>[_f<load>].csv`` — the tidied
-        per-condition retract curve.
-
-    Combined:
-      - ``<out_dir>/indent_manifest.csv`` — one row per condition with the fresh
-        velocity ``seed``, the hold length (``hold_steps``), the retract
-        discretization (``z_step``, ``n_steps``) and a best-effort ``wall_time``.
-
-Reduced adhesion descriptors (``fz_tip`` is the z-force the surface exerts on the
-tip: + repulsive, − adhesive; ``z_tip`` increases as the tip retracts):
-
-    ================= ================================================================
-    pulloff_force      -min(fz_tip) — the peak tensile (adhesive) force, nN
-    work_of_adhesion   ∫ over the attractive branch of (-fz_tip) dz — energy to
-                       separate the contact, eV (also reported in nN·Å)
-    contact_stiffness  |slope of fz_tip vs z_tip| over the repulsive wall — nN/Å
-    snapoff_z          tip COM z at the pull-off minimum, Å
-    ================= ================================================================
+The tidied retract curves go to ``<out_dir>/indent/<material>_l<layer>[_f<load>].csv``.
 """
 from __future__ import annotations
 
@@ -53,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from ..core.utils.tokens import material_id
 from ..data.models import EV_A_TO_NN
 from ..run.tree import discover_runs
 
@@ -67,11 +43,6 @@ _CSV_RE = re.compile(r"indent_f(?P<load>[0-9.]+)N_l(?P<layer>\d+)\.csv$")
 _WALL_TIME_RE = re.compile(r"Total wall time:\s*([0-9:]+)")
 #: Log-like filenames worth scanning for a wall time (avoid huge trajectories).
 _LOG_GLOBS = ("log.lammps", "*.log", "logs/*", "*.out", "*.o*")
-
-
-def material_id(name: str) -> str:
-    """Map a directory/material name to the ML merge id (``h-MoS2`` -> ``h_MoS2``)."""
-    return name.replace("-", "_").replace("/", "__")
 
 
 def _load_token(load_val: float) -> str:
@@ -251,9 +222,9 @@ def retract_features(df: pd.DataFrame) -> Dict[str, float]:
 
     # Work of adhesion: area under the attractive (fz < 0) branch, ∫ (-fz) dz.
     tensile = np.clip(-fz, 0.0, None)
-    w_nnA = float(np.trapz(tensile, z)) if z.size > 1 else 0.0
-    out["work_of_adhesion_nnA"] = w_nnA
-    out["work_of_adhesion"] = w_nnA / EV_A_TO_NN     # eV (1 nN·Å = 1/EV_A_TO_NN eV)
+    w_nn_a = float((np.diff(z) * (tensile[1:] + tensile[:-1]) / 2.0).sum()) if z.size > 1 else 0.0
+    out["work_of_adhesion_nnA"] = w_nn_a
+    out["work_of_adhesion"] = w_nn_a / EV_A_TO_NN     # eV (1 nN·Å = 1/EV_A_TO_NN eV)
 
     # Contact stiffness: slope of the *leading repulsive wall* only — from the
     # loaded contact (fz > 0) up to and including the first zero crossing. Fitting

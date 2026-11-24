@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from frictionsim2d.postprocessing import indent
 from tests.helpers.results_tree import make_family_run
@@ -74,6 +75,17 @@ def test_retract_features_pulloff_and_work_positive():
     assert 1.5 < feats["pulloff_force"] < 2.0
     assert feats["work_of_adhesion"] > 0
     assert feats["detached"] == 1.0
+
+
+def test_work_of_adhesion_is_the_trapezoid_area_of_the_tensile_branch():
+    # a triangular well 1 nN deep and 2 A wide: area 1 nN*A
+    df = pd.DataFrame({"z_tip": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+                       "fz_tip": [1.0, 0.0, -1.0, 0.0, 0.0, 0.0]})
+
+    feats = indent.retract_features(df)
+
+    assert feats["work_of_adhesion_nnA"] == pytest.approx(1.0)
+    assert feats["work_of_adhesion"] == pytest.approx(1.0 / indent.EV_A_TO_NN)
 
 
 def test_contact_stiffness_is_the_steep_wall_not_the_tail():

@@ -11,7 +11,7 @@ single `results/pes_scan.csv` `frictionsim2d.postprocessing.pes_scan` actually r
 import pandas as pd
 import pytest
 
-from frictionsim2d.postprocessing.pes_scan import KIND_BY_TOPDIR, grid_descriptors
+from frictionsim2d.postprocessing.pes_scan import KIND_BY_FAMILY, grid_descriptors
 from tests.helpers.synthetic_results import make_run, write_pes_grid, write_results
 
 _PES_RUNS = {
@@ -52,7 +52,7 @@ def test_make_run_writes_a_grid_pes_scan_reads(tmp_path, family):
     assert len(df) >= 4
 
     # this is exactly what frictionsim2d.postprocessing.pes_scan.extract_all does per row
-    feats = grid_descriptors(df, KIND_BY_TOPDIR[family])
+    feats = grid_descriptors(df, KIND_BY_FAMILY[family])
     assert 'pes_barrier_U' in feats
     if family == 'pes_tip':
         assert 'pes_fmax' in feats

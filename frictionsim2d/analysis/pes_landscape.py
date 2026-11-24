@@ -9,7 +9,7 @@ along x and y, and the Prandtl-Tomlinson parameter of a given spring and
 period:
 
 - ``pes_barrier_x`` / ``pes_barrier_y`` (eV): the easiest straight sliding
-  channel along x / y (``pes_scan._channel_barrier``), whose ratio is
+  channel along x / y (``pes_scan.channel_barrier``), whose ratio is
   ``pes_barrier_aniso``;
 - ``pt_eta`` (1) = 2 pi^2 U / (k a^2), ``U`` = ``pes_barrier_U`` (eV, max - min
   of the grid), ``k`` the param ``k`` (eV/A^2), ``a`` the param ``a`` (A).
@@ -29,13 +29,13 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, field_validator
 
+from ..postprocessing import pes_scan
+from ..postprocessing.pes_scan import KIND_BY_FAMILY
 from .base import Analysis, register
 from .periods import material_key, summary_identity
 
 __all__ = ['KIND_BY_FAMILY', 'NO_GRID', 'PesLandscape', 'PesLandscapeParams', 'pt_eta']
 
-#: family -> the ``kind`` of ``pes_scan.grid_descriptors`` (``pes_scan.FAMILY_BY_KIND``).
-KIND_BY_FAMILY = {'pes_tip': 'tip', 'pes_sheet': 'sheet'}
 #: The drop reason of a run with no usable grid (no window tier, no
 #: ``energy_eV``, or fewer than 4 points: ``pes_scan.extract_all`` :178).
 NO_GRID = 'no_pes_grid'
@@ -93,8 +93,6 @@ class PesLandscape(Analysis):  # pylint: disable=too-few-public-methods
         Raises:
             ValueError: the source is not a PES family.
         """
-        # pylint: disable=import-outside-toplevel,protected-access
-        from ..postprocessing import pes_scan
         if source.family not in KIND_BY_FAMILY:
             raise ValueError(f'pes_landscape reads PES datasets only ({sorted(KIND_BY_FAMILY)}); '
                              f'this one is family {source.family!r}')
@@ -106,12 +104,12 @@ class PesLandscape(Analysis):  # pylint: disable=too-few-public-methods
                 source.dropped.append((str(row.point_uuid), NO_GRID))
                 continue
             values = pes_scan.grid_descriptors(grid, kind)
-            energy = pes_scan._grid_from_frame(grid)[0]
+            energy = pes_scan.grid_from_frame(grid)[0]
             material = material_key(row.materials)
             k, a = _value(params.k, material), _value(params.a, material)
             out.append({**summary_identity(row), **values,
-                        'pes_barrier_x': pes_scan._channel_barrier(energy, axis=1),
-                        'pes_barrier_y': pes_scan._channel_barrier(energy, axis=0),
+                        'pes_barrier_x': pes_scan.channel_barrier(energy, axis=1),
+                        'pes_barrier_y': pes_scan.channel_barrier(energy, axis=0),
                         'pt_k_eV_A2': np.nan if k is None else k,
                         'pt_a_A': np.nan if a is None else a,
                         'pt_eta': pt_eta(values['pes_barrier_U'], k, a)})
