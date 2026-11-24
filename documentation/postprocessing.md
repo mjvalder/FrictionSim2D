@@ -347,7 +347,8 @@ FrictionSim2D analyse export NAME DATASET OUT.csv [--param NAME=VALUE ...] [--pr
 
 - A table field takes `TableSource(analysis=<name>, dataset=<dataset>)` (in JSON
   `{"analysis": ..., "dataset": ..., "version": <optional>, "params": {<optional>}}`;
-  default version: the registered one), or a CSV path.
+  default version: the registered one). A CSV path is not accepted: every table is a
+  stored result, so a publication table can be reproduced from the store.
 - `aiida://analysis/<name>/<dataset>[?k=v&k2=v2]` in `data_dirs` reads a summary-shaped
   result (`period_summary`) as that label's summary rows.
 - Both select by params as `analyse show` does: the result under exactly those params
@@ -402,15 +403,15 @@ FrictionSim2D aiida export-results <label> <dir>
 
 - `aiida://analysis/<name>/<dataset>` in `data_dirs`: a summary-shaped analysis result
   (`period_summary`) becomes that label's summary rows, as `aiida://dataset/` does.
-- A table field (`ranking_file`, `traces_file`, ...) takes a path or
+- A table field (`ranking_file`, `traces_file`, ...) takes
   `{"analysis": <name>, "dataset": <dataset>, "version": <optional>, "params": {...}}`.
   URI query values are text, parsed by the analysis' params model (a dict or list as
   JSON text).
 - `stickslip_period_histogram` and `contact_cof_scatter` read the load from `load_nN`, or
   from `force` as `stick_slip` and `contact` name it. Those analyses hold every layer:
   `filter_layer` keeps one.
-- `sheet_profile` and `integrity_panel` take `dataset` + `material` + `layer` instead
-  of `run_dir`; the integrity panel draws failed points too.
+- `sheet_profile` and `integrity_panel` take `dataset` + `material` + `layer`; the
+  integrity panel draws failed points too.
 - The plotter never computes an analysis: a missing result raises naming
   `FrictionSim2D analyse run <name> <dataset>`.
 
@@ -996,11 +997,9 @@ against.
 | `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
 | `load_colors` | `Optional[List[str]]` |  |
 | `line_width` | `Optional[float]` |  |
-| `run_dir` | `Optional[str]` | AFM run directory holding <layer_dir>/ (or give dataset) |
-| `layer_dir` | `Optional[str]` |  |
-| `dataset` | `Optional[str]` | Stored dataset holding the run (instead of run_dir) |
-| `material` | `Optional[str]` | Material, with dataset |
-| `layer` | `Optional[int]` | Layers, with dataset (default 2) |
+| `dataset` | `Optional[str]` | Stored dataset holding the run |
+| `material` | `Optional[str]` | Material in the dataset |
+| `layer` | `Optional[int]` | Layers (default 2) |
 | `tip_types` | `Optional[List[int]]` |  |
 | `tip_apex_depth` | `Optional[float]` |  |
 | `far_field_radius` | `Optional[float]` |  |
@@ -1051,8 +1050,7 @@ against.
 | `average_first_n_timesteps` | `Optional[int]` |  |
 | `average_timestep_range` | `Optional[List[int]]` |  |
 | `material` | `Optional[str]` | Material (required) |
-| `run_dir` | `Optional[str]` | AFM run directory holding L<layer>/ (or give dataset) |
-| `dataset` | `Optional[str]` | Stored dataset holding the run (instead of run_dir) |
+| `dataset` | `Optional[str]` | Stored dataset holding the run |
 | `layer` | `Optional[int]` |  |
 | `loads` | `Optional[List[float]]` |  |
 | `traces_file` | `Optional[frictionsim2d.postprocessing.plot_config.TableSource]` | run_id, step, temp_sheet_3d, comz_L1, comz_L2 |

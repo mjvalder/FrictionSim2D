@@ -4,7 +4,7 @@ import pytest
 
 from frictionsim2d.analysis.sheet_geometry import read_settings
 from frictionsim2d.postprocessing.snapshot_geometry import (expand_lammps_types, parse_type_groups,
-                                                            radial_profile, read_type_groups)
+                                                            radial_profile)
 
 
 def test_expand_lammps_types():
@@ -56,10 +56,3 @@ def test_bins_with_fewer_than_three_atoms_are_skipped():
     xy = np.array([[0.0, 0.0], [0.1, 0.0], [5.0, 0.0], [5.1, 0.0], [5.2, 0.0]])
     mid, _ = radial_profile(xy, np.zeros(5), np.array([0.0, 0.0]), 0.0, np.array([0, 1, 6]))
     assert list(mid) == [3.5]
-
-
-def test_read_type_groups_expands_ranges(tmp_path):
-    f = tmp_path / 'system.in.settings'
-    f.write_text('group layer_1 type 1 2\ngroup tip_all type 4*6\n'
-                 'group layer_1 type 9\n', encoding='utf-8')
-    assert read_type_groups(f) == {'layer_1': {1, 2}, 'tip_all': {4, 5, 6}}

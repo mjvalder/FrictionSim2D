@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing_extensions import Annotated
 
 __all__ = ['PLOT_TYPES', 'ExternalSeries', 'SourceSpec', 'PlotBase',
@@ -346,44 +346,20 @@ class CofHistogramPlot(PlotBase):
 
 
 class TableSource(BaseModel):
-    """Where a table plot reads its rows. A bare string is a file path.
-
-    Exactly one of ``file`` (a CSV, resolved like external-series files) or
-    ``analysis`` (a stored result of that analysis over ``dataset``, the
-    newest one of ``version`` -- by default the registered analysis' current
-    version -- under exactly ``params``, by default the analysis' defaults;
-    they are hashed as ``analyse run`` hashes them). The plotter never
-    computes an analysis: run it first with
+    """Where a table plot reads its rows: a stored result of ``analysis`` over
+    ``dataset``, the newest one of ``version`` -- by default the registered
+    analysis' current version -- under exactly ``params``, by default the
+    analysis' defaults; they are hashed as ``analyse run`` hashes them. The
+    plotter never computes an analysis: run it first with
     ``FrictionSim2D analyse run <analysis> <dataset> [--param k=v ...]``.
     """
     model_config = _FORBID
 
-    file: Optional[Path] = Field(None, description='CSV file')
-    analysis: Optional[str] = Field(None, description='Stored analysis result, by name')
-    dataset: Optional[str] = Field(None, description='Dataset the analysis ran over')
+    analysis: str = Field(description='Stored analysis result, by name')
+    dataset: str = Field(description='Dataset the analysis ran over')
     version: Optional[str] = Field(None, description="Analysis version (default: current)")
     params: Optional[Dict[str, Any]] = Field(
         None, description="The analysis' params the result was run with (default: its defaults)")
-
-    @model_validator(mode='before')
-    @classmethod
-    def _bare_path(cls, value):
-        return {'file': value} if isinstance(value, (str, Path)) else value
-
-    @model_validator(mode='after')
-    def _one_source(self):
-        if (self.file is None) == (self.analysis is None):
-            raise ValueError('a table source names exactly one of file or analysis')
-        if self.analysis is not None and not self.dataset:
-            raise ValueError(f'analysis {self.analysis!r} needs dataset')
-        if self.file is not None and (self.dataset or self.version or self.params):
-            raise ValueError('dataset, version and params go only with an analysis')
-        return self
-
-    @model_serializer(mode='wrap')
-    def _as_bare_path(self, handler):
-        """A file-only source dumps back to the bare path it was written as."""
-        return str(self.file) if self.file is not None else handler(self)
 
 
 class _TablePlot(PlotBase):
@@ -425,13 +401,9 @@ class SheetProfilePlot(_TablePlot):
     """Top surface and bottom layer height vs distance from the tip axis, per load."""
     plot_type: Literal['sheet_profile'] = 'sheet_profile'
 
-    run_dir: Optional[str] = Field(
-        None, description='AFM run directory holding <layer_dir>/ (or give dataset)')
-    layer_dir: Optional[str] = None
-    dataset: Optional[str] = Field(
-        None, description='Stored dataset holding the run (instead of run_dir)')
-    material: Optional[str] = Field(None, description='Material, with dataset')
-    layer: Optional[int] = Field(None, description='Layers, with dataset (default 2)')
+    dataset: Optional[str] = Field(None, description='Stored dataset holding the run')
+    material: Optional[str] = Field(None, description='Material in the dataset')
+    layer: Optional[int] = Field(None, description='Layers (default 2)')
     tip_types: Optional[List[int]] = None
     tip_apex_depth: Optional[float] = None
     far_field_radius: Optional[float] = None
@@ -446,10 +418,7 @@ class IntegrityPanelPlot(PlotBase):
     plot_type: Literal['integrity_panel'] = 'integrity_panel'
 
     material: Optional[str] = Field(None, description='Material (required)')
-    run_dir: Optional[str] = Field(
-        None, description='AFM run directory holding L<layer>/ (or give dataset)')
-    dataset: Optional[str] = Field(
-        None, description='Stored dataset holding the run (instead of run_dir)')
+    dataset: Optional[str] = Field(None, description='Stored dataset holding the run')
     layer: Optional[int] = None
     loads: Optional[List[float]] = None
     traces_file: Optional[TableSource] = Field(

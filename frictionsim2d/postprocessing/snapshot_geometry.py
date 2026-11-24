@@ -31,11 +31,6 @@ def parse_type_groups(text: str) -> Dict[str, Set[int]]:
     return groups
 
 
-def read_type_groups(settings_path: Path) -> Dict[str, Set[int]]:
-    """:func:`parse_type_groups` of a settings file."""
-    return parse_type_groups(Path(settings_path).read_text(encoding='utf-8'))
-
-
 def radial_profile(xy: np.ndarray, z: np.ndarray, axis: np.ndarray, z_far: float,
                    edges: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Median height minus ``z_far`` in each radial bin around ``axis``.

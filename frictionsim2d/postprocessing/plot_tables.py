@@ -4,8 +4,8 @@ Four plot types ported from the publication plotter, which reproduced figures
 first drawn by ``ML_taxonomy`` (``scripts/figs/fig_fs2d_article.py``: the period
 histogram, contact scatters and sheet profile; ``build_round13_integrity_audit.py``:
 the integrity panels). The drawing follows the originals line for line so the
-images reproduce. Tables are read with ``float_precision='round_trip'``: the
-default CSV parser can be 1 ulp off the written value.
+images reproduce. Tables and snapshots come from the store only (stored analysis
+results and stored datasets); frozen ``ML_taxonomy`` tables are not read.
 """
 # pylint: disable=too-many-locals
 
@@ -23,7 +23,7 @@ from .plot_config import TableSource
 from .plot_mixin_base import PlotDataError, PlotterMixinBase
 from .plot_style import GEM24_COLORS
 from .run_status import completion_status
-from .snapshot_geometry import parse_type_groups, radial_profile, read_type_groups
+from .snapshot_geometry import parse_type_groups, radial_profile
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +32,11 @@ _STATUS_TEXT = {"halted": "halted (T guard)", "truncated": "truncated", "no_outp
 
 
 def _as_source(source: Any) -> TableSource:
-    """A ``TableSource`` given as a model, its dump, or a bare path."""
+    """A ``TableSource`` given as a model or its dump."""
     if isinstance(source, TableSource):
         return source
     if not source:
-        raise PlotDataError('table source names no file')
+        raise PlotDataError('table source names no analysis')
     try:
         return TableSource.model_validate(source)
     except ValueError as exc:
@@ -82,58 +82,20 @@ def _param_text(value: Any) -> str:
     return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
 
 
-def load_table(source: Any, base_dir: Path, required: Sequence[str] = ()) -> pd.DataFrame:
-    """Read a table source; raise naming the table and any missing column.
-
-    A file path that is relative is tried as given, then under ``base_dir``;
-    an analysis is read from the store (:func:`analysis_table`).
-    """
+def load_table(source: Any, required: Sequence[str] = ()) -> pd.DataFrame:
+    """Read a stored analysis table (:func:`analysis_table`); raise naming the
+    table and any missing column."""
     source = _as_source(source)
-    if source.analysis is not None:
-        table = analysis_table(source.analysis, source.dataset, source.version, source.params)
-        name = f'{source.analysis} over {source.dataset}'
-    else:
-        path = Path(source.file)
-        if not path.is_absolute() and not path.exists():
-            path = Path(base_dir) / path
-        if not path.is_file():
-            raise PlotDataError(f"{path}: table not found")
-        table = pd.read_csv(path, float_precision='round_trip')
-        name = path.name
+    table = analysis_table(source.analysis, source.dataset, source.version, source.params)
+    name = f'{source.analysis} over {source.dataset}'
     missing = [c for c in required if c not in table.columns]
     if missing:
         raise PlotDataError(f"{name}: missing column(s) {missing}")
     return table
 
 
-class _RunFiles:
-    """The settings groups and snapshots of one AFM run, from a run
-    directory: ``<layer dir>/lammps/system.in.settings`` and
-    ``<layer dir>/data/{load_<L>N,final_f<F>N_a0}.data``."""
-
-    def __init__(self, layer_dir: Path) -> None:
-        self.layer_dir = layer_dir
-
-    def __enter__(self) -> '_RunFiles':
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        return None
-
-    def groups(self) -> dict:
-        """``{group: atom types}`` of the run's settings."""
-        return read_type_groups(self.layer_dir / 'lammps' / 'system.in.settings')
-
-    def snapshot(self, load: float, kind: str) -> Path | None:
-        """The ``load`` (loaded, before sliding) or ``final`` (end of the
-        0 degree slide) snapshot at ``load``, or None."""
-        name = f"load_{load:g}N.data" if kind == 'load' else f"final_f{load:g}N_a0.data"
-        path = self.layer_dir / 'data' / name
-        return path if path.exists() else None
-
-
 class _DatasetRunFiles:
-    """:class:`_RunFiles` read from a stored dataset through
+    """The settings groups and snapshots of one AFM run, read from a stored dataset through
     :class:`~frictionsim2d.analysis.source.RunSource`: the points of ``material`` at
     ``layer`` layers, every verdict (a failed load is what an integrity
     panel shows), one run only. ``material`` matches the stack as stored
@@ -218,18 +180,13 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
             self._required(plot_config, key)
 
     def _table(self, source: Any, required: Sequence[str] = ()) -> pd.DataFrame:
-        source = _as_source(source)
-        if source.file is not None:
-            source = self._resolve_aux_file_path(str(source.file))
-        return load_table(source, self.output_dir.parent, required)
+        return load_table(source, required)
 
-    def _run_files(self, plot_config: dict, layer: int, layer_dir: str):
-        """The run a snapshot plot reads: ``run_dir``/``layer_dir``, or the
-        points of ``material`` at ``layer`` in ``dataset``."""
-        if plot_config.get('run_dir'):
-            return _RunFiles(Path(plot_config['run_dir']) / layer_dir)
+    def _run_files(self, plot_config: dict, layer: int):
+        """The run a snapshot plot reads: the points of ``material`` at
+        ``layer`` in ``dataset``."""
         if not plot_config.get('dataset'):
-            raise PlotDataError(f"{plot_config.get('plot_type')} needs run_dir or dataset")
+            raise PlotDataError(f"{plot_config.get('plot_type')} needs dataset")
         return _DatasetRunFiles(plot_config['dataset'],
                                 self._required(plot_config, 'material'), layer)
 
@@ -244,16 +201,14 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
         """A per-run table with a ``load_nN`` column and, with ``layer``, only
         the rows of that many layers.
 
-        The frozen ML_taxonomy tables name the load ``load_nN`` and hold one
-        layer; a stored analysis (``contact``, ``stick_slip``) names it
+        A stored analysis (``contact``, ``stick_slip``) names the load
         ``force``, as a summary row does, and holds every layer.
         """
         table = self._table(source, [c for c in required if c != 'load_nN'])
         if 'load_nN' not in table.columns and 'force' in table.columns:
             table = table.assign(load_nN=table['force'])
         source = _as_source(source)
-        name = (f'{source.analysis} over {source.dataset}' if source.analysis is not None
-                else Path(source.file).name)
+        name = f'{source.analysis} over {source.dataset}'
         if 'load_nN' in required and 'load_nN' not in table.columns:
             raise PlotDataError(f"{name}: missing column(s) ['load_nN'] (or 'force')")
         if layer is not None:
@@ -327,22 +282,19 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
     def _generate_sheet_profile(self, plot_config: dict) -> None:
         """Height of the top surface and bottom layer vs distance from the tip axis.
 
-        Reads ``<run_dir>/<layer_dir>/data/load_<L>N.data`` (the loaded state
-        before sliding) and the groups of ``.../lammps/system.in.settings`` --
-        or, given ``dataset`` (+ ``material``, ``layer``) instead of
-        ``run_dir``, the same files as the store holds them. For
-        each layer only its upper sublayer is profiled (types whose far-field
-        median z is within ``sublayer_dz`` of the highest), relative to that
-        sublayer's far-field median.
+        Reads the stored ``data/load_<L>N.data`` (the loaded state before
+        sliding) and the groups of ``lammps/system.in.settings`` of ``material``
+        at ``layer`` in ``dataset``. For each layer only its upper sublayer is
+        profiled (types whose far-field median z is within ``sublayer_dz`` of the
+        highest), relative to that sublayer's far-field median.
         """
         from .integrity import read_snapshot  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
-        with self._run_files(plot_config, int(plot_config.get('layer') or 2),
-                             plot_config.get('layer_dir', 'L2')) as run:
+        with self._run_files(plot_config, int(plot_config.get('layer') or 2)) as run:
             self._draw_sheet_profile(plot_config, run, read_snapshot)
 
     def _draw_sheet_profile(self, plot_config: dict, run: Any, read_snapshot: Any) -> None:
-        """:meth:`_generate_sheet_profile` over an open :class:`_RunFiles`."""
+        """:meth:`_generate_sheet_profile` over an open :class:`_DatasetRunFiles`."""
         groups = run.groups()
         top = groups.get('layer_2') or groups.get('layer_1', set())
         bottom = groups.get('layer_1', set()) - top
@@ -386,21 +338,18 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
         Rows: side view (x-z; grey tip, blue lower, orange upper layer), top
         view of each layer (wrapped into the box), sheet temperature over the
         slide and, for bilayers, the interlayer gap (upper minus lower layer COM
-        z) on one y scale across loads. Snapshots are
-        ``<run_dir>/L<layer>/data/final_f<F>N_a0.data``; run ids are
-        ``<material>/l<layer>/f<F>/a0``. Drawn in plain matplotlib at its own
-        size and dpi, not the shared figure settings.
-
-        Given ``dataset`` instead of ``run_dir``, the snapshots and groups are
-        the stored ones of ``material`` at ``layer``, failed points included.
+        z) on one y scale across loads. Snapshots and groups are the stored ones
+        of ``material`` at ``layer`` in ``dataset``, failed points included; run
+        ids are ``<material>/l<layer>/f<F>/a0``. Drawn in plain matplotlib at
+        its own size and dpi, not the shared figure settings.
         """
         self._require_all(plot_config, 'material', 'traces_file', 'filename')
         layer = int(plot_config.get('layer') or 2)
-        with self._run_files(plot_config, layer, f"L{layer}") as run:
+        with self._run_files(plot_config, layer) as run:
             self._draw_integrity_panel(plot_config, run, layer)
 
     def _draw_integrity_panel(self, plot_config: dict, run: Any, layer: int) -> None:
-        """:meth:`_generate_integrity_panel` over an open :class:`_RunFiles`."""
+        """:meth:`_generate_integrity_panel` over an open :class:`_DatasetRunFiles`."""
         import matplotlib.pyplot as plt  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
         from .integrity import read_snapshot  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
@@ -414,7 +363,7 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
             st = self._table(plot_config['status_file'], ['run_id', 'force', 'status'])
             st = st[st['run_id'].str.startswith(prefix)]
             status = dict(zip(st['force'].astype(float), st['status']))
-        elif hasattr(run, 'statuses'):     # a dataset: the stored verdicts say which failed
+        else:                              # the stored verdicts say which failed
             status = run.statuses(plot_config.get('title_status') or 'completion')
         ex = self._table(self._required(plot_config, 'traces_file'),
                          ['run_id', 'step', 'temp_sheet_3d'])
