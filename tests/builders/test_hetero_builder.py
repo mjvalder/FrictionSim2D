@@ -440,8 +440,8 @@ def test_hetero_stack_is_periodic_and_complete(tmp_path):
     # Identify (via the stack's own bookkeeping) which stacked layers belong to
     # the reference vs the displaced non-reference material, split the atoms by
     # z accordingly, and check the applied lateral offset actually survives.
-    ref_z = np.mean([l.z for l in stack.layers if l.material_index == stack.reference_index])
-    non_z = np.mean([l.z for l in stack.layers if l.material_index == stack.nonreference_index])
+    ref_z = np.mean([l.z for l in stack.layers if l.material_index == 0])
+    non_z = np.mean([l.z for l in stack.layers if l.material_index == 1])
     # The two materials form two well-separated z-clusters; split the ACTUAL
     # atom z at the midpoint of their range. The material placed at the lower
     # z-shift is the lower atom cluster.

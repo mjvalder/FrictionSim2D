@@ -709,7 +709,6 @@ def build_matched_supercells(
     strain_tol: float = 0.02,
     max_supercell: int = 10,
     area_tol: float = 0.10,
-    max_strain: Optional[float] = None,
 ) -> MatchedStack:
     """Build A's and B's coincidence supercells sharing one in-plane mean cell.
 
@@ -735,10 +734,6 @@ def build_matched_supercells(
             the fail-loud bound on each material's applied mean-cell strain.
         max_supercell: Max supercell repeat along each axis for the match search.
         area_tol: Relative supercell-area agreement tolerance for the search.
-        max_strain: Optional override for the per-material fail-loud strain
-            bound. Defaults to ``strain_tol`` (each material must land within
-            ``strain_tol`` of the shared mean cell). Straining beyond it raises
-            ``ValueError``.
 
     Returns:
         :class:`MatchedStack` with both output supercell paths (ordered A then
@@ -760,8 +755,6 @@ def build_matched_supercells(
     workdir.mkdir(parents=True, exist_ok=True)
     mono_a_path = Path(mono_a_path)
     mono_b_path = Path(mono_b_path)
-
-    strain_bound = strain_tol if max_strain is None else max_strain
 
     # 1. Read each monolayer (metadata-preserving) and its ACTUAL in-plane cell.
     mono = {"a": _read_monolayer(mono_a_path), "b": _read_monolayer(mono_b_path)}
@@ -798,12 +791,12 @@ def build_matched_supercells(
     #    FRAME (rotation-free), and fail loud if either exceeds the bound (no
     #    silent incommensurate fallback).
     strains = {label: _max_strain(mean_co, sc_cell[label]) for label in ("a", "b")}
-    if strains["a"] > strain_bound or strains["b"] > strain_bound:
+    if strains["a"] > strain_tol or strains["b"] > strain_tol:
         raise ValueError(
             f"Cannot build a commensurate heterostructure stack between "
             f"'{mono_a_path.name}' and '{mono_b_path.name}': symmetric mean-cell "
             f"strain exceeds tol -- strain_a={strains['a']:.4%}, "
-            f"strain_b={strains['b']:.4%} > {strain_bound:.4%}."
+            f"strain_b={strains['b']:.4%} > {strain_tol:.4%}."
         )
 
     # 6. Strain BOTH supercells onto the mean cell IN THE CO-ORIENTED FRAME
@@ -1042,28 +1035,17 @@ class HeteroStack:
         ri_offset: The cross-material Registry-Index offset (Å) actually applied
             to the displaced material's layers (one-sided; NOT
             centroid-cancelled). Non-zero for AB / off-registry stackings.
-        reference_index: In-plane anchor material index, left unshifted (always
-            material 0). Both materials are symmetrically strained onto the
-            shared mean cell, so this is the RI anchor, not a strain reference.
-        nonreference_index: Material index carrying ``ri_offset`` (material 1).
         interface_spacing: Cross-material interlayer COM z-gap (Å) found by real
             minimization with the registered potential.
-        stacking: The requested layer ordering ('grouped' or 'alternating').
         total_types: Number of global atom types in the assembled cell
             (== len(pm.types)).
-        material_offsets: Per-material in-plane anchor (Å) applied to all of
-            that material's layers.
     """
     data_path: Path
     settings_path: Path
     layers: List[HeteroStackLayer]
     ri_offset: np.ndarray
-    reference_index: int
-    nonreference_index: int
     interface_spacing: float
-    stacking: str
     total_types: int
-    material_offsets: Dict[int, np.ndarray]
     # D3 twist path only (None otherwise): achieved relative twist (deg) + moiré
     # periodicity (Å), logged into the run manifest by the slide builder.
     twist_angle_achieved: Optional[float] = None
@@ -1497,12 +1479,8 @@ def assemble_hetero_stack(
         settings_path=settings_path,
         layers=layers_spec,
         ri_offset=ri_offset,
-        reference_index=ref_index,
-        nonreference_index=nonref_index,
         interface_spacing=float(interface_spacing) if interface_spacing is not None else 0.0,
-        stacking=stacking,
         total_types=total_types,
-        material_offsets={m: material_anchor[m] for m in range(n_mats)},
     )
 
 
