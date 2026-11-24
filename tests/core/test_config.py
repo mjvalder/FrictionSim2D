@@ -973,6 +973,26 @@ def test_dispersion_requires_an_mlip_pot_type(sheet_kwargs, tmp_path):
                        'dispersion': 'd3'})
 
 
+def test_precision_defaults_to_float64_and_is_validated(sheet_kwargs, tmp_path):
+    mace = {**sheet_kwargs, 'pot_type': 'mace', 'lat_c': 6.15,
+            'pot_path': _model(tmp_path, 'm.json')}
+    assert SheetConfig(**mace).precision == 'float64'
+    assert SheetConfig(**mace, precision='float32').precision == 'float32'
+    with pytest.raises(ValidationError):
+        SheetConfig(**mace, precision='float16')
+
+
+def test_float32_needs_a_framework_with_a_float32_style(sheet_kwargs, tmp_path):
+    with pytest.raises(ValidationError, match="float32"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd', 'lat_c': 6.15,
+                       'pot_path': _model(tmp_path, 'm.pth'), 'precision': 'float32'})
+    pot = tmp_path / "MoS2.sw"
+    pot.write_text("# sw\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match="precision"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'sw', 'pot_path': str(pot),
+                       'precision': 'float32'})
+
+
 def test_mlip_requires_lat_c(sheet_kwargs, tmp_path):
     with pytest.raises(ValidationError, match="lat_c"):
         SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd',
@@ -1276,6 +1296,15 @@ class TestSheetSectionsAgreeOnDispersion:
             self._config(tmp_path, {
                 '2D-1': self._sheet(tmp_path, dispersion='d3'),
                 '2D-2': self._sheet(tmp_path, dispersion='none')})
+
+    def test_hetero_sections_disagreeing_on_precision(self, tmp_path):
+        model = tmp_path / 'm.json'
+        model.write_text('{}', encoding='utf-8')
+        mace = dict(pot_type='mace', pot_path=str(model))
+        with pytest.raises(ValidationError, match=r'\[2D-1\] precision = float32.*\[2D-2\] precision = float64'):
+            self._config(tmp_path, {
+                '2D-1': self._sheet(tmp_path, precision='float32', **mace),
+                '2D-2': self._sheet(tmp_path, precision='float64', **mace)})
 
     def test_hetero_sections_disagreeing_on_allow_unbound(self, tmp_path):
         with pytest.raises(ValidationError, match=r'allow_unbound.*\[2D-2\] allow_unbound = True'):

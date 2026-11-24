@@ -273,7 +273,7 @@ hpc:
   env_lines: []          # extra shell lines, rendered after the environment setup
   lmp_binary: null       # LAMMPS binary (null: `lmp` on PATH)
   gpu: null              # e.g. {ngpus: 1, gpu_type: L40S} -- requested by MLIP job groups
-  frameworks: {}         # per-MLIP overlay: {mace: {binary, modules, env_lines, conda_env}, deepmd: {...}}
+  frameworks: {}         # per-MLIP overlay: {mace: {binary, backend, modules, env_lines, conda_env}, deepmd: {...}}
 ```
 
 Job-script generation needs `modules`, `conda_env`, `env_lines`, or a
@@ -285,6 +285,16 @@ layered over the base block: `binary` replaces `lmp_binary`, `conda_env`
 replaces `conda_env`, `modules` and `env_lines` are appended. There are no named
 profiles; keep one settings file per cluster and pass it with
 `--settings-file`. Details in [mlip.md](mlip.md) §8.
+
+`hpc.frameworks.mace.backend` is `device` (the default: Kokkos GPU, launch flags
+`-k on g 1 ... -sf kk`) or `host` (CPU, `-sf kk/host`, `hpc.gpu` dropped for that
+group). A device-backend MACE group with `hpc.gpu` unset is an error at script
+generation, not a silent CPU job. The backend does not change physics, so it is
+not part of the run directory name. How a job fits a cluster (cores, GPUs,
+threads) is yours to set in `hpc.num_cpus`, `hpc.gpu` and the overlay's
+`env_lines`; nothing is cluster-specific in code. MACE's float32 style is not an
+HPC setting: it changes results, so it is the sheet key `precision = float32`
+(see [mlip.md](mlip.md)).
 
 Job scripts -- PBS and SLURM alike -- load the environment, copy the simulation
 to `scratch_dir` when `use_tmpdir` is on, run LAMMPS with

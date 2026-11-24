@@ -44,6 +44,7 @@ REFUSED_SETTINGS = frozenset({
     ('hpc', 'preflight'), ('hpc', 'lammps_scripts'),
     # MLIP job settings: shell lines, a binary path and GPU requests all reach the job script.
     ('hpc', 'env_lines'), ('hpc', 'lmp_binary'), ('hpc', 'gpu'), ('hpc', 'frameworks'),
+    ('hpc', 'mlip_backend'),
 })
 
 

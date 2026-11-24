@@ -358,21 +358,29 @@ def resolve_pot_type(entry: Union[str, dict]) -> ResolvedPotential:
 
 #: Slug suffix marking an MLIP run with the D3 dispersion overlay.
 MLIP_D3_SLUG_SUFFIX = '-d3'
+#: Slug suffix marking an MLIP run in float32 (always after any ``-d3``).
+#: float64, the default, carries no suffix, so existing directory names stay.
+MLIP_F32_SLUG_SUFFIX = '-f32'
 
 
 def pot_dir_token(pot_type: str, path: Union[str, Path],
-                  dispersion: Optional[str] = None) -> str:
+                  dispersion: Optional[str] = None,
+                  precision: Optional[str] = None) -> str:
     """Output-directory segment: pot_<type-slug>_<stem>.
 
     '/' becomes '-' (sw/mod -> sw-mod); the stem is sanitised so the token
     is always a single path segment. For an MLIP ``pot_type`` the slug also
     carries the dispersion choice -- ``mace`` (bare model) or ``mace-d3``
     (``dispersion = d3``) -- so two runs of one model with and without D3
-    never share a directory. ``dispersion`` is ignored for classical types.
+    never share a directory. A float32 run adds ``-f32`` after that
+    (``mace-d3-f32``), since float32 shifts energies. ``dispersion`` and
+    ``precision`` are ignored for classical types.
     """
     slug = normalize_potential_type(pot_type).replace('/', '-')
     if slug in MLIP_TYPES and normalize_potential_type(dispersion or '') == 'd3':
         slug += MLIP_D3_SLUG_SUFFIX
+    if slug.split('-', 1)[0] in MLIP_TYPES and (precision or 'float64') == 'float32':
+        slug += MLIP_F32_SLUG_SUFFIX
     stem = Path(path).name
     for ext in sorted({*EXTENSION_MAP, *MLIP_MODEL_EXTENSIONS}, key=len, reverse=True):
         if stem.lower().endswith(ext):

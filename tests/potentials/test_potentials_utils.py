@@ -293,3 +293,11 @@ def test_pot_dir_token_d3_slug_only_for_mlips():
 def test_lj_params_reports_the_missing_element():
     with pytest.raises(KeyError, match="'Xx' not found"):
         lj_params('Mo', 'Xx')
+
+
+def test_pot_dir_token_float32_slug_only_for_mlips():
+    assert pot_dir_token('mace', 'm.json', precision='float32') == 'pot_mace-f32_m'
+    assert pot_dir_token('mace', 'm.json', dispersion='d3', precision='float32') == 'pot_mace-d3-f32_m'
+    assert pot_dir_token('mace', 'm.json', precision='float64') == 'pot_mace_m'
+    assert pot_dir_token('sw', 'MoS2.sw', precision='float32') == 'pot_sw_MoS2'
+    assert pot_dir_token('sw/mod', 'MoS2.sw', precision='float32') == 'pot_sw-mod_MoS2'

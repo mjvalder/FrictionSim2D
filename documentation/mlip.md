@@ -422,19 +422,31 @@ symmetrix_extract_mace -m mace-mpa-0-medium.model --chemical-symbols Mo S
 - `pair_coeff` carries the model path for MACE (`pair_coeff * * <file> Mo S`),
   unlike DeePMD, which carries it in `pair_style`. The registry handles this —
   see `MLIPSpec.model_in_style_line`.
-- Keep **float64**; float32 shifts energies at the meV level.
+- **float64** is the default. `precision = float32` (a sheet key, like
+  `dispersion`) selects symmetrix's `symmetrix/mace/float32` style: on an L40S
+  (fp64 about 1/64 of fp32) it is likely much faster, but energies shift at the
+  meV level. It therefore adds `-f32` to the run directory (`pot_mace-f32_<stem>`,
+  `pot_mace-d3-f32_<stem>`), so float32 and float64 results never mix. float32
+  exists only as a Kokkos style (`-sf kk` or `-sf kk/host`), which the launcher
+  always passes; every sheet section of a cell must agree. Measure before using
+  it: see the float32 comparison in the spec's verification protocol
+  (`docs/superpowers/specs/TO-DO/2026-11-24-mace-gpu-design.md`, V2/V6).
 
 #### Traps that decide whether your MACE numbers are real
 
-**1. The CUDA backend is silently wrong on a stock checkout.** symmetrix
+**1. The CUDA backend is silently wrong on an unpatched symmetrix.** symmetrix
 allocates `mace_types` with one slot per *model element* but fills one per
 *LAMMPS atom type*; they agree only when `ntypes == n_elements`, which is false
 for any multi-layer cell. Unpatched CUDA returns **-126.5489 eV** where the
 correct answer is **-173.40779 eV** (24-atom h-MoS2 bilayer) - a 27 % error with
 no diagnostic. `scripts/hpc/symmetrix-mace_types-overflow.patch` fixes it and
-`build_lammps_mace.sh` refuses to build without it. The fix is **not upstream**.
-The host (OpenMP) backend the registry defaults to is correct either way, which
-is exactly why it is the default.
+`build_lammps_mace.sh` refuses to build without it; patched CUDA matches CPU and
+host to every printed digit and is ~2.3x faster than host. The fix is **not
+upstream**, so a fresh clone built outside the script is still unsafe. The
+**device** backend (`-k on g 1 ... -sf kk`) is therefore the default;
+`hpc.frameworks.mace.backend: host` opts into the OpenMP backend
+(`-sf kk/host`, which stays on the host even on a CUDA binary). A device job
+needs `hpc.gpu`; generation fails without it rather than writing a CPU job.
 
 **2. Runs exit non-zero after succeeding.** A teardown heap abort (`rc=134`)
 fires *after* the output is written, even on a bare `lmp -h`. Harmless to the
@@ -834,8 +846,9 @@ For an MLIP job group (`frictionsim2d/hpc/scripts.py::HPCConfig`):
   `CONDA_PREFIX` is exported too (deepmd-kit's plugin lookup keys off it).
 - **Launch line.** `{{ launch_command }} -in <deck> -log <log>`, where
   `launch_command` is `<mpi_command> <binary> <launcher flags>` — for MACE
-  `-k on t ${OMP_NUM_THREADS:-8} -sf kk -pk kokkos neigh half` (Kokkos host
-  backend; see §10 for why not CUDA by default). Preflight scripts use the same
+  `-k on g 1 t ${OMP_NUM_THREADS:-1} -sf kk -pk kokkos newton on neigh half`
+  (Kokkos device backend; `hpc.frameworks.mace.backend: host` gives
+  `-k on t ${OMP_NUM_THREADS:-8} -sf kk/host ...` and drops `ngpus`). Preflight scripts use the same
   per-group binary and env lines.
 - **Grouping.** Jobs are grouped by `(needs_gpu, framework)`, one script per
   group for array, combined *and* two-phase submission: e.g. `run_cpu.pbs`,

@@ -1173,6 +1173,31 @@ class TestMLIPEmission:
             for t in range(1, 8):
                 assert f"neigh_modify exclude type {v} {t}" in text
 
+    def test_mace_float32_deck_uses_the_float32_style(self, mock_settings, tmp_path):
+        """precision = float32 renames the style in pair_style and pair_coeff."""
+        model = _fake_model(tmp_path, "m.json")
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        cfg = make_component_config(tmp_path, pot_type="mace", pot_path=model)
+        cfg.precision = 'float32'
+        pm.register_component("sheet", cfg, n_layers=3)
+        pm.add_self_interaction("sheet")
+        pm.enable_d3()
+        lines = write_and_read(pm, tmp_path).splitlines()
+        assert ("pair_style hybrid/overlay symmetrix/mace/float32 "
+                "dispersion/d3 bj pbe 16.0 8.0") in lines
+        assert any(l.startswith(f"pair_coeff * * symmetrix/mace/float32 {model} ")
+                   for l in lines)
+
+    def test_mace_float64_deck_is_unchanged(self, mock_settings, tmp_path):
+        model = _fake_model(tmp_path, "m.json")
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            "sheet", make_component_config(tmp_path, "mace", model), n_layers=3)
+        pm.add_self_interaction("sheet")
+        text = write_and_read(pm, tmp_path)
+        assert "float32" not in text
+        assert "pair_style symmetrix/mace" in text.splitlines()
+
     def test_mace_fullcell_with_d3_and_virtual(self, mock_settings, tmp_path):
         """Full-cell + D3 mechanism incl. virtual-atom placeholder + exclusion."""
         model = _fake_model(tmp_path, "m.json")

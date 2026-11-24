@@ -53,6 +53,7 @@
     "interlayer_g": null,
     "materials_list": null,
     "dispersion": "none",
+    "precision": "float64",
     "allow_unbound": false
   },
   "sheets": [
@@ -71,6 +72,7 @@
       "interlayer_g": null,
       "materials_list": null,
       "dispersion": "none",
+      "precision": "float64",
       "allow_unbound": false
     }
   ],
@@ -196,6 +198,7 @@
       "env_lines": [],
       "gpu": null,
       "frameworks": {},
+      "mlip_backend": "device",
       "lmp_binary": null
     },
     "aiida": {

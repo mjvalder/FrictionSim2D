@@ -699,10 +699,12 @@ def run_lammps(
     return log, peak
 
 
-def resolve_launcher(framework: str) -> Tuple[List[str], List[str]]:
+def resolve_launcher(framework: str,
+                     backend: str = "device") -> Tuple[List[str], List[str]]:
     """Return ``(lmp_flags, env_warnings)`` from the registry's LauncherSpec.
 
-    The flags (MACE's ``-k on g 1 -sf kk``) and the DeePMD
+    The flags (MACE's device ``-k on g 1 ... -sf kk``, or the host
+    ``-sf kk/host`` for ``backend="host"``) and the DeePMD
     ``LAMMPS_PLUGIN_PATH`` export live in ``frictionsim2d/core/mlip.py``; this script
     never re-derives them. Env lines are *shell* lines, so they are reported
     rather than executed — export them in the calling shell (see
@@ -711,7 +713,7 @@ def resolve_launcher(framework: str) -> Tuple[List[str], List[str]]:
     if not is_mlip(framework):
         return [], []
     spec = get_mlip(framework)
-    flags = spec.launcher.lmp_flags.split()
+    flags = spec.launcher.flags_for(backend).split()
     warnings: List[str] = []
     if framework == "deepmd" and not os.environ.get("LAMMPS_PLUGIN_PATH"):
         warnings.append(
@@ -766,11 +768,15 @@ def build_parser() -> argparse.ArgumentParser:
                             for name, spec in sorted(MLIP_REGISTRY.items())))
     p.add_argument("--pot", help="SW potential file (--framework sw)")
     p.add_argument("--lmp", default="lmp", help="LAMMPS binary to invoke")
+    p.add_argument("--backend", choices=("device", "host"), default="device",
+                   help="Kokkos backend of the registry launcher flags (MACE: "
+                        "device = GPU, host = `-sf kk/host`)")
     p.add_argument("--lmp-flags",
                    help="override the registry LauncherSpec flags (pass '' for "
-                        "none). Needed to force symmetrix/MACE onto its CPU "
-                        "path: the Kokkos/CUDA build returns wrong energies "
-                        "(-5.20 vs -7.14 eV/atom) and aborts ~80%% of runs.")
+                        "none, e.g. a plain-CPU run). The CUDA wrong-energy bug "
+                        "of an unpatched symmetrix is fixed by "
+                        "scripts/hpc/symmetrix-mace_types-overflow.patch; use "
+                        "this only to cross-check a build.")
     p.add_argument("--d3", action="store_true",
                    help="overlay dispersion/d3 (full-cell MLIP only)")
     p.add_argument("--out", help="output JSON (default: "
@@ -814,7 +820,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         d3_cutoff=args.d3_cutoff, d3_cn_cutoff=args.d3_cn_cutoff,
     ) if args.d3 else None
 
-    flags, warnings = resolve_launcher(args.framework)
+    flags, warnings = resolve_launcher(args.framework, args.backend)
     if args.lmp_flags is not None:
         flags = args.lmp_flags.split()
     for warning in warnings:

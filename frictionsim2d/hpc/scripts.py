@@ -322,9 +322,15 @@ class HPCConfig:
         """
         launcher = self.launcher
         command = f"{self.mpi_command} {self.lmp_binary}"
-        if launcher is not None and launcher.lmp_flags:
-            command += f" {launcher.lmp_flags}"
+        flags = launcher.flags_for(self.backend) if launcher is not None else ''
+        if flags:
+            command += f" {flags}"
         return command
+
+    @property
+    def backend(self) -> str:
+        """Kokkos backend of this group's MLIP launcher: ``device`` or ``host``."""
+        return self.hpc_settings.mlip_backend
 
     @property
     def gres(self) -> Optional[str]:
@@ -457,6 +463,10 @@ class HPCScriptGenerator:
         * An MLIP group gets ``hpc.frameworks[<framework>]`` merged in through
           :func:`~frictionsim2d.core.config.apply_framework_overlay` -- its own ``lmp``
           binary, modules, conda prefix and env lines -- and its LauncherSpec.
+        * A MACE group's Kokkos backend (``hpc.frameworks.mace.backend``) decides
+          its GPU: the default ``device`` backend needs ``hpc.gpu`` and raises
+          without it (never a silent CPU job); ``host`` drops ``hpc.gpu`` so no
+          accelerator sits idle.
         * When the campaign is actually split (more than one group), a group
           that needs no GPU drops ``hpc.gpu`` so the CPU half of a mixed
           campaign does not idle an accelerator. A single-group campaign
@@ -464,6 +474,11 @@ class HPCScriptGenerator:
 
         Returns the generator's own config, untouched, for a classical group
         that needs no change -- which keeps CPU output byte-identical.
+
+        Raises:
+            ValueError: A device-backend group with a host/device choice has
+                no ``hpc.gpu``, or ``backend: host`` names a framework without
+                a host backend.
         """
         needs_gpu, framework = key
         settings = self.config.hpc_settings
@@ -476,7 +491,27 @@ class HPCScriptGenerator:
             settings = copy.deepcopy(settings)
         if strip_gpu:
             settings.gpu = None
+        if framework:
+            self._apply_backend(settings, framework)
         return replace(self.config, hpc_settings=settings, framework=framework)
+
+    @staticmethod
+    def _apply_backend(settings, framework: str) -> None:
+        """Reconcile ``settings.gpu`` with the framework's Kokkos backend (in place)."""
+        launcher = get_mlip(framework).launcher
+        backend = settings.mlip_backend
+        if backend == 'host':
+            if not launcher.has_host_backend:
+                raise ValueError(
+                    f"hpc.frameworks.{framework}.backend: host is not available; "
+                    f"{framework} has no host backend.")
+            settings.gpu = None
+        elif launcher.has_host_backend and settings.gpu is None:
+            raise ValueError(
+                f"{framework} runs on the GPU (Kokkos device backend) but hpc.gpu is "
+                f"not set. Set hpc.gpu (e.g. {{ngpus: 1, gpu_type: ...}}) for your "
+                f"cluster, or opt into the CPU backend with "
+                f"hpc.frameworks.{framework}.backend: host.")
 
     def _resolve_log_dir(self, base_dir: str) -> str:
         """Resolve log directory for job scripts.

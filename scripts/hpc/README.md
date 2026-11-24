@@ -179,24 +179,30 @@ needs neither `mace-torch` nor Python; ship it the `.json`.
 
 ### Runtime flags
 
-The registry (`frictionsim2d/core/mlip.py`, MACE `LauncherSpec.lmp_flags`) emits the
-**Kokkos host (OpenMP)** backend, not CUDA:
+The registry (`frictionsim2d/core/mlip.py`, MACE `LauncherSpec`) emits the
+**Kokkos device (CUDA)** backend by default, and the host backend on request
+(`hpc.frameworks.mace.backend: host`):
 
 ```bash
-"$PREFIX/lammps-mace/build-gpu/lmp" -k on t ${OMP_NUM_THREADS:-8} -sf kk -pk kokkos neigh half -in deck.in
+# device (default)
+"$PREFIX/lammps-mace/build-gpu/lmp" -k on g 1 t ${OMP_NUM_THREADS:-1} -sf kk -pk kokkos newton on neigh half -in deck.in
+# host (opt-in): -sf kk/host stays on the host even on this CUDA binary
+"$PREFIX/lammps-mace/build-gpu/lmp" -k on t ${OMP_NUM_THREADS:-8} -sf kk/host -pk kokkos newton on neigh half -in deck.in
 ```
 
-This default is chosen for **safety, not speed**: the host backend is correct
-whether or not symmetrix is patched, and is still ~4× faster than the plain CPU
-pair style (0.64 vs 2.58 s/step at 810 atoms). CUDA is a further ~2.3× (0.108 vs
-0.251 s/step) but is silently wrong on a stock checkout — opt in only after
-applying the patch **and** verifying the reference energy.
+Device is safe because `build_lammps_mace.sh` refuses to build without the
+`mace_types` patch (patched CUDA matches CPU and host to every printed digit,
+~2.3x faster than host: 0.108 vs 0.251 s/step at 810 atoms). A device job
+requests a GPU from `hpc.gpu` and generation fails without it. `precision:
+float32` on a sheet selects `symmetrix/mace/float32/kk`; see the spec's
+verification protocol for the float32 comparison.
 
 `neigh half` is **mandatory and paired with the flags above**:
 `symmetrix/mace/kk` requires `newton pair on`, while KOKKOS defaults to
 `neigh full`, which demands newton off (`kokkos.cpp:713`). Change the two
 together or runs abort. symmetrix is OpenMP-threaded rather than rank-parallel,
-so give it the whole node and one MPI rank.
+so use one MPI rank; on the device backend the threads only do host-side
+work, so size `hpc.num_cpus` for that, not for the node.
 
 ### Known non-fatal teardown abort
 

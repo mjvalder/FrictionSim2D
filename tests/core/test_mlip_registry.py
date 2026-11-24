@@ -82,19 +82,25 @@ def test_registry_capability_flags():
     assert any("LAMMPS_PLUGIN_PATH" in line for line in deepmd.launcher.env_lines)
 
     assert mace.launcher.mpi_ranks == 1
-    assert mace.launcher.lmp_flags == "-k on t ${OMP_NUM_THREADS:-8} -sf kk -pk kokkos neigh half"
-    # REGRESSION GUARD -- the PACKAGE default must stay on the Kokkos host
-    # backend. `-k on g 1` on a stock symmetrix returns -126.5489 eV where
-    # every correct path returns -173.40779 eV (24-atom h-MoS2 bilayer,
-    # measured 2026-08-31), with NO error raised: its `mace_types` view is
-    # sized by model-element count but filled per atom type, so on CUDA only
-    # 2 of 7 entries reach the device. That is fixed by
-    # campaign_mace/symmetrix-mace_types-overflow.patch, but the fix is NOT
-    # upstream, so we cannot assume it here. CUDA is a per-campaign opt-in
-    # gated on the patch plus a reference-energy check; the host backend is
-    # correct either way (documentation/mlip.md).
-    assert " g " not in mace.launcher.lmp_flags
-    assert "-k on t " in mace.launcher.lmp_flags
+    # Device (Kokkos CUDA) is the explicit default; the host backend is opt-in.
+    # The CUDA wrong-energy bug (`mace_types` overflow) is fixed by
+    # scripts/hpc/symmetrix-mace_types-overflow.patch, which the build script
+    # insists on (documentation/mlip.md).
+    assert mace.launcher.lmp_flags == (
+        "-k on g 1 t ${OMP_NUM_THREADS:-1} -sf kk -pk kokkos newton on neigh half")
+    assert " g 1 " in mace.launcher.lmp_flags
+    assert "-sf kk " in mace.launcher.lmp_flags
+    assert "newton on neigh half" in mace.launcher.lmp_flags
+    host = mace.launcher.host_lmp_flags
+    assert host == "-k on t ${OMP_NUM_THREADS:-8} -sf kk/host -pk kokkos newton on neigh half"
+    assert " g " not in host and "-sf kk/host" in host
+    assert mace.launcher.flags_for("device") == mace.launcher.lmp_flags
+    assert mace.launcher.flags_for("host") == host
+    assert not deepmd.launcher.has_host_backend
+    with pytest.raises(ValueError, match="no host backend"):
+        deepmd.launcher.flags_for("host")
+    with pytest.raises(ValueError, match="unknown backend"):
+        mace.launcher.flags_for("cpu")
     assert any("OMP_NUM_THREADS" in line for line in mace.launcher.env_lines)
 
 
@@ -473,3 +479,18 @@ def test_coeff_line_non_hybrid_drops_the_style_token():
         "pair_coeff * * m.json Mo S"
     assert get_mlip("deepmd").coeff_line(" 2", "m.pth", ["Mo", "S"], hybrid=False) == \
         "pair_coeff * * Mo S"
+
+
+def test_float32_styles():
+    mace, deepmd = get_mlip("mace"), get_mlip("deepmd")
+    assert mace.style_for() == "symmetrix/mace"
+    assert mace.style_for("float32") == "symmetrix/mace/float32"
+    assert mace.style_token("m.json", "float32") == "symmetrix/mace/float32"
+    assert mace.coeff_line("", "m.json", ["Mo", "S"], hybrid=False,
+                           precision="float32") == "pair_coeff * * m.json Mo S"
+    assert mace.coeff_line("", "m.json", ["Mo", "S"], precision="float32") == \
+        "pair_coeff * * symmetrix/mace/float32 m.json Mo S"
+    # float64 stays byte-identical
+    assert mace.coeff_line("", "m.json", ["Mo", "S"]) == "pair_coeff * * symmetrix/mace m.json Mo S"
+    with pytest.raises(ValueError, match="no float32 style"):
+        deepmd.style_for("float32")

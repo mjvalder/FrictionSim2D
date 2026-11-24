@@ -206,7 +206,8 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
         # An MLIP sheet's D3 choice rides in the slug (pot_mace-d3_<stem>), so
         # with/without-D3 runs of one model never share a directory.
         pot_segment = pot_dir_token(sheet.get('pot_type', 'sw'), pot_path,
-                                    dispersion=sheet.get('dispersion'))
+                                    dispersion=sheet.get('dispersion'),
+                                    precision=sheet.get('precision'))
 
     general = run_dict['general']
     il_segment = interlayer_dir_token(
@@ -293,6 +294,8 @@ def mlip_flavor_from_pot_token(pot_token: Optional[str]) -> Optional[Tuple[str, 
     slug = pot_token[len('pot_'):].split('_', 1)[0]
     from ..core.mlip import MLIP_REGISTRY  # pylint: disable=import-outside-toplevel
     dispersion = 'none'
+    if slug.endswith('-f32'):
+        slug = slug[:-len('-f32')]
     if slug.endswith('-d3'):
         slug, dispersion = slug[:-len('-d3')], 'd3'
     if slug not in MLIP_REGISTRY:

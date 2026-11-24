@@ -17,7 +17,8 @@
 #              falling back to $LMP_<FRAMEWORK>, then hpc.lmp_binary, then `lmp`
 #              on PATH (which is all the classical `sw` path ever needs).
 #   flags/env  frictionsim2d/core/mlip.py -> get_mlip(framework).launcher  (MACE's
-#              `-k on g 1 -sf kk`, DeePMD's LAMMPS_PLUGIN_PATH export). Never
+#              device backend `-k on g 1 ... -sf kk`; `hpc.frameworks.mace.backend: host`
+#              picks `-sf kk/host`; DeePMD's LAMMPS_PLUGIN_PATH export). Never
 #              re-spelled here: the registry is the single source of truth.
 #              See scripts/hpc/README.md and documentation/milestone0.md.
 #   workdir    the simulation root the HPC job scripts cd into
@@ -128,7 +129,7 @@ def note(msg):
 
 
 # --- launcher flags / env exports come from the MLIP registry ---------------
-flags, env_lines = "", []
+flags, env_lines, launcher = "", [], None
 try:
     from frictionsim2d.core.mlip import get_mlip, is_mlip
 except Exception as exc:                      # pragma: no cover - defensive
@@ -169,6 +170,12 @@ else:
     # binary replaces hpc.lmp_binary; modules and env_lines are additive.
     # Switch clusters by pointing FRICTIONSIM_SETTINGS at another file.
     overlay = (hpc.get("frameworks") or {}).get(framework) or {}
+    if launcher is not None and overlay.get("backend"):
+        try:
+            flags = launcher.flags_for(overlay["backend"])
+            note("backend %s from %s" % (overlay["backend"], settings_path))
+        except ValueError as exc:
+            note("ignoring hpc.frameworks.%s.backend: %s" % (framework, exc))
     binary = overlay.get("binary") or hpc.get("lmp_binary")
     if binary:
         note("binary from %s" % settings_path)
@@ -228,7 +235,7 @@ if ! command -v "$LMP_BINARY" >/dev/null 2>&1 && [ ! -x "$LMP_BINARY" ]; then
 fi
 
 run_deck() {
-    # shellcheck disable=SC2086  # $LMP_FLAGS must word-split (-k on g 1 -sf kk)
+    # shellcheck disable=SC2086  # $LMP_FLAGS must word-split (-k on g 1 ... -sf kk)
     local deck="$1"
     echo "==> $LMP_BINARY $LMP_FLAGS -in $deck"
     if [ "${RUN_LOCAL_DRY_RUN:-0}" = "1" ]; then

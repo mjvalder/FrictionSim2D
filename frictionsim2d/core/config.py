@@ -392,6 +392,16 @@ class FrameworkOverlay(BaseModel):
     exports — per framework. Keyed by framework name (``hpc.frameworks``).
     """
     binary: Optional[str] = None
+    backend: Optional[Literal['device', 'host']] = Field(
+        default=None,
+        description=(
+            "Kokkos backend of this framework's job group: 'device' (GPU, the "
+            "default when unset) or 'host' (CPU/OpenMP, `-sf kk/host`). A "
+            "launch-time choice that does not change physics, so it stays out "
+            "of the run directory name. Only frameworks with a host backend "
+            "(mace) accept 'host'."
+        ),
+    )
     modules: List[str] = Field(default_factory=list)
     env_lines: List[str] = Field(default_factory=list)
     conda_env: Optional[str] = Field(
@@ -441,6 +451,13 @@ class HPCSettings(BaseModel):
             "Applied per job group by apply_framework_overlay()."
         ),
     )
+    mlip_backend: Literal['device', 'host'] = Field(
+        default='device',
+        description=(
+            "Kokkos backend of this job group's MLIP launcher; populated by "
+            "apply_framework_overlay() from a FrameworkOverlay's backend."
+        ),
+    )
     lmp_binary: Optional[str] = Field(
         default=None,
         description=(
@@ -459,7 +476,8 @@ def apply_framework_overlay(hpc: HPCSettings,
     need a different binary, modules and environment per framework. Merge
     rules: the overlay's ``modules`` and ``env_lines`` are appended to the
     base ones (a framework needs the cluster's modules too); a set ``binary``
-    replaces ``lmp_binary``; a set ``conda_env`` replaces ``conda_env``.
+    replaces ``lmp_binary``; a set ``conda_env`` replaces ``conda_env``; a set
+    ``backend`` becomes ``mlip_backend``.
 
     Args:
         hpc: base settings, never mutated.
@@ -475,6 +493,8 @@ def apply_framework_overlay(hpc: HPCSettings,
         return merged
     if overlay.binary:
         merged.lmp_binary = overlay.binary
+    if overlay.backend:
+        merged.mlip_backend = overlay.backend
     if overlay.conda_env:
         merged.conda_env = overlay.conda_env
     if overlay.modules:
@@ -763,6 +783,16 @@ class SheetConfig(ComponentConfig):
             "dispersion over the SW/LJ pairs."
         ),
     )
+    precision: Literal['float64', 'float32'] = Field(
+        default='float64',
+        description=(
+            "Arithmetic of the MLIP evaluation. 'float32' selects symmetrix's "
+            "float32 style (symmetrix/mace/float32): much faster on GPUs with "
+            "weak fp64 (L40S), but energies shift at the meV level. It changes "
+            "results, so it adds '-f32' to the pot_ directory token and never "
+            "shares a directory with float64. MACE only."
+        ),
+    )
     allow_unbound: bool = Field(
         default=False,
         description=(
@@ -810,7 +840,16 @@ class SheetConfig(ComponentConfig):
                     f"(mace or deepmd); got '{self.pot_type}'. The dispersion/d3 "
                     f"overlay is only defined for full-cell MLIP coverage."
                 )
+            if self.precision != 'float64':
+                raise ValueError(
+                    f"precision = '{self.precision}' requires an MLIP pot_type "
+                    f"(mace); got '{self.pot_type}'.")
             return self
+
+        if self.precision == 'float32' and not get_mlip(self.pot_type).float32_style_name:
+            raise ValueError(
+                f"precision = 'float32' is not available for pot_type "
+                f"'{self.pot_type}' (no float32 style); only mace has one.")
 
         if self.lat_c is None:
             raise ValueError(
@@ -1214,7 +1253,7 @@ def _check_mlip_interlayer_choice(config: Any) -> None:
 def _check_sheet_sections_agree(config: Any, include_flake_sheets: bool) -> None:
     """Require the sheet sections of an MLIP hetero or flake cell to agree on D3.
 
-    ``dispersion`` and ``allow_unbound`` are properties of the whole cell, but the
+    ``dispersion``, ``allow_unbound`` and ``precision`` are properties of the whole cell, but the
     builders read them from the first sheet only, so a disagreeing section would
     be silently ignored (or wrongly refused). Only MLIP cells are checked, since
     both settings are inert for classical potentials, and only the sheet lists
@@ -1235,7 +1274,7 @@ def _check_sheet_sections_agree(config: Any, include_flake_sheets: bool) -> None
     labelled += [(f"[Flake-{i}]", sh) for i, sh in enumerate(flake_sheets, 1)]
     if not any(sh.pot_type and is_mlip(sh.pot_type) for _, sh in labelled):
         return
-    for field in ('dispersion', 'allow_unbound'):
+    for field in ('dispersion', 'allow_unbound', 'precision'):
         values = {label: getattr(sh, field) for label, sh in labelled}
         if len(set(values.values())) > 1:
             listed = ', '.join(f"{label} {field} = {value}" for label, value in values.items())

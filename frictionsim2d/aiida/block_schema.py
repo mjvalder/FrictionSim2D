@@ -97,6 +97,9 @@ _SHEET = {
     'interlayer_g': _INTERACTION,
     # MLIP sheets: dispersion = d3 overlays a D3 term on the model.
     'dispersion': _INTERACTION,
+    # MLIP sheets: float32 evaluation shifts energies, so it is identity (an interaction-block field, like dispersion). The
+    # float64 default is elided, so every stored block keeps its hash.
+    'precision': _INTERACTION,
 }
 
 _TIP = {
@@ -243,7 +246,7 @@ _HPC = ('scheduler_type', 'queue', 'partition', 'account', 'hpc_host', 'hpc_home
         'log_dir', 'scratch_dir', 'num_nodes', 'num_cpus', 'memory_gb',
         'walltime_hours', 'max_array_size', 'modules', 'conda_env', 'mpi_command',
         'use_tmpdir', 'preflight', 'lammps_scripts', 'env_lines', 'frameworks',
-        'gpu.ngpus', 'gpu.gpu_type', 'lmp_binary')
+        'gpu.ngpus', 'gpu.gpu_type', 'lmp_binary', 'mlip_backend')
 _AIIDA = ('profile', 'computer_label', 'max_stored_file_mb', 'skip_fraction',
           'machine')
 # Analysis thresholds of the post-run integrity check, not simulation physics:

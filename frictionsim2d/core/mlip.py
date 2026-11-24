@@ -45,8 +45,32 @@ class LauncherSpec:
     """
 
     mpi_ranks: int = 1
+    #: Flags of the default (device) backend.
     lmp_flags: str = ''
+    #: Flags of the opt-in host (CPU) backend; ``''`` means the framework has
+    #: no backend choice (DeePMD), so asking for ``host`` is an error.
+    host_lmp_flags: str = ''
     env_lines: tuple = ()
+
+    @property
+    def has_host_backend(self) -> bool:
+        """Whether this framework offers a host (CPU) backend besides the device one."""
+        return bool(self.host_lmp_flags)
+
+    def flags_for(self, backend: str) -> str:
+        """The ``lmp`` flags of ``backend`` (``'device'`` | ``'host'``).
+
+        Raises:
+            ValueError: ``host`` for a framework without a host backend, or an
+                unknown backend name.
+        """
+        if backend == 'device':
+            return self.lmp_flags
+        if backend == 'host':
+            if not self.has_host_backend:
+                raise ValueError("this framework has no host backend; use backend: device")
+            return self.host_lmp_flags
+        raise ValueError(f"unknown backend {backend!r}; expected 'device' or 'host'")
 
 
 @dataclass(frozen=True)
@@ -61,6 +85,11 @@ class MLIPSpec:
     # LAMMPS pair_style token, when it differs from the user-facing pot_type:
     # MACE is driven through wcwitt/symmetrix, whose style is `symmetrix/mace`.
     style_name: str = ''
+    # The pair_style token of the float32 variant (``''``: float64 only).
+    # The Kokkos suffix (`-sf kk`, `-sf kk/host`) completes it to
+    # `symmetrix/mace/float32/kk[/host]`, registered in symmetrix's
+    # pair_symmetrix_mace_kokkos.h; there is no plain-CPU float32 style.
+    float32_style_name: str = ''
     # Deck lines this style requires, emitted right after `atom_style`; they
     # must precede the box/read_data.
     deck_directives: tuple = ()
@@ -75,17 +104,31 @@ class MLIPSpec:
         """The LAMMPS pair_style token (``style_name`` if set, else ``name``)."""
         return self.style_name or self.name
 
-    def style_token(self, model_path: str) -> str:
+    def style_for(self, precision: str = 'float64') -> str:
+        """The LAMMPS style token for ``precision`` (``float64`` | ``float32``).
+
+        Raises:
+            ValueError: ``float32`` for a framework without a float32 style.
+        """
+        if precision == 'float32':
+            if not self.float32_style_name:
+                raise ValueError(f"{self.name} has no float32 style; precision must be float64")
+            return self.float32_style_name
+        return self.style_token_name
+
+    def style_token(self, model_path: str, precision: str = 'float64') -> str:
         """Return this framework's contribution to a ``pair_style`` line.
 
         DeePMD embeds the model path here; MACE's goes into ``pair_coeff``.
         """
+        style = self.style_for(precision)
         if self.model_in_style_line:
-            return f"{self.style_token_name} {model_path}"
-        return self.style_token_name
+            return f"{style} {model_path}"
+        return style
 
     def coeff_line(self, index_str: str, model_path: str,
-                   atom_list: Sequence[str], hybrid: bool = True) -> str:
+                   atom_list: Sequence[str], hybrid: bool = True,
+                   precision: str = 'float64') -> str:
         """Return a full ``pair_coeff`` line for this framework.
 
         Inside ``pair_style hybrid`` the line names the sub-style. Outside it
@@ -109,15 +152,16 @@ class MLIPSpec:
             atom_list: one entry per LAMMPS atom type -- an element symbol, or
                 ``NULL`` for types this instance must ignore (DeePMD only).
             hybrid: ``False`` for a lone (non-hybrid) pair_style.
+            precision: selects the style name the line must repeat.
         """
         atoms = ' '.join(atom_list)
         if self.model_in_style_line:
             if not hybrid:
                 return f"pair_coeff * * {atoms}"
-            return f"pair_coeff * * {self.style_token_name}{index_str} {atoms}"
+            return f"pair_coeff * * {self.style_for(precision)}{index_str} {atoms}"
         if not hybrid:
             return f"pair_coeff * * {model_path} {atoms}"
-        return f"pair_coeff * * {self.style_token_name} {model_path} {atoms}"
+        return f"pair_coeff * * {self.style_for(precision)} {model_path} {atoms}"
 
 
 MLIP_REGISTRY: Dict[str, MLIPSpec] = {
@@ -149,12 +193,19 @@ MLIP_REGISTRY: Dict[str, MLIPSpec] = {
         virtual_atom_element='Mo',
         launcher=LauncherSpec(
             mpi_ranks=1,
-            # KOKKOS host (OpenMP) backend, chosen for safety, not speed: the CUDA
-            # backend is silently wrong on a stock symmetrix checkout (`mace_types`
-            # overflow, see documentation/mlip.md) and the host one is correct.
-            # `neigh half` is mandatory: symmetrix/mace/kk requires `newton pair
-            # on`, which KOKKOS rejects with `neigh full`. Change the two together.
-            lmp_flags='-k on t ${OMP_NUM_THREADS:-8} -sf kk -pk kokkos neigh half',
+            # Device (Kokkos CUDA) is the default: `-sf kk` selects
+            # `symmetrix/mace/kk`, the Device class. The CUDA wrong-energy bug
+            # (`mace_types` overflow) is fixed by scripts/hpc/symmetrix-mace_types-
+            # overflow.patch, which build_lammps_mace.sh insists on. Threads are
+            # host-side work only, hence the small default. `neigh half` is
+            # mandatory: symmetrix/mace/kk requires `newton pair on`, which KOKKOS
+            # rejects with `neigh full`; the deck's `newton on` pairs with it.
+            lmp_flags='-k on g 1 t ${OMP_NUM_THREADS:-1} -sf kk '
+                      '-pk kokkos newton on neigh half',
+            # Opt-in host (OpenMP) backend. `-sf kk/host` makes it really host,
+            # even on a CUDA binary (bare `-sf kk` would pick the Device class).
+            host_lmp_flags='-k on t ${OMP_NUM_THREADS:-8} -sf kk/host '
+                           '-pk kokkos newton on neigh half',
             env_lines=(
                 '# symmetrix/mace is OpenMP-threaded, NOT one-thread-per-rank '
                 'like DeePMD -- give it the whole node.',
@@ -164,11 +215,12 @@ MLIP_REGISTRY: Dict[str, MLIPSpec] = {
             ),
         ),
         style_name='symmetrix/mace',
+        float32_style_name='symmetrix/mace/float32',
         deck_directives=(
             # pair_symmetrix_mace.cpp:172: hard error without a global map.
             'atom_modify     map yes',
             # pair_symmetrix_mace_kokkos.cpp:195 demands `newton pair on`; pairs
-            # with `-pk kokkos neigh half` in launcher.lmp_flags.
+            # with `-pk kokkos ... neigh half` in the launcher flags.
             'newton          on',
         ),
         binds_interlayer=True,

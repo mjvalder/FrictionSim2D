@@ -167,3 +167,34 @@ def test_parse_run_path_of_a_classical_path_has_no_flavor():
     tokens = parse_run_path(str(output_dir_for(_afm_dict(), 'afm')))
     assert tokens.mlip_framework is None
     assert tokens.dispersion is None
+
+
+# ---------------------------------------------------------------------------
+# float32 precision token
+# ---------------------------------------------------------------------------
+
+def test_float32_gets_a_distinct_token_and_float64_names_are_unchanged():
+    base = output_dir_for(_sheet_dict(_mlip_sheet('mace', 'm.json')), 'sheetonsheet')
+    explicit64 = output_dir_for(
+        _sheet_dict(_mlip_sheet('mace', 'm.json', precision='float64')), 'sheetonsheet')
+    f32 = output_dir_for(
+        _sheet_dict(_mlip_sheet('mace', 'm.json', precision='float32')), 'sheetonsheet')
+    assert base == explicit64 == Path('sheetonsheet/h-MoS2/100x_100y/K0/pot_mace_m')
+    assert f32 == Path('sheetonsheet/h-MoS2/100x_100y/K0/pot_mace-f32_m')
+    d3_f32 = output_dir_for(
+        _sheet_dict(_mlip_sheet('mace', 'm.json', dispersion='d3', precision='float32')),
+        'sheetonsheet')
+    assert d3_f32.name == 'pot_mace-d3-f32_m'
+
+
+def test_float32_token_decodes_to_the_same_framework_flavour():
+    from frictionsim2d.run.naming import mlip_flavor_from_pot_token
+    assert mlip_flavor_from_pot_token('pot_mace-f32_m') == ('mace', 'none')
+    assert mlip_flavor_from_pot_token('pot_mace-d3-f32_m') == ('mace', 'd3')
+    assert mlip_flavor_from_pot_token('pot_mace-d3_m') == ('mace', 'd3')
+
+
+def test_classical_pot_ignores_precision_in_the_slug():
+    path = output_dir_for(
+        _sheet_dict(_sheet(pot_path='pots/MoS.sw', precision='float32')), 'sheetonsheet')
+    assert path.name == 'pot_sw_MoS'

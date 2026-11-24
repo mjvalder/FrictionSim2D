@@ -962,8 +962,21 @@ class PotentialManager:
         # full-cell MLIP is never a numbered hybrid sub-style.
         index_str = f" {self.potential_indices[pot_type]}" \
             if self.potential_usage[pot_type] > 1 else ""
-        cmd = get_mlip(pot_type).coeff_line(index_str, pot_path, atom_list, hybrid=hybrid)
+        cmd = get_mlip(pot_type).coeff_line(index_str, pot_path, atom_list, hybrid=hybrid,
+                                            precision=self._mlip_precision(pot_type))
         return [f"{cmd} # {', '.join(self._mlip_components[pot_type])}"]
+
+    def _mlip_precision(self, pot_type: str) -> str:
+        """``float64`` | ``float32`` of the cell's ``pot_type`` components.
+
+        Read from the components' configs (``SheetConfig.precision``); a cell
+        whose sections disagree is refused at config time, so the first wins.
+        """
+        for comp in self.components.values():
+            cfg = comp['config']
+            if normalize_potential_type(cfg.pot_type) == pot_type:
+                return getattr(cfg, 'precision', 'float64')
+        return 'float64'
 
     def _check_model_covers(self, pot_type: str, atom_list: List[str]) -> None:
         """Refuse a type map naming an element the model does not have.
@@ -1766,7 +1779,8 @@ class PotentialManager:
                 elif is_mlip(pot_type):
                     style_parts.append(
                         get_mlip(pot_type).style_token(
-                            self._mlip_model_paths.get(pot_type, '')
+                            self._mlip_model_paths.get(pot_type, ''),
+                            self._mlip_precision(pot_type),
                         )
                     )
                 else:

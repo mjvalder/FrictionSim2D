@@ -37,6 +37,7 @@ Common fields:
 - `lat_c` (optional; **mandatory** for an MLIP sheet — the interlayer distance)
 - `materials_list` (optional)
 - `dispersion` (`none` or `d3`; MLIP sheets only)
+- `precision` (`float64` default, or `float32`; MACE only; float32 adds `-f32` to the `pot_` directory)
 
 `pot_type` takes the classical types (`sw`, `tersoff`, `reaxff`, ...) or a
 machine-learned potential, `mace` or `deepmd`, with `pot_path` pointing at the

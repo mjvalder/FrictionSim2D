@@ -313,3 +313,10 @@ def test_a_legacy_sheet_record_with_16_02_still_raises():
         check_units(_run(family='sheetonsheet', driving_spring=50.0,
                          drive_method='smd', drive_k=50.0 / 16.02),
                     record={'schema_version': '2.1.0', 'run_uuid_stamped_at': 'x'})
+
+
+def test_precision_is_interaction_identity_with_an_elided_float64_default():
+    """float32 shifts energies, so it keys the interaction block; float64 is the elided default."""
+    for family in FAMILIES:
+        assert FIELD_MAP['sheet.precision'] == 'interaction'
+        assert defaults_for(family)['sheet.precision'] == 'float64'

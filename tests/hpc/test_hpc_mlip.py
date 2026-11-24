@@ -88,7 +88,8 @@ def test_slurm_gpu_ntasks_is_mpi_ranks_not_cpus():
 def test_launch_command_uses_framework_binary_and_flags():
     assert _group_config("deepmd").to_dict()["launch_command"] == "mpirun $HOME/deepmd-kit/bin/lmp"
     assert _group_config("mace").to_dict()["launch_command"] == (
-        "mpirun $HOME/lammps-mace/build/lmp -k on t ${OMP_NUM_THREADS:-8} -sf kk -pk kokkos neigh half")
+        "mpirun $HOME/lammps-mace/build/lmp -k on g 1 t ${OMP_NUM_THREADS:-1} -sf kk "
+        "-pk kokkos newton on neigh half")
 
 
 def test_env_lines_base_then_overlay_then_launcher():
@@ -113,7 +114,7 @@ def test_env_lines_render_after_the_omp_export(template):
 def test_mace_gets_omp_threads_of_its_rank(template):
     rendered = _render(template, _group_config("mace"))
     assert "export OMP_NUM_THREADS=8\n" in rendered
-    assert "mpirun $HOME/lammps-mace/build/lmp -k on t" in rendered
+    assert "mpirun $HOME/lammps-mace/build/lmp -k on g 1 t" in rendered
     assert "mpirun lmp " not in rendered
     proc = subprocess.run(["bash", "-n"], input=rendered, text=True, capture_output=True)
     assert proc.returncode == 0, proc.stderr
@@ -221,3 +222,54 @@ def test_two_phase_is_grouped(tmp_path):
     assert sub.count("--dependency=afterany:$SYSTEM_JOB_ID") == 2
     assert subprocess.run(["bash", "-n", str(out / "submit_jobs.sh")]).returncode == 0
     assert "#SBATCH --array=1-2" in (out / "run_slide_gpu_mace.sh").read_text()
+
+
+def test_host_backend_opt_in_renders_kk_host_and_drops_the_gpu():
+    hpc = _gpu_settings()
+    hpc.frameworks["mace"].backend = "host"
+    gen = HPCScriptGenerator(HPCConfig.from_settings(hpc))
+    cfg = gen._config_for_group((True, "mace"), split=False)
+    ctx = cfg.to_dict()
+    assert ctx["launch_command"] == (
+        "mpirun $HOME/lammps-mace/build/lmp -k on t ${OMP_NUM_THREADS:-8} -sf kk/host "
+        "-pk kokkos newton on neigh half")
+    assert "ngpus" not in ctx["select_single"] and ctx["gres"] is None
+    # the DeePMD group of the same campaign keeps its GPU
+    assert gen._config_for_group((True, "deepmd"), split=False).gpu is not None
+
+
+def test_device_backend_without_hpc_gpu_raises():
+    hpc = _gpu_settings()
+    hpc.gpu = None
+    gen = HPCScriptGenerator(HPCConfig.from_settings(hpc))
+    with pytest.raises(ValueError, match=r"hpc\.gpu"):
+        gen._config_for_group((True, "mace"), split=False)
+    # DeePMD has no backend choice: unchanged behaviour
+    gen._config_for_group((True, "deepmd"), split=False)
+    # host needs no GPU
+    hpc.frameworks["mace"].backend = "host"
+    gen = HPCScriptGenerator(HPCConfig.from_settings(hpc))
+    gen._config_for_group((True, "mace"), split=False)
+
+
+def test_device_job_without_gpu_fails_at_script_generation(tmp_path):
+    hpc = _gpu_settings()
+    hpc.gpu = None
+    gen = HPCScriptGenerator(HPCConfig.from_settings(hpc))
+    path = "sheetonsheet/h_MoS2/100x_100y/K300/pot_mace_model"
+    with pytest.raises(ValueError, match=r"hpc\.gpu"):
+        gen.generate_scripts([path], tmp_path / "hpc", scheduler="pbs")
+
+
+def test_host_backend_on_deepmd_is_an_error():
+    hpc = _gpu_settings()
+    hpc.frameworks["deepmd"].backend = "host"
+    gen = HPCScriptGenerator(HPCConfig.from_settings(hpc))
+    with pytest.raises(ValueError, match="no host backend"):
+        gen._config_for_group((True, "deepmd"), split=False)
+
+
+def test_framework_overlay_backend_is_validated():
+    with pytest.raises(ValueError):
+        FrameworkOverlay(backend="cpu")
+    assert FrameworkOverlay().backend is None
