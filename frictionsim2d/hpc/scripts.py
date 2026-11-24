@@ -43,6 +43,11 @@ GroupKey = Tuple[bool, Optional[str]]
 CPU_GROUP: GroupKey = (False, None)
 
 
+def scheduler_base_dir(scheduler: str) -> str:
+    """The shell variable holding the directory a job was submitted from."""
+    return '$' + _PREFLIGHT_DIALECT[scheduler]['workdir_var']
+
+
 def _group_key(entry) -> GroupKey:
     """Group key for a :class:`~frictionsim2d.hpc.manifest.JobEntry`."""
     return (bool(entry.needs_gpu), entry.framework or None)
@@ -507,10 +512,11 @@ class HPCScriptGenerator:
         if log_dir and not log_dir.startswith(('$', '/')):
             (sim_root / log_dir).mkdir(parents=True, exist_ok=True)
 
-    def _generate_array_scripts(self, simulation_paths: List[str], output_dir: Path,
-                                base_dir: str, scheduler: Literal['pbs', 'slurm'],
-                                simulation_root: Optional[Path] = None,
-                                job_entries: Optional[List[Any]] = None) -> List[Path]:
+    def generate_scripts(self, simulation_paths: List[str], output_dir: Path,
+                         scheduler: Literal['pbs', 'slurm'] = 'pbs',
+                         base_dir: Optional[str] = None,
+                         simulation_root: Optional[Path] = None,
+                         job_entries: Optional[List[Any]] = None) -> List[Path]:
         """Generate array job scripts with automatic chunking.
 
         Jobs are first split by ``(needs_gpu, framework)`` -- a GPU/MLIP job
@@ -522,8 +528,9 @@ class HPCScriptGenerator:
         Args:
             simulation_paths: List of relative simulation paths.
             output_dir: Directory to write scripts.
-            base_dir: Base directory variable for HPC.
-            scheduler: Scheduler type.
+            scheduler: Scheduler type ('pbs' or 'slurm').
+            base_dir: Base directory variable for HPC (the scheduler's submit
+                directory if None).
             simulation_root: Tree the paths are relative to (default: output_dir's parent).
             job_entries: Optional index-parallel JobEntry list carrying the
                 resource fields to group on. Without it the group is read from
@@ -531,7 +538,13 @@ class HPCScriptGenerator:
 
         Returns:
             List of generated script paths.
+
+        Raises:
+            ValueError: If the scheduler is unknown or the config is incomplete.
         """
+        if scheduler not in _PREFLIGHT_DIALECT:
+            raise ValueError(f"Unknown scheduler: {scheduler}")
+        base_dir = base_dir or scheduler_base_dir(scheduler)
         output_dir = Path(output_dir)
         simulation_root = Path(simulation_root) if simulation_root else output_dir.parent
 
@@ -595,50 +608,6 @@ class HPCScriptGenerator:
 
         self._write_master_script(output_dir, scripts, scheduler)
         return scripts
-
-    def generate_pbs_scripts(self, simulation_paths: List[str], output_dir: Path,
-                            base_dir: str = "$PBS_O_WORKDIR",
-                            simulation_root: Optional[Path] = None,
-                            job_entries: Optional[List[Any]] = None) -> List[Path]:
-        """Generate PBS array job scripts.
-        
-        Args:
-            simulation_paths: List of relative simulation paths.
-            output_dir: Directory to write scripts.
-            base_dir: Base directory variable.
-            simulation_root: Tree the paths are relative to.
-            job_entries: Optional index-parallel JobEntry list for
-                GPU/framework splitting.
-
-        Returns:
-            List of generated script paths.
-        """
-        return self._generate_array_scripts(
-            simulation_paths, output_dir, base_dir, 'pbs', simulation_root,
-            job_entries=job_entries,
-        )
-
-    def generate_slurm_scripts(self, simulation_paths: List[str], output_dir: Path,
-                                base_dir: str = "$SLURM_SUBMIT_DIR",
-                                simulation_root: Optional[Path] = None,
-                                job_entries: Optional[List[Any]] = None) -> List[Path]:
-        """Generate SLURM array job scripts.
-        
-        Args:
-            simulation_paths: List of relative simulation paths.
-            output_dir: Directory to write scripts.
-            base_dir: Base directory variable.
-            simulation_root: Tree the paths are relative to.
-            job_entries: Optional index-parallel JobEntry list for
-                GPU/framework splitting.
-
-        Returns:
-            List of generated script paths.
-        """
-        return self._generate_array_scripts(
-            simulation_paths, output_dir, base_dir, 'slurm', simulation_root,
-            job_entries=job_entries,
-        )
 
     def _write_master_script(self, output_dir: Path, scripts: List[Path],
                             scheduler: Literal['pbs', 'slurm']) -> Path:
@@ -708,7 +677,7 @@ class HPCScriptGenerator:
         output_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_local_log_dir(output_dir)
 
-        base_dir = base_dir or ('$PBS_O_WORKDIR' if scheduler == 'pbs' else '$SLURM_SUBMIT_DIR')
+        base_dir = base_dir or scheduler_base_dir(scheduler)
 
         system_jobs = manifest.get_system_jobs()
         # One entry per unique simulation directory, preserving order.
@@ -857,29 +826,6 @@ class HPCScriptGenerator:
         submit_path.chmod(0o755)
         return submit_path
 
-    def generate_scripts(self, simulation_paths: List[str], output_dir: Path,
-                        scheduler: Literal['pbs', 'slurm'] = 'pbs',
-                        **kwargs) -> List[Path]:
-        """Generate HPC scripts for specified scheduler.
-        
-        Args:
-            simulation_paths: List of relative simulation paths.
-            output_dir: Directory to write scripts.
-            scheduler: Scheduler type ('pbs' or 'slurm').
-            **kwargs: Additional arguments for specific generator.
-            
-        Returns:
-            List of generated script paths.
-            
-        Raises:
-            ValueError: If scheduler is unknown.
-        """
-        if scheduler == 'pbs':
-            return self.generate_pbs_scripts(simulation_paths, output_dir, **kwargs)
-        if scheduler == 'slurm':
-            return self.generate_slurm_scripts(simulation_paths, output_dir, **kwargs)
-        raise ValueError(f"Unknown scheduler: {scheduler}")
-
     def generate_two_phase_scripts(self, manifest: 'JobManifest', output_dir: Path,
                                     scheduler: Literal['pbs', 'slurm'] = 'pbs',
                                     base_dir: Optional[str] = None,
@@ -903,7 +849,7 @@ class HPCScriptGenerator:
         output_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_local_log_dir(output_dir)
 
-        base_dir = base_dir or ('$PBS_O_WORKDIR' if scheduler == 'pbs' else '$SLURM_SUBMIT_DIR')
+        base_dir = base_dir or scheduler_base_dir(scheduler)
 
         simulation_root = Path(simulation_root) if simulation_root else output_dir.parent
         system_jobs = manifest.get_system_jobs()

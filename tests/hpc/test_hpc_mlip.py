@@ -195,7 +195,7 @@ def test_array_split_by_job_entries_and_by_pot_token(tmp_path):
     paths = ["afm/cpuA/L1/lammps/slide.in", "afm/mlA/L1/lammps/slide.in"]
     entries = [JobEntry(job_id="a", simulation_path="afm/cpuA/L1"),
                JobEntry(job_id="b", simulation_path="afm/mlA/L1", needs_gpu=True, framework="deepmd")]
-    scripts = HPCScriptGenerator(HPCConfig.from_settings(_gpu_settings())).generate_pbs_scripts(
+    scripts = HPCScriptGenerator(HPCConfig.from_settings(_gpu_settings())).generate_scripts(
         paths, out, job_entries=entries)
     assert sorted(s.name for s in scripts) == ["run_cpu.pbs", "run_gpu_deepmd.pbs"]
     assert (out / "manifest_cpu_1.txt").read_text().split("\t")[-1] == paths[0]
@@ -203,7 +203,7 @@ def test_array_split_by_job_entries_and_by_pot_token(tmp_path):
     out2 = tmp_path / "b" / "hpc"
     p2 = ["sheetonsheet/MoS2/pot_sw_x/K300/lammps/slide.in",
           "sheetonsheet/MoS2/pot_deepmd-d3_dpa3/K300/lammps/slide.in"]
-    scripts = HPCScriptGenerator(HPCConfig.from_settings(_gpu_settings())).generate_pbs_scripts(p2, out2)
+    scripts = HPCScriptGenerator(HPCConfig.from_settings(_gpu_settings())).generate_scripts(p2, out2)
     assert sorted(s.name for s in scripts) == ["run_cpu.pbs", "run_gpu_deepmd.pbs"]
     assert "LAMMPS_PLUGIN_PATH" in (out2 / "run_gpu_deepmd.pbs").read_text()
 

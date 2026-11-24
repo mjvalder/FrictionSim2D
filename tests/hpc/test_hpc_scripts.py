@@ -44,7 +44,7 @@ def test_generate_scripts_writes_the_scheduler_s_own_script(tmp_path, scheduler,
 
 def test_generated_script_carries_the_requested_modules(tmp_path):
     generator = HPCScriptGenerator(_config(modules=["lammps/2023", "python/3.11"]))
-    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+    generator.generate_scripts(["mat0/L1"], tmp_path / "hpc")
 
     text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
     assert "module load lammps/2023" in text
@@ -56,7 +56,7 @@ def test_walltime_and_cpu_resources_reach_the_pbs_script(tmp_path):
     node-count fix, `nodes` too (see test_pbs_select_line_honours_node_count
     and test_pbs_select_line_is_unchanged_for_the_single_node_default)."""
     generator = HPCScriptGenerator(_config(walltime_hours=8, num_cpus=16, memory_gb=64))
-    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+    generator.generate_scripts(["mat0/L1"], tmp_path / "hpc")
 
     text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
     assert "walltime=8:00:00" in text
@@ -68,7 +68,7 @@ def test_pbs_select_line_honours_node_count(tmp_path):
     """A multi-node PBS config must put the real node count in `select=`,
     not the hardcoded `1` that silently dropped `num_nodes` before this fix."""
     generator = HPCScriptGenerator(_config(num_nodes=4, num_cpus=16, memory_gb=64))
-    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+    generator.generate_scripts(["mat0/L1"], tmp_path / "hpc")
 
     text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
     assert "select=4:ncpus=16:mem=64gb:mpiprocs=16" in text
@@ -78,7 +78,7 @@ def test_pbs_select_line_is_unchanged_for_the_single_node_default(tmp_path):
     """Compatibility check: with the default num_nodes=1, the `select=` line
     must render byte-identical to what it produced before the fix."""
     generator = HPCScriptGenerator(_config())
-    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+    generator.generate_scripts(["mat0/L1"], tmp_path / "hpc")
 
     text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
     assert "select=1:ncpus=32:mem=62gb:mpiprocs=32" in text
@@ -86,7 +86,7 @@ def test_pbs_select_line_is_unchanged_for_the_single_node_default(tmp_path):
 
 def test_node_count_reaches_the_slurm_script(tmp_path):
     generator = HPCScriptGenerator(_config(num_nodes=4, num_cpus=8, memory_gb=32))
-    generator.generate_slurm_scripts(["mat0/L1"], tmp_path / "hpc")
+    generator.generate_scripts(["mat0/L1"], tmp_path / "hpc", scheduler="slurm")
 
     text = (tmp_path / "hpc" / "run.sh").read_text(encoding="utf-8")
     assert "--nodes=4" in text
@@ -104,7 +104,7 @@ def test_submit_all_lists_one_entry_per_array_chunk(tmp_path):
     """submit_all.txt has one qsub/sbatch line per *generated script*, not per
     simulation -- max_array_size chunks many simulations into one script."""
     generator = HPCScriptGenerator(_config(max_array_size=1))
-    generator.generate_pbs_scripts(["a", "b", "c"], tmp_path / "hpc")
+    generator.generate_scripts(["a", "b", "c"], tmp_path / "hpc")
 
     assert len(_submit_lines(tmp_path / "hpc" / "submit_all.txt")) == 3
 
@@ -113,7 +113,7 @@ def test_submit_all_lists_one_entry_per_script_not_per_simulation(tmp_path):
     """With the default max_array_size, several simulations still fit in a
     single array script, so submit_all.txt gets exactly one line."""
     generator = HPCScriptGenerator(_config())
-    generator.generate_pbs_scripts(["a", "b", "c"], tmp_path / "hpc")
+    generator.generate_scripts(["a", "b", "c"], tmp_path / "hpc")
 
     assert len(_submit_lines(tmp_path / "hpc" / "submit_all.txt")) == 1
 
@@ -122,7 +122,7 @@ def test_no_simulations_produces_an_empty_submit_all_without_raising(tmp_path):
     """Contract finding: an empty simulation list is not rejected -- it
     silently yields zero scripts and a submit_all.txt with no submit lines."""
     generator = HPCScriptGenerator(_config())
-    scripts = generator.generate_pbs_scripts([], tmp_path / "hpc")
+    scripts = generator.generate_scripts([], tmp_path / "hpc")
 
     assert scripts == []
     text = (tmp_path / "hpc" / "submit_all.txt").read_text(encoding="utf-8")
@@ -132,12 +132,12 @@ def test_no_simulations_produces_an_empty_submit_all_without_raising(tmp_path):
 def test_empty_modules_list_is_rejected(tmp_path):
     generator = HPCScriptGenerator(_config(modules=[]))
     with pytest.raises(ValueError, match="modules"):
-        generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+        generator.generate_scripts(["mat0/L1"], tmp_path / "hpc")
 
 
 def test_a_conda_env_stands_in_for_modules(tmp_path):
     generator = HPCScriptGenerator(_config(modules=[], conda_env="$HOME/envs/lammps"))
-    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+    generator.generate_scripts(["mat0/L1"], tmp_path / "hpc")
 
     assert 'CONDA_ENV="$HOME/envs/lammps"' in (tmp_path / "hpc" / "run.pbs").read_text(
         encoding="utf-8")
@@ -146,7 +146,7 @@ def test_a_conda_env_stands_in_for_modules(tmp_path):
 def test_use_tmpdir_without_scratch_dir_is_rejected(tmp_path):
     generator = HPCScriptGenerator(_config(use_tmpdir=True, scratch_dir=None))
     with pytest.raises(ValueError, match="scratch_dir"):
-        generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+        generator.generate_scripts(["mat0/L1"], tmp_path / "hpc")
 
 
 def test_generate_scripts_rejects_an_unknown_scheduler(tmp_path):
@@ -181,7 +181,7 @@ def test_the_download_hint_brings_the_run_logs_home(tmp_path, kind):
     generator = HPCScriptGenerator(_config())
     out_dir = tmp_path / "hpc"
     if kind == "array":
-        generator.generate_pbs_scripts(["mat0/L1"], out_dir)
+        generator.generate_scripts(["mat0/L1"], out_dir)
         helper = out_dir / "submit_all.txt"
     elif kind == "combined":
         generator.generate_combined_scripts(_combined_manifest(), out_dir)
@@ -197,3 +197,29 @@ def test_the_download_hint_brings_the_run_logs_home(tmp_path, kind):
         assert '--include="run*.log"' in line, line
         # Still ahead of the catch-all exclude, or the include never applies.
         assert line.index('--include="run*.log"') < line.index('--exclude="*"'), line
+
+
+def test_generate_scripts_rejects_an_unknown_scheduler(tmp_path):
+    with pytest.raises(ValueError, match="Unknown scheduler"):
+        HPCScriptGenerator(_config()).generate_scripts(
+            ["mat0/L1"], tmp_path / "hpc", scheduler="lsf")
+
+
+@pytest.mark.parametrize("scheduler, script, expected", [
+    ("pbs", "run.pbs", "#PBS -o $PBS_O_WORKDIR/logs/friction2d_out.txt"),
+    ("slurm", "run.sh", "#SBATCH --output=logs/friction2d_out.txt"),
+])
+def test_base_dir_defaults_to_the_schedulers_submit_directory(
+        tmp_path, scheduler, script, expected):
+    HPCScriptGenerator(_config()).generate_scripts(
+        ["mat0/L1"], tmp_path / "hpc", scheduler=scheduler)
+
+    assert expected in (tmp_path / "hpc" / script).read_text(encoding="utf-8")
+
+
+def test_an_explicit_base_dir_roots_the_default_log_directory(tmp_path):
+    HPCScriptGenerator(_config()).generate_scripts(
+        ["mat0/L1"], tmp_path / "hpc", base_dir="/work/sim")
+
+    text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
+    assert "#PBS -o /work/sim/logs/friction2d_out.txt" in text
