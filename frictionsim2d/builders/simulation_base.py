@@ -604,25 +604,9 @@ class SimulationBase(ABC):
             job_name=job_name
         )
 
-        # Empty modules is valid for a conda-based or env_lines-only MLIP
-        # environment (see the same relaxation in
-        # frictionsim2d/hpc/scripts.py::_validate_config).
-        if (not hpc_config.modules and not hpc_config.conda_env
-                and not hpc_config.env_lines):
-            raise ValueError(
-                "HPC modules list is empty; set hpc.modules, hpc.conda_env or "
-                "hpc.env_lines in settings.")
-        if hpc_config.use_tmpdir and not hpc_config.scratch_dir:
-            raise ValueError("HPC scratch_dir is required when use_tmpdir is true.")
-
         generator = HPCScriptGenerator(hpc_config)
-
-        if hpc_config.hpc_home:
-            base_dir = hpc_config.hpc_home.rstrip('/') + '/' + sim_root.name
-        elif hpc_config.scheduler_type == 'pbs':
-            base_dir = '$PBS_O_WORKDIR'
-        else:
-            base_dir = '$SLURM_SUBMIT_DIR'
+        generator.validate_config()
+        base_dir = hpc_config.base_dir(sim_root.name)
 
         if manifest.has_system_jobs():
             logger.info("Detected system initialization jobs - using two-phase submission")

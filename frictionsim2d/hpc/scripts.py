@@ -229,6 +229,13 @@ class HPCConfig:
     def lammps_scripts(self, scripts: List[str]) -> None:
         self.hpc_settings.lammps_scripts = list(scripts)
 
+    def base_dir(self, simulation_root_name: str) -> str:
+        """Where the job scripts find the tree: ``hpc_home/<root>`` when
+        ``hpc_home`` is set, else the scheduler's submit directory."""
+        if self.hpc_home:
+            return self.hpc_home.rstrip('/') + '/' + simulation_root_name
+        return scheduler_base_dir(self.scheduler_type)
+
     @property
     def max_array_size(self) -> int:
         return self.hpc_settings.max_array_size
@@ -429,7 +436,7 @@ class HPCScriptGenerator:
                            'scheduler': scheduler, 'phases': phases or [],
                            'config': config or self.config, 'group': group})
 
-    def _validate_config(self, config: Optional[HPCConfig] = None):
+    def validate_config(self, config: Optional[HPCConfig] = None):
         """Validate required config fields.
 
         Raises:
@@ -555,9 +562,9 @@ class HPCScriptGenerator:
         split = len(group_keys) > 1
         configs = {key: self._config_for_group(key, split) for key in group_keys}
         if not group_keys:
-            self._validate_config()
+            self.validate_config()
         for config in configs.values():
-            self._validate_config(config)
+            self.validate_config(config)
 
         output_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_local_log_dir(output_dir)

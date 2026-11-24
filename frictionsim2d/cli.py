@@ -14,9 +14,8 @@ import click
 
 from .core.config import load_settings, settings_origin, _global_settings_path
 from .run.hpc_dispatch import (
-    _build_hpc_manifest_entries,
     collect_hpc_simulation_paths,
-    dispatch_hpc_generation,
+    generate_scripts_for_tree,
     hpc_generation_blocker,
 )
 from .run.simulate import run_simulations
@@ -395,7 +394,7 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     Example:
         FrictionSim2D hpc generate ./afm_output --scheduler pbs
     """
-    from .hpc import HPCScriptGenerator, HPCConfig
+    from .hpc.scripts import HPCConfig, scheduler_base_dir
 
     sim_dir = Path(simulation_dir)
     out_dir = Path(output_dir) if output_dir else sim_dir / 'hpc'
@@ -408,8 +407,8 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     settings.hpc.scheduler_type = scheduler  # CLI --scheduler overrides the settings default
     hpc_config = HPCConfig.from_settings(settings.hpc)
 
-    script_names = hpc_config.lammps_scripts or ['system.in', 'slide.in']
-    simulation_paths = collect_hpc_simulation_paths(sim_dir, lammps_scripts=script_names)
+    simulation_paths = collect_hpc_simulation_paths(
+        sim_dir, lammps_scripts=hpc_config.lammps_scripts)
 
     if not simulation_paths:
         click.echo("❌ No simulation directories found", err=True)
@@ -422,24 +421,10 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
 
     click.echo(f"📋 Found {len(simulation_paths)} simulations")
 
-    manifest_entries, resolved_scripts = _build_hpc_manifest_entries(
-        sim_dir,
-        simulation_paths,
-        hpc_config.lammps_scripts,
-    )
-    hpc_config.lammps_scripts = resolved_scripts
-
-    generator = HPCScriptGenerator(hpc_config)
-    base_dir = '$PBS_O_WORKDIR' if scheduler == 'pbs' else '$SLURM_SUBMIT_DIR'
     preflight = preflight or hpc_config.preflight
-    result = dispatch_hpc_generation(
-        generator,
-        sim_dir,
-        out_dir,
-        scheduler,
-        base_dir,
-        manifest_entries,
-        preflight=preflight,
+    result = generate_scripts_for_tree(
+        sim_dir, hpc_config, out_dir, simulation_paths,
+        scheduler_base_dir(scheduler), preflight=preflight,
     )
 
     if isinstance(result, dict):

@@ -165,6 +165,34 @@ def dispatch_hpc_generation(
     return result
 
 
+def generate_scripts_for_tree(
+    simulation_root: Path,
+    hpc_config: 'HPCConfig',
+    output_dir: Path,
+    simulation_paths: List[str],
+    base_dir: str,
+    preflight: Optional[bool] = None,
+):
+    """Write the job scripts for ``simulation_paths`` found under ``simulation_root``.
+
+    ``preflight`` defaults to ``hpc_config.preflight``. Returns whatever
+    :func:`dispatch_hpc_generation` returns.
+    """
+    manifest_entries, resolved_scripts = _build_hpc_manifest_entries(
+        simulation_root, simulation_paths, hpc_config.lammps_scripts,
+    )
+    hpc_config.lammps_scripts = resolved_scripts
+    return dispatch_hpc_generation(
+        HPCScriptGenerator(hpc_config),
+        simulation_root,
+        output_dir,
+        hpc_config.scheduler_type,
+        base_dir,
+        manifest_entries,
+        preflight=hpc_config.preflight if preflight is None else preflight,
+    )
+
+
 def hpc_generation_blocker(settings) -> Optional[str]:
     """Why HPC script generation would be skipped, or None if it would run.
 
@@ -212,30 +240,10 @@ def generate_hpc_scripts_for_root(simulation_root: Path, settings) -> Optional[s
         logger.warning("%s", reason)
         return reason
 
-    manifest_entries, resolved_scripts = _build_hpc_manifest_entries(
-        simulation_root,
-        simulation_paths,
-        hpc_config.lammps_scripts,
-    )
-    hpc_config.lammps_scripts = resolved_scripts
-
     hpc_dir = simulation_root / 'hpc'
     hpc_dir.mkdir(parents=True, exist_ok=True)
-
-    if hpc_config.hpc_home:
-        base_dir = hpc_config.hpc_home.rstrip('/') + '/' + simulation_root.name
-    elif hpc_config.scheduler_type == 'pbs':
-        base_dir = '$PBS_O_WORKDIR'
-    else:
-        base_dir = '$SLURM_SUBMIT_DIR'
-    generator = HPCScriptGenerator(hpc_config)
-    dispatch_hpc_generation(
-        generator,
-        simulation_root,
-        hpc_dir,
-        hpc_config.scheduler_type,
-        base_dir,
-        manifest_entries,
-        preflight=hpc_config.preflight,
+    generate_scripts_for_tree(
+        simulation_root, hpc_config, hpc_dir, simulation_paths,
+        hpc_config.base_dir(simulation_root.name),
     )
     return None

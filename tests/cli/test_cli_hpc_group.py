@@ -35,7 +35,7 @@ def _sim_tree(tmp_path: Path, script: str = "slide.in", n_sims: int = 1) -> Path
 
 
 def _settings_file_with_modules(tmp_path: Path) -> Path:
-    """`hpc generate` calls HPCScriptGenerator._validate_config, which raises
+    """`hpc generate` calls HPCScriptGenerator.validate_config, which raises
     unless settings.hpc.modules is set -- the default GlobalSettings() leaves
     it None."""
     settings = GlobalSettings()
@@ -163,7 +163,7 @@ def test_missing_modules_is_blocked_before_anything_is_written(runner, tmp_path)
 
     On the common AFM path (1:1 system.in/slide.in per simulation directory)
     ``dispatch_hpc_generation`` calls ``generate_combined_scripts``, which
-    never reaches ``HPCScriptGenerator._validate_config`` -- so with no HPC
+    never reaches ``HPCScriptGenerator.validate_config`` -- so with no HPC
     modules configured, ``hpc generate`` used to exit 0 and write a
     ``run.pbs`` containing ``module purge`` and no ``module load`` line: a
     job script that only fails once submitted to the cluster.

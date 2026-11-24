@@ -301,3 +301,26 @@ def test_generator_renders_through_the_shared_template_environment():
     assert isinstance(env.loader, PackageLoader)
     assert env.trim_blocks and env.lstrip_blocks
     assert not env.keep_trailing_newline
+
+
+@pytest.mark.parametrize("scheduler, variable", [("pbs", "$PBS_O_WORKDIR"),
+                                                 ("slurm", "$SLURM_SUBMIT_DIR")])
+def test_config_base_dir_prefers_hpc_home(scheduler, variable):
+    config = _config(scheduler_type=scheduler)
+    assert config.base_dir("sim") == variable
+
+    config.hpc_settings.hpc_home = "/home/me/work/"
+    assert config.base_dir("sim") == "/home/me/work/sim"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"modules": None},
+    {"use_tmpdir": True, "scratch_dir": None},
+])
+def test_validate_config_refuses_an_incomplete_environment(overrides):
+    with pytest.raises(ValueError):
+        HPCScriptGenerator(_config(**overrides)).validate_config()
+
+
+def test_validate_config_accepts_a_conda_only_environment():
+    HPCScriptGenerator(_config(modules=None, conda_env="$HOME/envs/lammps")).validate_config()
