@@ -38,6 +38,7 @@ class QuenchRunController(QObject):
         self._process: Optional[QProcess] = None
         self._result_file: Optional[Path] = None
         self._cancelled = False
+        self._pending = ''
 
     @property
     def running(self) -> bool:
@@ -59,6 +60,7 @@ class QuenchRunController(QObject):
 
         self._result_file = result_file
         self._cancelled = False
+        self._pending = ''
         self.started.emit()
 
         process = QProcess(self)
@@ -88,7 +90,9 @@ class QuenchRunController(QObject):
         if self._process is None:
             return
         raw = bytes(self._process.readAllStandardOutput()).decode(errors='replace')
-        for line in raw.splitlines():
+        # A chunk can end mid-line: keep the unfinished tail for the next one.
+        *lines, self._pending = (self._pending + raw).split('\n')
+        for line in lines:
             try:
                 record = json.loads(line.strip())
             except json.JSONDecodeError:

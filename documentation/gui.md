@@ -140,7 +140,8 @@ integrity thresholds are not offered here: they judge results, not the quench.
   HPC scripts when ticked. Nothing runs.
 - **Run locally after generating** (this family only, unticked every time) then
   runs each member here with serial `lmp`, hours per member, in a worker
-  process, and imports the finished blocks. **Cancel quench run** kills `lmp`
+  process, and imports the finished blocks. Render and Generate stay disabled
+  while it runs. **Cancel quench run** kills `lmp`
   and imports nothing; closing the window asks first.
 - **File → Import quench results…** is `quench import ROOT`, for a root that
   finished on the HPC.

@@ -950,6 +950,11 @@ def run_lmp_serial(deck: str, log: str, cwd: Path) -> None:
         _ACTIVE_LMP = child
         try:
             code = child.wait()
+        except BaseException:
+            # An exception or SIGTERM-driven SystemExit must not orphan lmp.
+            child.kill()
+            child.wait()
+            raise
         finally:
             _ACTIVE_LMP = None
     if code:

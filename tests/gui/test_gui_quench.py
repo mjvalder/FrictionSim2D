@@ -78,10 +78,6 @@ def _window(qt_app, tmp_path, monkeypatch):
     del qt_app
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'xdg_data'))
     window = MainWindow(Workspace.open(tmp_path / 'ws'))
-    # A fresh Settings tab fails its own validation in this tree (the Task 18
-    # settings defect, present at the base commit); these tests are about the
-    # quench flow, so the settings step is stepped over.
-    monkeypatch.setattr(window, '_sync_settings', lambda: True)
     yield window
     window.document.dirty = False
     window.settings_document.dirty = False
@@ -502,3 +498,83 @@ class TestRunLocally:
             pytest.fail('the lmp child outlived Cancel')
         assert not (tmp_path / 'xdg' / 'FrictionSim2D' / 'amorphous').exists() or \
             not list((tmp_path / 'xdg' / 'FrictionSim2D' / 'amorphous').glob('*.lmp'))
+
+
+class TestFreshWindowSettings:
+    """A fresh Settings tab must validate; an empty dict editor stays {}."""
+
+    @pytest.fixture(name='fresh')
+    def _fresh(self, qt_app, tmp_path, monkeypatch):
+        del qt_app
+        monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'xdg_data'))
+        window = MainWindow(Workspace.open(tmp_path / 'ws'))
+        yield window
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        window.close()
+
+    def test_committing_the_untouched_settings_form_changes_nothing(self, fresh):
+        fresh.settings_form.commit()
+        assert not fresh.settings_document.dirty
+        assert fresh.settings_document.validate().ok
+
+    def test_render_does_not_open_the_settings_modal(self, fresh, monkeypatch):
+        def fail(*args, **kwargs):
+            raise AssertionError(f'modal opened: {args[1:2]}')
+        for name in ('warning', 'critical', 'information', 'question'):
+            monkeypatch.setattr(QMessageBox, name, fail)
+        assert fresh._sync_settings() is True
+
+    def test_an_optional_dict_still_empties_to_none(self):
+        from frictionsim2d.gui.schema.introspect import FieldKind, FieldSpec
+        from frictionsim2d.gui.widgets.fields import build_editor
+        spec = FieldSpec(name='d', key='d', kind=FieldKind.DICT, required=False,
+                         default=None)
+        assert build_editor(spec).value() is None
+
+
+class TestRunLmpSerialCleanup:
+
+    def test_an_exception_while_waiting_kills_the_child(self, tmp_path, monkeypatch):
+        killed = []
+
+        class Child:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def wait(self):
+                if not killed:
+                    raise KeyboardInterrupt
+                return -9
+
+            def kill(self):
+                killed.append(1)
+
+        monkeypatch.setattr(subprocess, 'Popen', lambda *a, **k: Child())
+        with pytest.raises(KeyboardInterrupt):
+            amorphous.run_lmp_serial('d.in', 'd.log', tmp_path)
+        assert killed == [1] and amorphous._ACTIVE_LMP is None  # pylint: disable=protected-access
+
+
+class TestOutputBuffering:
+
+    def test_a_json_line_split_over_two_chunks_is_one_record(self, qt_app, tmp_path):
+        del qt_app
+        controller = QuenchRunController(Workspace.open(tmp_path / 'ws'))
+        chunks = [b'{"kind": "progress", "mess', b'age": "hello"}\n']
+
+        class Proc:
+            def readAllStandardOutput(self):  # pylint: disable=invalid-name
+                return chunks.pop(0)
+
+        controller._process = Proc()  # pylint: disable=protected-access
+        seen = []
+        controller.progress.connect(seen.append)
+        controller._on_output()  # pylint: disable=protected-access
+        assert seen == []
+        controller._on_output()  # pylint: disable=protected-access
+        assert seen == ['hello']
+        controller._process = None  # pylint: disable=protected-access

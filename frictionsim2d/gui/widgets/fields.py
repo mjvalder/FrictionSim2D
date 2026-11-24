@@ -611,7 +611,9 @@ class _DictEditor(FieldEditor):
     def value(self) -> Any:
         text = self.edit.text().strip()
         if not text:
-            return None
+            # A field whose default is a dict (default_factory=dict) rejects
+            # None, so "empty" must stay {}; an Optional one is genuinely unset.
+            return {} if isinstance(self.spec.default, dict) else None
         try:
             return json.loads(text)
         except json.JSONDecodeError:
