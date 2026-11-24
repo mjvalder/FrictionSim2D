@@ -394,3 +394,29 @@ def test_amorphous_substrate_is_refused_in_the_afm_like_family(tmp_path):
     with pytest.raises(ValueError) as exc:
         _build(IndentSimulation, config, tmp_path)
     assert "amorph = 'a'" in str(exc.value)
+
+
+@needs_lmp
+def test_hetero_afm_all_deepmd_builds_as_one_full_cell(tmp_path):
+    """The hetero AFM build runs end to end; its replicated data has no coeff block.
+
+    `hetero_rep.data` is read by the run deck before its pair_style, so a
+    `Pair Coeffs` block (what `pair zero` would write) aborts LAMMPS.
+    """
+    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
+
+    model = _model(tmp_path)
+    config = AFMSimulationConfig(**{
+        'general': {'temp': 300.0, 'force': 5.0, 'scan_speed': 2.0},
+        'tip': _si_mlip('tip', model),
+        'sub': {**_si_mlip('sub', model), 'match_strain_tol': 0.1},
+        '2D-1': _deepmd_sheet(tmp_path, mat='h-MoS2', layers=(2,),
+                              x=24.0, y=24.0, model=model),
+        '2D-2': _deepmd_sheet(tmp_path, mat='h-WS2', layers=(2,),
+                              x=24.0, y=24.0, model=model),
+        'settings': load_settings().model_dump(),
+    })
+    text = _build(HeteroAFMSimulation, config, tmp_path)
+    assert 'NULL' not in text and 'lj/cut' not in text
+    _assert_no_pair_coeffs(tmp_path, 'hetero_rep.data')
+    _assert_no_pair_coeffs(tmp_path, 'hetero.data')
