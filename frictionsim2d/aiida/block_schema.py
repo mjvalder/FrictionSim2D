@@ -372,6 +372,8 @@ UNITS: Dict[str, str] = {
     'settings.output.results_frequency': 'steps',  # afm/base.py:867 results_freq
     # settings.potential
     'settings.potential.lj_cutoff': _A,  # construction/components.py:604 gap <= lj_cutoff
+    'settings.potential.d3_cutoff': _A,  # core/mlip.py d3_style_token rthr
+    'settings.potential.d3_cn_cutoff': _A,  # core/mlip.py d3_style_token cn_thr
     'settings.potential.reaxff_safezone': '1',  # potentials/manager.py:1359 multiplier
     'settings.potential.reaxff_mincap': '1',  # potentials/manager.py:1360 array capacity
     # realization (provenance)
