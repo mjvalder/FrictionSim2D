@@ -341,9 +341,8 @@ def model_elements(pot_type: str, model_path) -> "set | None":
     add a diagnosis, never break a working build.
     """
     # Deferred: core must stay ASE-free at import (tests/repo/test_import_weight.py);
-    # json/re are only needed on this rarely-hit path.
+    # json is only needed on this rarely-hit path.
     import json  # pylint: disable=import-outside-toplevel
-    import re  # pylint: disable=import-outside-toplevel
 
     from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
 

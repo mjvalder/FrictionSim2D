@@ -97,8 +97,9 @@ _SHEET = {
     'interlayer_g': _INTERACTION,
     # MLIP sheets: dispersion = d3 overlays a D3 term on the model.
     'dispersion': _INTERACTION,
-    # MLIP sheets: float32 evaluation shifts energies, so it is identity (an interaction-block field, like dispersion). The
-    # float64 default is elided, so every stored block keeps its hash.
+    # MLIP sheets: float32 evaluation shifts energies, so it is identity (an
+    # interaction-block field, like dispersion). The float64 default is elided,
+    # so every stored block keeps its hash.
     'precision': _INTERACTION,
 }
 
