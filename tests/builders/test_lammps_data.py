@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from frictionsim2d.builders.utils.lammps_data import atomic2charge, atomic2molecular, charge2atom
-from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
+from frictionsim2d.builders.utils.lammps_data import detect_atom_style, get_model_dimensions
 from frictionsim2d.builders.utils.lammps_data import (
     _is_lammps_section_header, atom_count_and_z_extent, get_num_atom_types, shift_atoms_to_z_zero)
 
@@ -457,3 +457,18 @@ def test_snap_small_tilts_drops_only_negligible_tilts(tmp_path):
     snap_small_tilts(large)
     assert "xy xz yz" not in small.read_text()
     assert "xy xz yz" in large.read_text()
+
+
+# --- detect_atom_style ---
+
+@pytest.mark.parametrize('header, style', [
+    ('Atoms # charge', 'charge'), ('Atoms #', 'atomic'), ('Atoms', 'atomic'),
+])
+def test_detect_atom_style_reads_the_atoms_header_comment(tmp_path, header, style):
+    f = tmp_path / 'x.data'; f.write_text(f'LAMMPS data\n\n2 atoms\n\n{header}\n\n1 1 0 0 0\n')
+    assert detect_atom_style(str(f)) == style
+
+
+def test_detect_atom_style_defaults_to_atomic_without_an_atoms_section(tmp_path):
+    f = tmp_path / 'x.data'; f.write_text('LAMMPS data\n\n0 atoms\n')
+    assert detect_atom_style(str(f)) == 'atomic'

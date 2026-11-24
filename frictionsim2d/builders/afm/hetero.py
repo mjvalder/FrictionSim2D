@@ -17,7 +17,7 @@ import numpy as np
 from frictionsim2d.builders.construction import components
 from frictionsim2d.builders.afm import AFMSimulation
 from frictionsim2d.builders.construction.hetero_stack import (
-    build_hetero_structure, register_sheet_block, _run_lammps,
+    build_hetero_structure, register_sheet_block, run_lammps,
 )
 from frictionsim2d.builders.afm.indent import IndentSimulation
 from frictionsim2d.builders.sheetonsheet.hetero import compute_layer_zbands
@@ -64,7 +64,7 @@ def replicate_hetero_in_plane(data_path, out_path, nx: int, ny: int) -> Path:
         f"replicate {nx} {ny} 1\n"
         f"write_data {out_path.name} nocoeff\n"
     )
-    _run_lammps(workdir, script)
+    run_lammps(workdir, script)
     return out_path
 
 

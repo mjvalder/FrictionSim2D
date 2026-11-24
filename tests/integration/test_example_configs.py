@@ -28,7 +28,7 @@ that list, so its first member is byte-for-byte the member the real campaign
 would build first.
 
 *Hetero.* A hetero build shells out to ``lmp_serial``
-(``frictionsim2d/builders/construction/hetero_stack.py`` ``_run_lammps``), so it cannot run
+(``frictionsim2d/builders/construction/hetero_stack.py`` ``run_lammps``), so it cannot run
 in the LAMMPS-free fast tier. Its case carries an ``lmp_serial`` skipif and
 ``conftest.py`` derives the ``lammps`` marker from that guard automatically.
 """
@@ -335,7 +335,7 @@ def test_every_potential_file_a_pair_coeff_names_resolves(name, model, _members,
 
 @pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")
 def test_the_hetero_example_builds_and_renders(build_example):
-    """A hetero build runs lmp_serial as a subprocess (hetero_stack._run_lammps),
+    """A hetero build runs lmp_serial as a subprocess (hetero_stack.run_lammps),
     so this one case cannot live in the LAMMPS-free fast tier."""
     name, model, members = HETERO
     result = build_example(name, model)

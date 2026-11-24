@@ -37,7 +37,7 @@ CAMPAIGNS: List[Tuple[str, str, int]] = [
     ('indent_campaign.ini', 'indent', 156),
 ]
 
-#: Needs ``lmp_serial`` at BUILD time (``hetero_stack._run_lammps``), so every
+#: Needs ``lmp_serial`` at BUILD time (``hetero_stack.run_lammps``), so every
 #: test that uses it must carry an ``lmp_serial`` skipif -- ``conftest.py``
 #: derives the ``lammps`` marker from that guard.
 HETERO: Tuple[str, str, int] = ('hetero_pair_sweep.ini', 'sheetonsheet', 3)

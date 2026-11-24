@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from ase import Atoms
 from ase.io import write, read
-from frictionsim2d.lattice.apply import _detect_atom_style, strain_monolayer_to_cell
+from frictionsim2d.lattice.apply import strain_monolayer_to_cell
 from tests.helpers.lattice import _flake_lattice_orientation
 
 
@@ -158,18 +158,3 @@ def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):
     rel = (_flake_lattice_orientation(a1) - _flake_lattice_orientation(a0)) % 60.0
     rel = min(rel, 60.0 - rel)
     assert abs(rel - 15.0) < 1.0        # the LATTICE actually twisted by ~15 deg (a real twist, not a no-op)
-
-
-# --- _detect_atom_style: fallback branches (finding 13) ---
-
-@pytest.mark.parametrize('header, style', [
-    ('Atoms # charge', 'charge'), ('Atoms #', 'atomic'), ('Atoms', 'atomic'),
-])
-def test_detect_atom_style_reads_the_atoms_header_comment(tmp_path, header, style):
-    f = tmp_path / 'x.data'; f.write_text(f'LAMMPS data\n\n2 atoms\n\n{header}\n\n1 1 0 0 0\n')
-    assert _detect_atom_style(str(f)) == style
-
-
-def test_detect_atom_style_defaults_to_atomic_without_an_atoms_section(tmp_path):
-    f = tmp_path / 'x.data'; f.write_text('LAMMPS data\n\n0 atoms\n')
-    assert _detect_atom_style(str(f)) == 'atomic'

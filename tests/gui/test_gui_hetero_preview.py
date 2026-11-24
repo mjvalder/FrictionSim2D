@@ -70,7 +70,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MATERIALS = REPO_ROOT / 'examples' / 'materials'
 POTENTIALS = REPO_ROOT / 'examples' / 'potentials' / 'sw'
 
-#: `frictionsim2d.builders.hetero._run_lammps` shells out to this by name. Without it
+#: `frictionsim2d.builders.hetero.run_lammps` shells out to this by name. Without it
 #: the whole build half of this file is skipped -- see `_require_lammps`.
 LMP_SERIAL = shutil.which('lmp_serial')
 

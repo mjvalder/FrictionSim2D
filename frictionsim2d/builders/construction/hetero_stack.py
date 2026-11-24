@@ -46,7 +46,7 @@ remap``, preserves fractional coordinates), and only then are *both* written
 out. Because both now carry the identical in-plane cell, ASE canonicalizes them
 by the same rotation, so their on-disk boxes coincide exactly and the relative
 A/B registry survives. Per-atom metadata (charges for ``atom_style charge``)
-round-trips through :func:`_write_supercell` (``specorder`` + ``atom_style``),
+round-trips through :func:`write_supercell` (``specorder`` + ``atom_style``),
 so no ReaxFF charge information is lost.
 
 
@@ -87,7 +87,9 @@ from .components import (
     apply_sheet_edge_types, build_monolayer, calculate_layer_shifts, carve_flake)
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 from ...interfaces.ase import read_lammps_data
-from ..utils.lammps_data import restore_masses_section
+from ..utils.lammps_data import (
+    detect_atom_style, monolayer_to_atoms, read_monolayer, write_supercell,
+)
 
 if TYPE_CHECKING:                      # ase.io costs ~270 ms; annotations only
     from ase import Atoms
@@ -407,19 +409,6 @@ def _embed_3x3(matrix_2x2: np.ndarray) -> np.ndarray:
     return p
 
 
-def _detect_atom_style(path: Path) -> str:
-    """Detect the LAMMPS ``atom_style`` from a data file's ``Atoms`` header."""
-    with open(path, "r", encoding="utf-8") as fh:
-        for line in fh:
-            stripped = line.strip()
-            if stripped.startswith("Atoms"):
-                if "#" in stripped:
-                    style = stripped.split("#", 1)[1].strip()
-                    return style or "atomic"
-                return "atomic"
-    return "atomic"
-
-
 #: Tolerance (Å) within which a candidate in-plane translation must map every
 #: atom onto a same-species atom for :func:`detect_inplane_repeat` to accept it
 #: as a lattice translation of the assembled stack.
@@ -557,151 +546,6 @@ def detect_inplane_repeat(
     return (lx / nx, ly / ny), (nx, ny)
 
 
-def _read_monolayer(path: Path) -> Dict[str, object]:
-    """Parse a LAMMPS monolayer data file, preserving all metadata.
-
-    Reads the box (incl. tilt), per-atom types + Cartesian positions, per-atom
-    charges (``atom_style charge`` only), the Masses section (type -> mass,
-    element), and the detected atom_style. This lets the supercell tiling carry
-    every LAMMPS type through as a *distinct* placeholder element (so sublattice
-    types that share a chemical element are not collapsed by ASE), and restore
-    the real masses / charges / atom_style afterwards -- i.e. no metadata is
-    lost the way a bare ASE read/write would drop it.
-
-    Returns:
-        Dict with keys: ``atom_style`` (str), ``cell`` (3x3 float array, rows =
-        lattice vectors, LAMMPS-canonical), ``types`` (List[int]), ``positions``
-        ((N,3) float, box-origin-relative), ``charges`` (List[float] or None),
-        ``masses`` ({type: (mass, element)}), ``n_types`` (int).
-    """
-    atom_style = _detect_atom_style(path)
-    is_charge = "charge" in atom_style
-
-    bounds: Dict[str, float] = {}
-    tilt = {"xy": 0.0, "xz": 0.0, "yz": 0.0}
-    masses: Dict[int, Tuple[float, str]] = {}
-    types: List[int] = []
-    positions: List[Tuple[float, float, float]] = []
-    charges: List[float] = []
-
-    section: Optional[str] = None
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        low = line.split("#", 1)[0].strip()
-        if low.endswith(("xlo xhi", "ylo yhi", "zlo zhi")):
-            parts = low.split()
-            key = parts[2][0]
-            bounds[f"{key}lo"] = float(parts[0])
-            bounds[f"{key}hi"] = float(parts[1])
-            continue
-        if low.endswith("xy xz yz"):
-            parts = low.split()
-            tilt["xy"], tilt["xz"], tilt["yz"] = float(parts[0]), float(parts[1]), float(parts[2])
-            continue
-        if line == "Masses" or line == "Atoms" or line.startswith("Atoms"):
-            section = "Masses" if line == "Masses" else "Atoms"
-            continue
-        if line in ("Velocities", "Bonds", "Angles", "Dihedrals", "Impropers"):
-            section = None
-            continue
-        if section == "Masses":
-            parts = line.split()
-            if parts[0].lstrip("-").isdigit():
-                elem = line.split("#")[-1].strip().split()[0] if "#" in line else "X"
-                masses[int(parts[0])] = (float(parts[1]), elem)
-        elif section == "Atoms":
-            parts = low.split()
-            if is_charge:
-                if len(parts) >= 6 and parts[0].lstrip("-").isdigit():
-                    types.append(int(parts[1]))
-                    charges.append(float(parts[2]))
-                    positions.append((float(parts[3]), float(parts[4]), float(parts[5])))
-            else:
-                if len(parts) >= 5 and parts[0].lstrip("-").isdigit():
-                    types.append(int(parts[1]))
-                    positions.append((float(parts[2]), float(parts[3]), float(parts[4])))
-
-    lx = bounds["xhi"] - bounds["xlo"]
-    ly = bounds["yhi"] - bounds["ylo"]
-    lz = bounds["zhi"] - bounds["zlo"]
-    cell = np.array([
-        [lx, 0.0, 0.0],
-        [tilt["xy"], ly, 0.0],
-        [tilt["xz"], tilt["yz"], lz],
-    ])
-    origin = np.array([bounds["xlo"], bounds["ylo"], bounds["zlo"]])
-    pos = np.array(positions, dtype=float) - origin
-    n_types = max([*types, *masses.keys()], default=1)
-
-    return {
-        "atom_style": atom_style,
-        "cell": cell,
-        "types": types,
-        "positions": pos,
-        "charges": charges if is_charge else None,
-        "masses": masses,
-        "n_types": int(n_types),
-    }
-
-
-def _monolayer_to_atoms(mono: Dict[str, object]) -> Atoms:
-    """Build an ASE ``Atoms`` from parsed monolayer data using placeholder elements.
-
-    Each distinct LAMMPS type ``t`` is carried as chemical element number ``t``
-    (H, He, Li, ...) so that ``make_supercell`` never collapses two LAMMPS types
-    that happen to share a real element. Per-atom charges are attached when the
-    source used ``atom_style charge``.
-    """
-    # Lazy: ase + ase.data cost ~70-80 ms combined (measured with python
-    # -X importtime; chemical_symbols reuses the same ase package init as
-    # Atoms); deferred so this module stays cheap to import.
-    from ase import Atoms  # pylint: disable=import-outside-toplevel
-    from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
-
-    types: List[int] = mono["types"]  # type: ignore[assignment]
-    placeholders = [chemical_symbols[t] for t in types]
-    atoms = Atoms(
-        symbols=placeholders,
-        positions=mono["positions"],
-        cell=mono["cell"],
-        pbc=True,
-    )
-    if mono["charges"] is not None:
-        atoms.set_initial_charges(mono["charges"])  # type: ignore[arg-type]
-    return atoms
-
-
-def _write_supercell(
-    atoms: Atoms,
-    out_path: Path,
-    atom_style: str,
-    n_types: int,
-    masses: Dict[int, Tuple[float, str]],
-) -> np.ndarray:
-    """Write an ASE supercell as a LAMMPS data file, preserving metadata.
-
-    The type-ordered placeholder elements are written via ``specorder`` so the
-    original integer LAMMPS type ids are reproduced exactly; ``atom_style`` and
-    per-atom charges round-trip through ASE; the real Masses section is restored
-    afterwards. ASE canonicalizes the box to LAMMPS form (a1 along +x) on write.
-
-    Returns:
-        The written in-plane 2x2 cell (LAMMPS-canonical), read back from disk.
-    """
-    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
-    from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
-    from ase.io import read, write  # pylint: disable=import-outside-toplevel
-
-    if out_path.exists():
-        out_path.unlink()
-    specorder = [chemical_symbols[t] for t in range(1, n_types + 1)]
-    write(str(out_path), atoms, format="lammps-data", atom_style=atom_style, specorder=specorder)
-    restore_masses_section(out_path, masses, n_types)
-    return np.array(read(str(out_path), format="lammps-data").cell)[:2, :2]
-
-
 def build_matched_supercells(
     mono_a_path: PathLike,
     mono_b_path: PathLike,
@@ -757,7 +601,7 @@ def build_matched_supercells(
     mono_b_path = Path(mono_b_path)
 
     # 1. Read each monolayer (metadata-preserving) and its ACTUAL in-plane cell.
-    mono = {"a": _read_monolayer(mono_a_path), "b": _read_monolayer(mono_b_path)}
+    mono = {"a": read_monolayer(mono_a_path), "b": read_monolayer(mono_b_path)}
     cell_mono = {label: np.asarray(m["cell"])[:2, :2] for label, m in mono.items()}
 
     # 2. Find the coincidence match on the very cells that will be tiled.
@@ -776,7 +620,7 @@ def build_matched_supercells(
     matrices = {"a": match.matrix_a, "b": match.matrix_b}
 
     # 3. Tile each monolayer into its coincidence supercell (co-oriented frame).
-    atoms = {label: _monolayer_to_atoms(mono[label]) for label in ("a", "b")}
+    atoms = {label: monolayer_to_atoms(mono[label]) for label in ("a", "b")}
     sc_atoms = {
         label: make_supercell(atoms[label], _embed_3x3(matrices[label]))
         for label in ("a", "b")
@@ -805,7 +649,7 @@ def build_matched_supercells(
     #    one shared frame so no per-material canonicalization rotation is baked
     #    in as spurious shear). Since both now carry the identical in-plane cell,
     #    ASE canonicalizes them by the same rotation on write, so their on-disk
-    #    boxes coincide exactly; _write_supercell preserves per-atom metadata.
+    #    boxes coincide exactly; write_supercell preserves per-atom metadata.
     outputs: Dict[str, Path] = {}
     mean_cell: Optional[np.ndarray] = None
     for label in ("a", "b"):
@@ -820,7 +664,7 @@ def build_matched_supercells(
             scale_atoms=True,
         )
         out_path = workdir / f"{label}_supercell.lmp"
-        written_cell = _write_supercell(
+        written_cell = write_supercell(
             at, out_path,
             atom_style=str(mono[label]["atom_style"]),
             n_types=int(mono[label]["n_types"]),
@@ -906,8 +750,8 @@ def build_twisted_supercells(
     mono_a_path = Path(mono_a_path)
     mono_b_path = Path(mono_b_path)
 
-    mono_a = _read_monolayer(mono_a_path)
-    mono_b = _read_monolayer(mono_b_path)
+    mono_a = read_monolayer(mono_a_path)
+    mono_b = read_monolayer(mono_b_path)
     cell_a = np.asarray(mono_a["cell"])[:2, :2]
     cell_b = np.asarray(mono_b["cell"])[:2, :2]
 
@@ -926,12 +770,12 @@ def build_twisted_supercells(
     #    verified end to end and B's file is the tiling input).
     mono_b_rot_path = workdir / "b_twist_rotated.lmp"
     rotate_layer_to_angle(str(mono_b_path), achieved, str(mono_b_rot_path))
-    mono_b_rot = _read_monolayer(mono_b_rot_path)
+    mono_b_rot = read_monolayer(mono_b_rot_path)
 
     # 3. Tile each monolayer into its moiré supercell with the integer matrices.
     atoms = {
-        "a": _monolayer_to_atoms(mono_a),
-        "b": _monolayer_to_atoms(mono_b_rot),
+        "a": monolayer_to_atoms(mono_a),
+        "b": monolayer_to_atoms(mono_b_rot),
     }
     matrices = {"a": twist.supercell_a, "b": twist.supercell_b}
     sc_atoms = {
@@ -969,7 +813,7 @@ def build_twisted_supercells(
             scale_atoms=True,
         )
         out_path = workdir / f"{lbl}_twist_supercell.lmp"
-        _write_supercell(
+        write_supercell(
             at, out_path,
             atom_style=str(mono["atom_style"]),
             n_types=int(mono["n_types"]),
@@ -1056,7 +900,7 @@ class HeteroStack:
     pm: Optional[PotentialManager] = None
 
 
-def _run_lammps(workdir: Path, script_path: Path) -> str:
+def run_lammps(workdir: Path, script_path: Path) -> str:
     """Run ``lmp_serial`` on a script with ``cwd = workdir`` and return stdout.
 
     Running from ``workdir`` is mandatory: the settings file's ``pair_coeff``
@@ -1086,7 +930,7 @@ def _run_lammps(workdir: Path, script_path: Path) -> str:
     return result.stdout
 
 
-def _box_region_cmd(lx: float, ly: float, xy: float, zlo: float, zhi: float) -> str:
+def box_region_cmd(lx: float, ly: float, xy: float, zlo: float, zhi: float) -> str:
     """LAMMPS ``region box ...`` command reproducing the shared in-plane box.
 
     Uses a ``prism`` region when the shared box is sheared (non-zero xy tilt),
@@ -1137,7 +981,7 @@ def _minimize_interface_gap(
     """
     zlo = min(bot_zext[0], top_zext[0]) - 10.0
     zhi = max(bot_zext[1], top_zext[1] + initial_guess) + 10.0
-    box_region = _box_region_cmd(lx, ly, xy, zlo, zhi)
+    box_region = box_region_cmd(lx, ly, xy, zlo, zhi)
 
     dx, dy = float(top_shift_xy[0]), float(top_shift_xy[1])
     disp = ""
@@ -1167,7 +1011,7 @@ print           "RESULT_LAT_C ${{lat_c}}"
 """
     script_path = workdir / f"min_interface_{bot_off}_{top_off}.lmp"
     script_path.write_text(script, encoding="utf-8")
-    out = _run_lammps(workdir, script_path)
+    out = run_lammps(workdir, script_path)
 
     value: Optional[float] = None
     for line in out.splitlines():
@@ -1267,7 +1111,7 @@ def assemble_hetero_stack(
     ref_index = 0
     nonref_index = 1
 
-    styles = {_detect_atom_style(p) for p in mat_paths}
+    styles = {detect_atom_style(p) for p in mat_paths}
     if len(styles) > 1:
         raise ValueError(
             f"Cannot assemble materials with differing atom_style {sorted(styles)} "
@@ -1426,7 +1270,7 @@ def assemble_hetero_stack(
     # Box z-window from the actual (shifted) atom extents so nothing wraps.
     zmins = [z_ext[s.material_index][0] + s.z for s in layers_spec]
     zmaxs = [z_ext[s.material_index][1] + s.z for s in layers_spec]
-    box_region = _box_region_cmd(lx, ly, xy, min(zmins) - 10.0, max(zmaxs) + 10.0)
+    box_region = box_region_cmd(lx, ly, xy, min(zmins) - 10.0, max(zmaxs) + 10.0)
 
     # Render + run the assembly. The assembly is a pure placement (`run 0` then
     # write_data), so for an MLIP cell the zero surrogate stands in for the real
@@ -1467,7 +1311,7 @@ def assemble_hetero_stack(
     template = env.get_template("hetero/stack_hetero.lmp")
     script_path = workdir / "stack_hetero.lmp"
     script_path.write_text(template.render(context), encoding="utf-8")
-    _run_lammps(workdir, script_path)
+    run_lammps(workdir, script_path)
 
     if not output_path.exists():
         raise RuntimeError(

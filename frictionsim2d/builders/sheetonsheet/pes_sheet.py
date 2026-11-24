@@ -85,7 +85,7 @@ class PESGridMixin:
       comparable and neither depends on the configured footprint.
     * :meth:`_scan_atom_style` / :meth:`_scan_pot_type` — ``atom_style`` comes
       from the sheet's potential type homogeneously, and from the assembled
-      data file (``_detect_atom_style``) for hetero.
+      data file (``detect_atom_style``) for hetero.
     * :meth:`_scan_extra_context` — extra template variables; ``{}``
       homogeneously, the box + z-band layer list for hetero.
     * :meth:`_scan_pm` / :meth:`_scan_interlayer_context` — the potential
@@ -603,7 +603,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
     def _scan_atom_style(self) -> str:
         """The style ``build`` already detected from the assembled data file.
 
-        ``HeteroSheetOnSheetSimulation.build`` runs ``_detect_atom_style`` on
+        ``HeteroSheetOnSheetSimulation.build`` runs ``detect_atom_style`` on
         ``hetero.data`` and stores the result in ``self._hetero_atom_style``
         before handing over to the run-phase seam, so re-reading the file here
         would only re-derive the identical value — a second source of truth

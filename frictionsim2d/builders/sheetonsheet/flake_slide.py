@@ -34,7 +34,8 @@ from ..utils.interlayer import (check_interlayer_box_from_data, interlayer_style
                                 interlayer_template_context, set_interlayer_from_config)
 from ..utils.z_vacuum import VIRTUAL_ATOM_ROOM, ZBox
 from ..construction.hetero_stack import (
-    build_hetero_flake_component, _box_region_cmd, _detect_atom_style, _run_lammps)
+    build_hetero_flake_component, box_region_cmd, run_lammps)
+from ..utils.lammps_data import detect_atom_style
 from ...interfaces.ase import read_lammps_data
 
 logger = logging.getLogger(__name__)
@@ -469,7 +470,7 @@ class FlakeSlideSimulation(SimulationBase):
             "ngroups": len(pm.types),
             "n_layers": n_sheet_layers,
             "constraint_mode": sim.constraint_mode,
-            "atom_style": _detect_atom_style(combined_path),
+            "atom_style": detect_atom_style(combined_path),
             "pot_type": "sw",
             # LOAD-BEARING (see mlip_template_context): this builder
             # subclasses SimulationBase directly, so it inherits neither the
@@ -720,7 +721,7 @@ class FlakeSlideSimulation(SimulationBase):
         placed_zmax = f_zmax + dz
         zlo = min(sheet_bot, f_zmin + dz) - 15.0
         zhi_box = max(sheet_top, placed_zmax) + 15.0
-        box_region = _box_region_cmd(lx, ly, xy, zlo, zhi_box)
+        box_region = box_region_cmd(lx, ly, xy, zlo, zhi_box)
         # `read_data ... add append` GROWS the box to take in the flake file's
         # own (larger, carving) box. Pin it back to the sheet's periodic cell,
         # or the substrate is a finite island with vacuum seams at the box edge.
@@ -729,7 +730,7 @@ class FlakeSlideSimulation(SimulationBase):
             f"change_box      all x final 0.0 {lx:.6f} y final 0.0 {ly:.6f} "
             f"z final {zlo:.6f} {zhi_box:.6f}{tilt} units box"
         )
-        atom_style = _detect_atom_style(sheet_path)
+        atom_style = detect_atom_style(sheet_path)
         total_types = len(pm.types)
         masses_block = pm.get_masses_string()
         combined_path = self.output_dir / "flake_slide.data"
@@ -774,7 +775,7 @@ write_data      {combined_path}{mol_nofix}
 """
         script_path = self.output_dir / "assemble_flake_slide.lmp"
         script_path.write_text(script, encoding="utf-8")
-        _run_lammps(self.output_dir, script_path)
+        run_lammps(self.output_dir, script_path)
 
         if not combined_path.exists():
             raise RuntimeError(

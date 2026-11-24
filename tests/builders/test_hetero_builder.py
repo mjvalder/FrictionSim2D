@@ -25,13 +25,13 @@ from ase.io import read, write
 
 from frictionsim2d.builders import components
 from frictionsim2d.builders.construction.hetero_stack import (
-    _detect_atom_style,
-    _run_lammps,
+    run_lammps,
     assemble_hetero_stack,
     build_hetero_structure,
     build_matched_supercells,
     register_hetero_potentials,
 )
+from frictionsim2d.builders.utils.lammps_data import detect_atom_style
 from frictionsim2d.core.config import SheetConfig, SheetOnSheetSimulationConfig, load_settings
 from frictionsim2d.lattice.matching import find_coincidence_lattice
 
@@ -507,7 +507,7 @@ def _lammps_run0_energy(data_path, settings_path) -> float:
     data_path = Path(data_path).resolve()
     settings_path = Path(settings_path).resolve()
     workdir = data_path.parent  # hetero.data lives directly in the run dir
-    atom_style = _detect_atom_style(data_path)
+    atom_style = detect_atom_style(data_path)
 
     script = f"""units           metal
 atom_style      {atom_style}
@@ -522,7 +522,7 @@ print           "RESULT_NATOMS ${{na}}"
 """
     script_path = workdir / "run0_smoke.lmp"
     script_path.write_text(script, encoding="utf-8")
-    out = _run_lammps(workdir, script_path)
+    out = run_lammps(workdir, script_path)
 
     assert "Lost atoms" not in out, f"LAMMPS reported lost atoms:\n{out[-2000:]}"
 

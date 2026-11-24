@@ -124,9 +124,9 @@ def install(monkeypatch, record: bool = False, fixture_dir: Path = FIXTURE_DIR) 
     monkeypatch.setattr(
         components, "run_lammps_commands",
         make_run_lammps_commands(components.run_lammps_commands, record, fixture_dir))
-    run = make_run_lammps(hetero_stack._run_lammps, record, fixture_dir)
-    monkeypatch.setattr(hetero_stack, "_run_lammps", run)
-    monkeypatch.setattr(flake_slide, "_run_lammps", run)
+    run = make_run_lammps(hetero_stack.run_lammps, record, fixture_dir)
+    monkeypatch.setattr(hetero_stack, "run_lammps", run)
+    monkeypatch.setattr(flake_slide, "run_lammps", run)
 
     if not record:
         def no_melt_quench(cmd, *args, **kwargs):

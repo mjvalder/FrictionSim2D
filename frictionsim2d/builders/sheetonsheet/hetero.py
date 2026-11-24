@@ -13,8 +13,8 @@ from ...interfaces.ase import read_lammps_data
 from ..utils.z_vacuum import SHEET_VIRTUAL_ATOM_HEIGHT, VIRTUAL_ATOM_ROOM, ZBox
 from ..utils.interlayer import (check_interlayer_box, interlayer_style,
                                 interlayer_template_context)
+from ..utils.lammps_data import detect_atom_style
 from ..construction.hetero_stack import (
-    _detect_atom_style,
     build_hetero_structure,
     register_hetero_potentials,
 )
@@ -214,7 +214,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
                              skin=settings.simulation.neighbor_list)
         self._check_d3_fits({'xlo': xlo, 'xhi': xhi, 'ylo': ylo, 'yhi': yhi})
 
-        atom_style = _detect_atom_style(stack.data_path)  # 'atomic' for sw
+        atom_style = detect_atom_style(stack.data_path)  # 'atomic' for sw
         lat_c = stack.interface_spacing or settings.geometry.lat_c_default
 
         # ------------------------------------------------------------------ #

@@ -3,42 +3,18 @@
 Bridges the pure-math ``lattice_matching`` module to on-disk structures. Kept
 separate so ``lattice_matching`` stays dependency-free (math only).
 """
-# pylint: disable=cyclic-import
-# The lazy imports of frictionsim2d.builders.construction.hetero_stack below (in
-# rotate_layer_to_angle/rotate_flake_in_plane) close a real import cycle with
-# frictionsim2d.builders.construction.{hetero_stack,components}: this module needs their
-# metadata-preserving I/O helpers, and they import this module for lattice
-# matching. The cycle is broken at runtime (both imports are deferred into the
-# function bodies), so it never actually hangs; pylint's cyclic-import check
-# only sees the module graph, not the deferral, and reports it on whichever
-# module pylint analyses first. A line-level pragma on the lazy imports cannot
-# silence it (pylint attributes the message to the first-analysed module, not
-# the import site), so the disable lives here at module scope instead.
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 
+from ..builders.utils.lammps_data import (
+    detect_atom_style, monolayer_to_atoms, read_monolayer, write_supercell,
+)
 from .matching import _max_strain, rotation_angle_between
 
 _TILT_EPS = 1e-9
-
-
-def _detect_atom_style(path: str) -> str:
-    """Detect the LAMMPS ``atom_style`` from a data file's ``Atoms`` header.
-
-    LAMMPS data files annotate the Atoms section with the style used to write
-    it, e.g. ``Atoms # charge``. Falls back to ``atomic`` if the comment is
-    absent (older/hand-written files).
-    """
-    with open(path, "r", encoding="utf-8") as fh:
-        for line in fh:
-            stripped = line.strip()
-            if stripped.startswith("Atoms"):
-                if "#" in stripped:
-                    style = stripped.split("#", 1)[1].strip()
-                    return style or "atomic"
-                return "atomic"
-    return "atomic"
 
 
 def _has_masses_section(path: str) -> bool:
@@ -82,7 +58,7 @@ def strain_monolayer_to_cell(input_data_path: str,
     assert abs(target[0][1]) < _TILT_EPS, \
         "target_cell_2x2 must have its first vector along x (LAMMPS-canonical form)"
 
-    atom_style = _detect_atom_style(input_data_path)
+    atom_style = detect_atom_style(input_data_path)
     needs_mass_fallback = not _has_masses_section(input_data_path)
 
     from ..interfaces.lammps import create_lammps_instance  # pylint: disable=import-outside-toplevel
@@ -167,26 +143,14 @@ def rotate_layer_to_angle(mono_path: str,
         commensurate twist angles are discrete and the achieved angle must
         never be silently assumed.
     """
-    # Lazy import: the metadata-preserving read/write helpers live in the hetero
-    # builder (which imports this module), so import them at call time to avoid a
-    # module-load cycle while still reusing exactly one metadata path.
-    from ..builders.construction.hetero_stack import (  # pylint: disable=import-outside-toplevel
-        _monolayer_to_atoms,
-        _read_monolayer,
-        _write_supercell,
-    )
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
-    # (grouped with the hetero_stack import above rather than split to module
-    # scope, since both are used only inside this lazy-import block)
-
-    mono = _read_monolayer(Path(mono_path))
-    atoms = _monolayer_to_atoms(mono)
+    mono = read_monolayer(Path(mono_path))
+    atoms = monolayer_to_atoms(mono)
 
     cell_in = np.array(atoms.cell)[:2, :2].copy()
     atoms.rotate(angle_deg, "z", rotate_cell=True)
     cell_rot = np.array(atoms.cell)[:2, :2].copy()
 
-    _write_supercell(
+    write_supercell(
         atoms,
         Path(out_path),
         atom_style=str(mono["atom_style"]),
@@ -218,23 +182,12 @@ def rotate_flake_in_plane(flake_path, angle_deg, out_path=None):
     Returns:
         The output path (a :class:`~pathlib.Path`).
     """
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
-    # (grouped with the hetero_stack import below rather than split to module
-    # scope, since both are used only inside this lazy-import block)
-    from ..builders.construction.hetero_stack import (  # pylint: disable=import-outside-toplevel
-        _monolayer_to_atoms,
-        _read_monolayer,
-        _write_supercell,
-    )
-    # (lazy: avoids a module-load cycle with hetero_stack -- see the
-    # module-level disable=cyclic-import comment at the top of this file)
-
     out_path = Path(out_path) if out_path is not None else Path(flake_path)
-    mono = _read_monolayer(Path(flake_path))
-    atoms = _monolayer_to_atoms(mono)
+    mono = read_monolayer(Path(flake_path))
+    atoms = monolayer_to_atoms(mono)
     cxy = atoms.get_positions()[:, :2].mean(axis=0)
     atoms.rotate(angle_deg, "z", center=(cxy[0], cxy[1], 0.0), rotate_cell=False)
-    _write_supercell(
+    write_supercell(
         atoms,
         out_path,
         atom_style=str(mono["atom_style"]),
