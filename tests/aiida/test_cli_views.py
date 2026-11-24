@@ -54,3 +54,33 @@ def test_sidecar_dir_finds_one_params_child_and_refuses_two(tmp_path):
     (two / 'schema-1.json').write_text('{}')
     with pytest.raises(ValueError, match='several sidecars'):
         sidecar_dir(tmp_path)
+
+
+def test_load_side_reads_a_sidecar_and_compare_loaded_reports_the_difference(tmp_path):
+    from frictionsim2d.aiida.compare import compare_loaded, load_side
+    from tests.cli.test_cli_compare import _sidecar
+    a = _sidecar(tmp_path / 'a.params', 300.0)
+    b = _sidecar(tmp_path / 'b.params', 400.0)
+    left = load_side(f'sidecar:{a}', None, 1e-6, 1e-9)
+    right = load_side(str(tmp_path / 'b.params'), None, 1e-6, 1e-9)
+    text = compare_loaded(left, right, 1e-6, 1e-9).render()
+    assert '300.0' in text and '400.0' in text
+    assert 'no differences' in compare_loaded(left, left, 1e-6, 1e-9).render()
+    (tmp_path / 'empty').mkdir()
+    with pytest.raises(LookupError, match='is not an export sidecar'):
+        load_side(f'sidecar:{tmp_path / "empty"}', None, 1e-6, 1e-9)
+
+
+def test_open_query_lists_set_labels_only_when_one_is_asked_for(monkeypatch):
+    from frictionsim2d import aiida as aiida_pkg
+    from frictionsim2d.aiida import query as query_mod
+    loaded = []
+    monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', loaded.append)
+
+    class _DB:
+        def get_available_conditions(self):
+            return {'set_labels': ['camp']}
+    monkeypatch.setattr(query_mod, 'Friction2DDB', _DB)
+    db, labels = query_mod.open_query('p', 'nope')
+    assert isinstance(db, _DB) and labels == ['camp'] and 'nope' not in labels
+    assert query_mod.open_query(None, None)[1] == [] and loaded == ['p', None]

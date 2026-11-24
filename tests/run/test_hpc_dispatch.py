@@ -168,3 +168,14 @@ def test_generation_report_names_the_submit_file_of_each_layout(tmp_path):
     assert single[0] == f"✅ Generated 1 script(s) in {out}"
     assert single[-2:] == ["   3. From the simulation root: sbatch hpc/preflight.slurm",
                            "   4. Follow submit_all.txt"]
+
+
+def test_plan_tree_generation_applies_the_scheduler_and_finds_the_runs(tmp_path):
+    root = _tree(tmp_path)
+    settings = _settings("pbs")
+    settings.hpc.scheduler_type = ""
+    hpc_config, paths = hpc_dispatch.plan_tree_generation(root, settings, "slurm")
+    assert settings.hpc.scheduler_type == "slurm" == hpc_config.scheduler_type
+    assert paths == ["afm/mat0/L1"]
+    _, none = hpc_dispatch.plan_tree_generation(tmp_path / "empty", _settings(), "pbs")
+    assert none == []

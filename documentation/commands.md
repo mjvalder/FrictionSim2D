@@ -727,8 +727,10 @@ FrictionSim2D fetch model qwen3.5-4b              # install
 FrictionSim2D fetch model qwen3.5-4b --remove     # uninstall, delete the bundle
 ```
 
-A local Ollama that does not answer is started first, as the Assistant pane
-does, and stopped again when the command ends. See [assistant.md](assistant.md).
+To install or remove, a local Ollama that does not answer is started first, as
+the Assistant pane does, and stopped again when the command ends. The plain
+listing never starts Ollama: with it down, nothing shows as installed. See
+[assistant.md](assistant.md).
 
 ## db and api (removed)
 

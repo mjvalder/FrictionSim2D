@@ -344,3 +344,14 @@ def test_fetch_command_refuses_an_unknown_tag_or_a_server_that_will_not_start():
     with pytest.raises(FetchError, match='Ollama is not installed'):
         fetch_command(TAG, False, print, settings=AgentSettings(), server=server,
                       models_fn=lambda s: None)
+
+
+def test_a_missing_ollama_binary_is_a_fetch_error(tmp_path):
+    def _no_binary(cmd, **kwargs):
+        raise FileNotFoundError(2, 'No such file or directory', cmd[0])
+    with pytest.raises(FetchError, match='cannot run /nowhere/ollama'):
+        fetch_model(TAG, lambda line: None, popen=_no_binary, hf_hub_download=FakeHub(),
+                    binary='/nowhere/ollama', models_dir=tmp_path, models_fn=_up)
+    with pytest.raises(FetchError, match='cannot run'):
+        remove_model(TAG, popen=_no_binary, binary='/nowhere/ollama', models_dir=tmp_path,
+                     models_fn=_up)

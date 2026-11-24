@@ -89,11 +89,17 @@ class _Ollama:
 
     def run(self, *args: str) -> Tuple[int, str]:
         """Run ``ollama <args>`` with its output as progress; (exit code, last line)."""
-        return _run([self.binary, *args], self.env, self.progress, self.popen)
+        try:
+            return _run([self.binary, *args], self.env, self.progress, self.popen)
+        except OSError as exc:  # no ollama binary here (a remote server may still answer)
+            raise FetchError(f'cannot run {self.binary}: {exc}') from exc
 
     def output(self, *args: str) -> Tuple[int, str]:
         """Run ``ollama <args>`` quietly; (exit code, output)."""
-        return _output([self.binary, *args], self.env, self.popen)
+        try:
+            return _output([self.binary, *args], self.env, self.popen)
+        except OSError as exc:
+            raise FetchError(f'cannot run {self.binary}: {exc}') from exc
 
 
 def _pull(ollama: _Ollama, repo: str, name: str) -> bool:

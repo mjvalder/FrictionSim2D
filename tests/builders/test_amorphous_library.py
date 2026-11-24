@@ -433,3 +433,21 @@ def test_block_line_shows_box_key_and_the_set_conditions():
     assert amorphous.block_line(row) == (
         f"amor_Si.lmp  user  unkeyed (no sidecar)  10.0x20.0x12.0 A  natoms=500  "
         f"{amorphous.CONDITION_FIELDS[0]}=4000")
+
+
+def test_block_rows_take_the_conditions_from_the_key_else_the_sidecar(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    keyed = SimpleNamespace(key8='abcd1234', **{n: 1 for n in amorphous.CONDITION_FIELDS})
+    blocks = [SimpleNamespace(path=tmp_path / 'amor_Si.lmp', root='user', key=keyed,
+                              unkeyed_reason=None, box=(1.0, 2.0, 3.0), meta={'natoms': 9}),
+              SimpleNamespace(path=tmp_path / 'amor_C.lmp', root='pack', key=None,
+                              unkeyed_reason='no sidecar', box=None,
+                              meta={amorphous.CONDITION_FIELDS[0]: 7})]
+    seen = []
+    monkeypatch.setattr(amorphous, 'scan_blocks', lambda m: seen.append(m) or blocks)
+    rows = amorphous.block_rows('Si')
+    assert seen == ['Si']
+    assert rows[0]['key8'] == 'abcd1234' and rows[0]['box'] == [1.0, 2.0, 3.0]
+    assert rows[0]['natoms'] == 9 and rows[0][amorphous.CONDITION_FIELDS[-1]] == 1
+    assert rows[1]['key8'] is None and rows[1]['unkeyed'] == 'no sidecar'
+    assert rows[1][amorphous.CONDITION_FIELDS[0]] == 7 and rows[1]['box'] is None
