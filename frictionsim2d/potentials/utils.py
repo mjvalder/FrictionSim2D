@@ -1,14 +1,8 @@
-"""Shared vocabulary and helpers for classical potential files.
+"""Potential-file helpers, the potential-type vocabulary and the sweep type resolver.
 
-Holds three things that no single consumer owns: the parsing/lookup helpers
-split out of frictionsim2d/core/utils.py, the potential-type vocabulary formerly in
-potential_manager.py, and the sweep type resolver formerly in
-frictionsim2d/core/potential_resolve.py.
-
-Keeping them here rather than in manager.py is what makes the package acyclic:
-manager.py imports this module, so anything this module needed from manager
-would close a loop. Direction of dependency is potentials -> core, never the
-reverse.
+Kept apart from manager.py so the package stays acyclic: manager.py imports this
+module, so anything needed from manager would close a loop. Dependencies run
+potentials -> core, never the reverse.
 """
 import logging
 import math
@@ -51,10 +45,8 @@ def lj_params(atom_type_1: str, atom_type_2: str) -> Tuple[float, float]:
     key2 = normalize_element_symbol(atom_type_2)
 
     try:
-        e1 = lj.lj_params[key1][1]
-        e2 = lj.lj_params[key2][1]
-        s1 = lj.lj_params[key1][0]
-        s2 = lj.lj_params[key2][0]
+        s1, e1 = lj.lj_params[key1]
+        s2, e2 = lj.lj_params[key2]
     except KeyError as e:
         raise KeyError(
             f"Atom type '{e.args[0]}' not found in LJ parameters database. "
@@ -191,10 +183,8 @@ def normalize_potential_type(potential_type: str) -> str:
 # ---------------------------------------------------------------------------
 # Potential-type vocabulary
 # ---------------------------------------------------------------------------
-#: Lives here rather than in manager.py because three modules need it and none
-#: owns it: manager.py, the resolver below, and frictionsim2d/builders/sheetonsheet.py --
-#: which previously imported the whole 1,000-line manager to read a six-element
-#: set.
+#: Lives here rather than in manager.py because several modules need it and none
+#: owns it, and importing the whole manager just for these sets is expensive.
 POTENTIALS_WITH_INTERNAL_LJ = {'airebo', 'rebomos', 'comb', 'comb3', 'reaxff', 'reax/c'}
 POTENTIALS_REQUIRING_LJ = {'sw', 'tersoff', 'rebo', 'edip', 'meam', 'eam', 'bop',
                             'morse',  'sw/mod', 'extep', 'vashishta'}
@@ -207,7 +197,7 @@ KNOWN_TYPES = POTENTIALS_REQUIRING_LJ | POTENTIALS_WITH_INTERNAL_LJ | MLIP_TYPES
 
 
 # ---------------------------------------------------------------------------
-# Potential-sweep type resolution (merged in from frictionsim2d/core/potential_resolve.py)
+# Potential-sweep type resolution
 # ---------------------------------------------------------------------------
 
 #: Extension -> BASE family only. No entry ever yields a type with '/'.
@@ -222,12 +212,11 @@ EXTENSION_MAP = {
     '.vashishta': 'vashishta',
 }
 
-#: MLIP model-file extensions (MLIPSpec.file_extensions). Deliberately NOT in
-#: EXTENSION_MAP: an MLIP is never inferred from a file. '.pth' is also an
-#: older NequIP/Allegro deployment and '.json' could become another code's
-#: format, so a guess could pick the wrong framework; an MLIP needs an explicit
-#: pot_type. Used only to trim the extension from the pot_ directory token.
-MLIP_FILE_EXTENSIONS = frozenset(MLIP_MODEL_EXTENSIONS)
+# MLIP model-file extensions (core.mlip.MLIP_MODEL_EXTENSIONS) are deliberately
+# NOT in EXTENSION_MAP: an MLIP is never inferred from a file. '.pth' is also an
+# older NequIP/Allegro deployment and '.json' could become another code's
+# format, so a guess could pick the wrong framework; an MLIP needs an explicit
+# pot_type.
 
 
 class PotentialTypeError(ValueError):
@@ -242,23 +231,6 @@ class ResolvedPotential:
     route: str   # 'explicit' | 'directory' | 'extension'
 
 
-# Potential-sweep type resolution (spec §13.3).
-#
-# Neither the file extension nor the directory determines the pair style,
-# because LAMMPS variants share both: ``.sw`` serves ``sw`` AND ``sw/mod``;
-# ``.tersoff`` serves ``tersoff``/``tersoff/mod``/...; ``.reax.*`` serves
-# ``reaxff`` and legacy ``reax/c``. Resolution order per entry:
-#
-#     1. explicit ``pot_type`` on the entry (always wins)
-#     2. parent directory under the potentials root, if it names a known type
-#     3. file extension, through EXTENSION_MAP
-#        (an MLIP is never inferred by 2 or 3: it must be explicit)
-#     4. otherwise FAIL THE BUILD
-#
-# Variant styles (anything containing ``/``) are NEVER inferred. This matters
-# because the legacy fallback is not an error: ``is_sheet_lj`` logs "Unknown
-# potential type, assuming LJ is required" and proceeds — under a sweep that
-# would silently emit the wrong pair_style for an entire arm.
 def _accept_custom_type(normalised: str, raw: str, source: str) -> None:
     """Allow a pair style outside KNOWN_TYPES iff the installed LAMMPS lists it.
 
@@ -290,12 +262,11 @@ def validate_pot_type(value: str, *, source: str) -> str:
     """Return ``value`` normalised, or raise if it is not a known LAMMPS style.
 
     The same :data:`KNOWN_TYPES` gate :func:`resolve_pot_type` applies to a sweep
-    entry, exposed for the plain ``[section] pot_type`` route. Until 2026-09-09
-    only the sweep route was checked, so an unknown style on the plain route
-    reached ``PotentialManager.is_sheet_lj``, which logged a warning, guessed
-    "LJ required", and let the string through into
-    ``pair_style hybrid sw sw sw <typo> lj/cut 11.0``. The build succeeded and
-    LAMMPS rejected the run with "Unknown pair style" -- after the job had been
+    entry, exposed for the plain ``[section] pot_type`` route. Unchecked, an
+    unknown style reaches ``PotentialManager.is_sheet_lj``, which logs a warning,
+    guesses "LJ required" and lets the string into
+    ``pair_style hybrid sw sw sw <typo> lj/cut 11.0``: the build succeeds and
+    LAMMPS rejects the run with "Unknown pair style" -- after the job has been
     transferred, queued and started.
 
     Args:
@@ -317,11 +288,34 @@ def validate_pot_type(value: str, *, source: str) -> str:
     return normalised
 
 
-def resolve_pot_type(entry: Union[str, dict],
-                     potentials_root: Path) -> ResolvedPotential:  # pylint: disable=unused-argument
-    # potentials_root is accepted for call-site symmetry with the sweep expander; the
-    # directory route deliberately matches any parent segment (spec §13.3), not only
-    # children of the root.
+def resolve_pot_type(entry: Union[str, dict]) -> ResolvedPotential:
+    """Resolve a sweep entry's potential file to its LAMMPS pair style.
+
+    Neither the file extension nor the directory determines the pair style,
+    because LAMMPS variants share both: ``.sw`` serves ``sw`` AND ``sw/mod``;
+    ``.tersoff`` serves ``tersoff``/``tersoff/mod``/...; ``.reax.*`` serves
+    ``reaxff`` and legacy ``reax/c``. Resolution order:
+
+    1. explicit ``pot_type`` on the entry (always wins);
+    2. any parent directory of the path that names a known type;
+    3. the file extension, through :data:`EXTENSION_MAP`
+       (an MLIP is never inferred by 2 or 3: it must be explicit);
+    4. otherwise fail the build.
+
+    Variant styles (anything containing ``/``) are NEVER inferred: the legacy
+    fallback is not an error (``is_sheet_lj`` logs "Unknown potential type,
+    assuming LJ is required" and proceeds), so under a sweep it would silently
+    emit the wrong pair_style for an entire arm.
+
+    Args:
+        entry: A path, or a dict with ``path`` and optionally ``pot_type``.
+
+    Returns:
+        The path, the resolved type and the route that decided it.
+
+    Raises:
+        PotentialTypeError: If no route resolves the type unambiguously.
+    """
     if isinstance(entry, dict):
         path = entry['path']
         explicit = entry.get('pot_type')
@@ -339,7 +333,7 @@ def resolve_pot_type(entry: Union[str, dict],
     suffix = Path(path).suffix.lower()
     mlip_dir = next((p for p in map(normalize_potential_type, parts[:-1])
                      if p in MLIP_TYPES), None)
-    if suffix in MLIP_FILE_EXTENSIONS or mlip_dir:
+    if suffix in MLIP_MODEL_EXTENSIONS or mlip_dir:
         raise PotentialTypeError(
             f"{path}: looks like an MLIP model; MLIPs are never inferred from a "
             f"folder or extension. State pot_type explicitly "
@@ -368,7 +362,7 @@ MLIP_D3_SLUG_SUFFIX = '-d3'
 
 def pot_dir_token(pot_type: str, path: Union[str, Path],
                   dispersion: Optional[str] = None) -> str:
-    """Output-directory segment: pot_<type-slug>_<stem> (spec §13.4).
+    """Output-directory segment: pot_<type-slug>_<stem>.
 
     '/' becomes '-' (sw/mod -> sw-mod); the stem is sanitised so the token
     is always a single path segment. For an MLIP ``pot_type`` the slug also
@@ -380,7 +374,7 @@ def pot_dir_token(pot_type: str, path: Union[str, Path],
     if slug in MLIP_TYPES and normalize_potential_type(dispersion or '') == 'd3':
         slug += MLIP_D3_SLUG_SUFFIX
     stem = Path(path).name
-    for ext in sorted({*EXTENSION_MAP, *MLIP_FILE_EXTENSIONS}, key=len, reverse=True):
+    for ext in sorted({*EXTENSION_MAP, *MLIP_MODEL_EXTENSIONS}, key=len, reverse=True):
         if stem.lower().endswith(ext):
             stem = stem[:-len(ext)]
             break

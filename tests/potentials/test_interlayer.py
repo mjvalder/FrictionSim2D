@@ -212,3 +212,17 @@ def test_hetero_component_splits_under_ilp(tmp_path):
     assert pm.components["sheet_1"]["split_chalcogens"] == {"S"}
     assert pm.components["tip_1"]["split_chalcogens"] == set()
     assert len(pm.types.ids_by_component("sheet_1")) == 3
+
+
+@pytest.mark.parametrize('style, elements, counts, expected', [
+    ('ilp', {'Mo', 'S'}, {'Mo': 1, 'S': 1}, {'S'}),
+    ('ilp', {'W', 'Se'}, {}, {'Se'}),
+    ('ilp', {'Mo', 'S'}, {'Mo': 1, 'S': 2}, set()),          # potential already splits S
+    ('ilp', {'S'}, {'S': 1}, set()),                         # no metal plane
+    ('kc', {'Mo', 'S'}, {'S': 1}, set()),                    # not ilp
+    ('ilp', {'C'}, {'C': 1}, set()),                         # graphene: not ilp/tmd
+    ('ilp', {'B', 'N'}, {'B': 1, 'N': 1}, set()),            # hBN: not ilp/tmd
+])
+def test_chalcogen_split_elements(style, elements, counts, expected):
+    from frictionsim2d.potentials.interlayer import chalcogen_split_elements
+    assert chalcogen_split_elements(style, elements, counts) == expected

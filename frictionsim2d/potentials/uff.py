@@ -1,16 +1,12 @@
-"""Lennard-Jones parameters for the Universal Force Field (UFF).
-
-This module contains a comprehensive dictionary of LJ parameters (sigma and epsilon)
-for all elements, derived from the UFF force field. These parameters are used for
-calculating cross-interactions between different material components and interlayer
-interactions in 2D materials.
+"""UFF Lennard-Jones (sigma [Angstrom], epsilon [eV]) per element, for Lorentz-Berthelot
+cross terms in ``utils.lj_params``.
 
 Reference:
     Rappe et al. (1992). "A full description of the UFF"
 """
 
 lj_params = {
-# symbol   Sigma      Epsilon
+# symbol   (sigma [A], epsilon [eV])
 'Ac' :(3.478 , 0.0014309922),
 'Ag' :(3.148 , 0.0015610824),
 'Al' :(4.499 , 0.0218985170),

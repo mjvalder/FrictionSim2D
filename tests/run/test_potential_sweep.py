@@ -13,42 +13,42 @@ ROOT = Path('examples/potentials')
 
 
 def test_directory_inference():
-    r = resolve_pot_type('sw/sw_lammps/h-MoS2.sw', ROOT)
+    r = resolve_pot_type('sw/sw_lammps/h-MoS2.sw')
     assert r.pot_type == 'sw' and r.route == 'directory'
 
 
 def test_explicit_overrides_directory():
     r = resolve_pot_type({'path': 'sw/sw_lammps/h-MoS2.sw',
-                          'pot_type': 'sw/mod'}, ROOT)
+                          'pot_type': 'sw/mod'})
     assert r.pot_type == 'sw/mod' and r.route == 'explicit'
 
 
 def test_variant_never_inferred():
     # a .sw file can serve sw OR sw/mod; inference must yield only 'sw'
-    r = resolve_pot_type('somewhere/else/h-MoS2.sw', ROOT)
+    r = resolve_pot_type('somewhere/else/h-MoS2.sw')
     assert r.route == 'extension' and '/' not in r.pot_type
 
 
 def test_reaxff_directory_infers_base_family():
     # 'reaxff' has no '/': directory inference is legitimate for it
-    r = resolve_pot_type('reaxff/ffield_ost.reax.MoS', ROOT)
+    r = resolve_pot_type('reaxff/ffield_ost.reax.MoS')
     assert r.pot_type == 'reaxff' and r.route == 'directory'
 
 
 def test_reaxff_outside_typed_dir_requires_explicit_type():
     # .reax.* serves both reaxff and legacy reax/c — extension never decides
     with pytest.raises(PotentialTypeError, match='explicitly'):
-        resolve_pot_type('potentials/ffield_ost.reax.MoS', ROOT)
+        resolve_pot_type('potentials/ffield_ost.reax.MoS')
 
 
 def test_unknown_type_fails_build():
     with pytest.raises(PotentialTypeError):
-        resolve_pot_type('mystery/thing.xyz', ROOT)
+        resolve_pot_type('mystery/thing.xyz')
 
 
 def test_explicit_unknown_type_fails():
     with pytest.raises(PotentialTypeError):
-        resolve_pot_type({'path': 'sw/x.sw', 'pot_type': 'quantum-magic'}, ROOT)
+        resolve_pot_type({'path': 'sw/x.sw', 'pot_type': 'quantum-magic'})
 
 
 def test_dir_token_slug():
@@ -112,7 +112,7 @@ def test_flake_sweep_rejected():
 ])
 def test_an_mlip_model_is_never_inferred(entry):
     with pytest.raises(PotentialTypeError, match='State pot_type explicitly'):
-        resolve_pot_type(entry, ROOT)
+        resolve_pot_type(entry)
 
 
 @pytest.mark.parametrize('pot_type, entry', [
@@ -120,10 +120,11 @@ def test_an_mlip_model_is_never_inferred(entry):
     ('deepmd', 'deepmd/dpa3.pth'),
 ])
 def test_an_mlip_model_with_an_explicit_type_resolves(pot_type, entry):
-    r = resolve_pot_type({'path': entry, 'pot_type': pot_type}, ROOT)
+    r = resolve_pot_type({'path': entry, 'pot_type': pot_type})
     assert (r.pot_type, r.route) == (pot_type, 'explicit')
 
 
 def test_mlip_extensions_are_not_in_the_inference_map():
-    from frictionsim2d.potentials.utils import EXTENSION_MAP, MLIP_FILE_EXTENSIONS  # pylint: disable=import-outside-toplevel
-    assert MLIP_FILE_EXTENSIONS and not MLIP_FILE_EXTENSIONS & set(EXTENSION_MAP)
+    from frictionsim2d.core.mlip import MLIP_MODEL_EXTENSIONS  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.potentials.utils import EXTENSION_MAP  # pylint: disable=import-outside-toplevel
+    assert MLIP_MODEL_EXTENSIONS and not set(MLIP_MODEL_EXTENSIONS) & set(EXTENSION_MAP)

@@ -628,8 +628,7 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                 )
             from ..potentials.utils import resolve_pot_type  # pylint: disable=import-outside-toplevel
             # deferred: potentials.utils imports the UFF table; only sweeps that use it pay for it
-            root = Path(base_dir) if base_dir else Path('.')
-            resolved = [resolve_pot_type(entry, root) for entry in pot_val]
+            resolved = [resolve_pot_type(entry) for entry in pot_val]
             sweep_params[(primary_key, '_pot_expand')] = resolved
 
     if not sweep_params:

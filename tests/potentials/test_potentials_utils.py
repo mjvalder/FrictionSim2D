@@ -160,7 +160,7 @@ def test_pot_dir_token_is_a_single_safe_segment(pot_type, path, token):
 
 
 def test_resolve_pot_type_directory_route_wins_over_extension(tmp_path):
-    r = resolve_pot_type('tersoff/thing.sw', tmp_path)
+    r = resolve_pot_type('tersoff/thing.sw')
     assert (r.pot_type, r.route) == ('tersoff', 'directory')
 
 
@@ -174,13 +174,13 @@ def test_resolve_pot_type_never_infers_a_variant_style(tmp_path):
     matches and wins before 'mod' is ever considered. A variant type can only be
     reached via an explicit pot_type (test_explicit_overrides_directory in that
     same file) — never inferred, only ever the base style."""
-    r = resolve_pot_type('sw/mod/thing.xyz', tmp_path)
+    r = resolve_pot_type('sw/mod/thing.xyz')
     assert (r.pot_type, r.route) == ('sw', 'directory')
 
 
 def test_resolve_pot_type_unknown_extension_and_directory_fails(tmp_path):
     with pytest.raises(PotentialTypeError):
-        resolve_pot_type('mystery/thing.xyz', tmp_path)
+        resolve_pot_type('mystery/thing.xyz')
 
 
 def test_known_types_contains_the_three_documented_families():
@@ -215,5 +215,81 @@ class TestCustomPotType:
         from frictionsim2d.potentials import utils
         monkeypatch.setattr('frictionsim2d.interfaces.lammps.lammps_pair_styles',
                             lambda: frozenset({'mlip'}))
-        res = utils.resolve_pot_type({'path': 'a.bin', 'pot_type': 'mlip'}, Path('.'))
+        res = utils.resolve_pot_type({'path': 'a.bin', 'pot_type': 'mlip'})
         assert res.pot_type == 'mlip'
+
+
+# --- potential/CIF compatibility, internal cutoffs, D3 slug ------------------
+
+_MATERIALS = Path(__file__).resolve().parents[2] / 'examples' / 'materials'
+
+
+def _potential(tmp_path, *triplets):
+    path = tmp_path / 'p.sw'
+    path.write_text('\n'.join(f'{a} {b} {c} 1.0' for a, b, c in triplets) + '\n',
+                    encoding='utf-8')
+    return path
+
+
+def test_cif_compatibility_consistent_multiples(tmp_path):
+    from frictionsim2d.potentials.utils import check_potential_cif_compatibility
+    cif = _MATERIALS / 'h-MoS2.cif'                       # Mo 1, S 2 per cell
+    plain = _potential(tmp_path, ('Mo', 'S', 'S'))
+    assert check_potential_cif_compatibility(cif, plain) == 1
+    doubled = _potential(tmp_path, ('Mo1', 'S1', 'S3'), ('Mo2', 'S2', 'S4'))
+    assert check_potential_cif_compatibility(cif, doubled) == 2
+
+
+def test_cif_compatibility_inconsistent_ratios_raise(tmp_path):
+    from frictionsim2d.potentials.utils import check_potential_cif_compatibility
+    cif = _MATERIALS / 'h-MoS2.cif'
+    mixed = _potential(tmp_path, ('Mo1', 'S1', 'S2'), ('Mo2', 'S1', 'S2'))
+    with pytest.raises(ValueError, match='Inconsistent atom type multiplier'):
+        check_potential_cif_compatibility(cif, mixed)
+
+
+_POTS = Path(__file__).resolve().parents[2] / 'examples' / 'potentials'
+
+
+@pytest.mark.parametrize('pot_type, expected', [
+    ('airebo', 3.0 * 3.4),
+    ('comb', 7.5),
+    ('comb3', 7.5),
+    ('deepmd', 7.5),
+    ('mace', 7.5),
+    ('sw', 0.0),
+])
+def test_internal_pair_cutoff_by_type(pot_type, expected):
+    from frictionsim2d.potentials.utils import internal_pair_cutoff
+    assert internal_pair_cutoff(pot_type, 'unused', 7.5) == expected
+
+
+def test_internal_pair_cutoff_reaxff_variants(tmp_path):
+    from frictionsim2d.potentials.utils import internal_pair_cutoff
+    wide = tmp_path / 'wide.reax'
+    wide.write_text('header\n' + ''.join(f'{v} x\n' for v in
+                                        [1] * 13 + [14.5, 0, 0]), encoding='utf-8')
+    assert internal_pair_cutoff('reaxff', wide, 11.0) == 14.5   # swb beats QEq 10.0
+    broken = tmp_path / 'broken.reax'
+    broken.write_text('too short\n', encoding='utf-8')
+    assert internal_pair_cutoff('reaxff', broken, 11.0) == 10.0  # unparseable: QEq
+
+
+def test_internal_pair_cutoff_rebomos_without_sigma_raises(tmp_path):
+    from frictionsim2d.potentials.utils import internal_pair_cutoff
+    empty = tmp_path / 'x.rebomos'
+    empty.write_text('1.0 epsilon_MM\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='no sigma_'):
+        internal_pair_cutoff('rebomos', empty, 11.0)
+
+
+def test_pot_dir_token_d3_slug_only_for_mlips():
+    assert pot_dir_token('mace', 'm.json', dispersion='d3') == 'pot_mace-d3_m'
+    assert pot_dir_token('mace', 'm.json', dispersion='none') == 'pot_mace_m'
+    assert pot_dir_token('mace', 'm.json') == 'pot_mace_m'
+    assert pot_dir_token('sw', 'MoS2.sw', dispersion='d3') == 'pot_sw_MoS2'
+
+
+def test_lj_params_reports_the_missing_element():
+    with pytest.raises(KeyError, match="'Xx' not found"):
+        lj_params('Mo', 'Xx')

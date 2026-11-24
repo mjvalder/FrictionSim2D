@@ -9,11 +9,10 @@ Must not import ``ase`` (``tests/repo/test_import_weight.py``): the CIF read in
 :func:`check_interlayer_choice` is a deferred import.
 """
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..core.utils.paths import get_material_path, get_potential_path
 
-InterlayerStyle = Literal['lj', 'lj_g', 'ilp', 'kc']
 INTERLAYER_STYLES: Tuple[str, ...] = ('lj', 'lj_g', 'ilp', 'kc')
 
 #: Jiang-Park Gaussian strength g (meV) by material, structure prefix stripped.
@@ -21,8 +20,10 @@ GAUSSIAN_G_MEV: Dict[str, float] = {
     'MoS2': 175.68, 'graphene': 94.87, 'C': 94.87, 'BP': 123.0, 'P': 123.0,
 }
 
+#: Cutoff (Angstrom) of ``ilp/tmd`` and ``kolmogorov/crespi/full``.
 ILP_CUTOFF = 16.0
 KC_FULL_CUTOFF = 16.0
+#: LAMMPS ilp/kc ``tap_flag`` argument: 1 = taper the cutoff.
 TAPER_FLAG = 1
 
 EXAMPLES_POTENTIALS_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'potentials'
@@ -50,7 +51,7 @@ def mixed_g(g1: float, g2: float) -> float:
     return (g1 * g2) ** 0.5
 
 
-#: Fixed KC/z columns that turn the potential into a pure Gaussian (spec §4).
+#: Fixed KC/z columns that turn the potential into a pure Gaussian.
 _GAUSSIAN_KC_Z0 = 3.0
 _GAUSSIAN_KC_DELTA = 1.0
 _GAUSSIAN_KC_S = 1.0
@@ -126,7 +127,7 @@ CHALCOGENS = frozenset({'S', 'Se', 'Te'})
 #: file; the potential manager splits the same components' types. The hetero
 #: components numbered after them (``sheet_1``, ``flake_2``, ...; see
 #: :func:`splits_chalcogens`) are built from ``build_monolayer`` too.
-SPLIT_COMPONENTS = ('sheet', 'flake')
+_SPLIT_COMPONENTS = ('sheet', 'flake')
 
 
 def splits_chalcogens(component: str) -> bool:
@@ -137,10 +138,10 @@ def splits_chalcogens(component: str) -> bool:
     ``flake_2`` of a hetero flake): every one of them is read from a
     ``build_monolayer`` file, which applies the same split.
     """
-    if component in SPLIT_COMPONENTS:
+    if component in _SPLIT_COMPONENTS:
         return True
     base, _, index = component.rpartition('_')
-    return base in SPLIT_COMPONENTS and index.isdigit()
+    return base in _SPLIT_COMPONENTS and index.isdigit()
 
 
 def chalcogen_split_elements(style: str, elements, pot_counts: Dict[str, int]) -> Set[str]:
@@ -186,6 +187,7 @@ def resolve_interlayer_file(name: str, style: str,
 
 def _sheet_elements(sheets, base_dir: Optional[Path]) -> Optional[Set[str]]:
     """Union of the CIF elements of ``sheets``; None if a CIF cannot be read."""
+    # Deferred: core.utils.structures reaches ase (tests/repo/test_import_weight.py).
     from ..core.utils.structures import cifread  # pylint: disable=import-outside-toplevel
     found: Set[str] = set()
     for sheet in sheets:
@@ -207,6 +209,7 @@ def check_interlayer_choice(config: Any, base_dir: Optional[Path] = None) -> Non
             an internal-LJ potential, a missing Gaussian ``g`` or a missing
             parameter file that cannot be defaulted.
     """
+    # Deferred: potentials.utils reaches ase (tests/repo/test_import_weight.py).
     # pylint: disable=import-outside-toplevel
     from .utils import POTENTIALS_WITH_INTERNAL_LJ
     general = config.general
