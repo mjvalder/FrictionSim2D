@@ -190,26 +190,12 @@ class PlotCommonMixin(PlotterMixinBase):
     # INITIALISATION HELPERS
     # =====================================================================
 
-    def _deep_merge_dict(self, d1: dict, d2: dict) -> None:
-        """Recursively merge *d2* into *d1*; a list REPLACES, never extends.
-
-        Extending was the bug: `--settings '{"figure": {"size": [8, 6]}}'`
-        produced `[10, 7, 8, 6]`, matplotlib read the first two, and the
-        option silently did nothing. A settings list is a value, not an
-        accumulator -- there is no setting for which appending is right.
-        """
-        for k, v in d2.items():
-            if k in d1 and isinstance(d1[k], dict) and isinstance(v, dict):
-                self._deep_merge_dict(d1[k], v)
-            else:
-                d1[k] = v
-
     def _merge_metadata(self, d1: dict, d2: dict) -> None:
         """Merge one dataset's metadata into the accumulated metadata.
 
         The OTHER merge: here a list is a SET OF VALUES SEEN and must be
         unioned, because `_load_all_metadata` folds every dataset's
-        `materials`/`sizes`/`temperatures` into one. `_deep_merge_dict` used to
+        `materials`/`sizes`/`temperatures` into one. `merge_settings` used to
         serve both call sites, so making settings lists replace (which is the
         only right answer for `--settings`) would have made the second dataset
         silently overwrite the first's material list. Two call sites, two

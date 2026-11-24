@@ -1304,21 +1304,6 @@ def postprocess_group():
     """Read, analyse and plot simulation results."""
 
 
-def _merge_settings(base: dict, overlay: dict) -> None:
-    """Merge `overlay` into `base`; a list REPLACES, never extends.
-
-    The same rule as `PlotCommonMixin._deep_merge_dict`, repeated here rather
-    than imported so `--validate` never has to import the plot stack (and
-    matplotlib with it).
-    """
-    for key, value in overlay.items():
-        if (key in base and isinstance(base[key], dict)
-                and isinstance(value, dict)):
-            _merge_settings(base[key], value)
-        else:
-            base[key] = value
-
-
 def _integrity_thresholds(path):
     """`IntegritySettings` from `path`, else from the user's settings."""
     import yaml  # noqa: PLC0415
@@ -1487,18 +1472,18 @@ def postprocess_plot(plot_config, output_dir, settings, preset, validate,
     except Exception as exc:  # pylint: disable=broad-except
         raise click.ClickException(str(exc)) from exc
 
-    from .postprocessing.plot_style import DEFAULT_SETTINGS  # noqa: PLC0415
+    from .postprocessing.plot_style import DEFAULT_SETTINGS, merge_settings  # noqa: PLC0415
     from .postprocessing.presets import load_preset  # noqa: PLC0415
 
     plot_settings = copy.deepcopy(DEFAULT_SETTINGS)
     if preset:
         try:
-            _merge_settings(plot_settings, load_preset(preset))
+            merge_settings(plot_settings, load_preset(preset))
         except KeyError as exc:
             raise click.ClickException(str(exc)) from exc
     if settings:
         with open(settings, 'r', encoding='utf-8') as fh:
-            _merge_settings(plot_settings, json.load(fh))
+            merge_settings(plot_settings, json.load(fh))
 
     if validate:
         click.echo(f"OK: {len(document.plots)} plot(s), "

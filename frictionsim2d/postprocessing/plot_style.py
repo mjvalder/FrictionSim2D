@@ -26,6 +26,15 @@ GEM12_COLORS = GEM24_COLORS
 DEFAULT_SETTINGS: dict[str, Any] = PlotSettings().model_dump()
 
 
+def merge_settings(base: dict, overlay: dict) -> None:
+    """Merge `overlay` into `base` in place; a list REPLACES, never extends."""
+    for key, value in overlay.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            merge_settings(base[key], value)
+        else:
+            base[key] = value
+
+
 @dataclasses.dataclass
 class StickSlipPSD:
     """Frequency-domain results from stick-slip FFT analysis."""

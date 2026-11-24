@@ -13,14 +13,16 @@ import pandas as pd
 from .plot_common import PlotCommonMixin
 # Re-exported: callers import it from here, it is defined there to keep
 # plot_common -> plot_data from being a cycle.
-from .plot_mixin_base import PlotDataError  # noqa: F401  # pylint: disable=unused-import
+from .plot_mixin_base import PlotDataError
 from .plot_correlation import PlotCorrelationMixin
 from .plot_ranking import PlotRankingMixin
-from .plot_style import DEFAULT_SETTINGS
+from .plot_style import DEFAULT_SETTINGS, merge_settings
 from .plot_stick_slip import PlotStickSlipMixin
 from .plot_summary import PlotSummaryMixin
 from .plot_tables import PlotTablesMixin
 from .plot_timeseries import PlotTimeseriesMixin
+
+__all__ = ['Plotter', 'PlotDataError']
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +54,10 @@ class Plotter(
         self.dataset_display_labels = dataset_display_labels or {}
         self.series_color_map = dict(series_color_map or {})
 
-        # deepcopy, not .copy(): a shallow copy shared every sub-dict with the
-        # module-level default, so one Plotter's --settings mutated the
-        # defaults for the next one constructed in the same process.
+        # deepcopy: a shallow copy lets one Plotter mutate the shared defaults.
         self.settings = copy.deepcopy(DEFAULT_SETTINGS)
         if settings:
-            self._deep_merge_dict(self.settings, settings)
+            merge_settings(self.settings, settings)
 
         self.figure_size = tuple(self.settings["figure"]["size"])
         self.constrained_layout = bool(

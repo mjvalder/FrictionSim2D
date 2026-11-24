@@ -27,16 +27,6 @@ def _emit(kind: str, **payload: Any) -> None:
     print(json.dumps({'kind': kind, **payload}), flush=True)
 
 
-def _merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> None:
-    """Merge `overlay` into `base`; a list REPLACES, never extends."""
-    for key, value in overlay.items():
-        if (key in base and isinstance(base[key], dict)
-                and isinstance(value, dict)):
-            _merge(base[key], value)
-        else:
-            base[key] = value
-
-
 def run(request: Dict[str, Any]) -> Dict[str, Any]:
     """Render the requested plots and describe what was written.
 
@@ -47,16 +37,16 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
     """
     from ..postprocessing.plot_config import load_plot_document  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
     from ..postprocessing.plot_data import Plotter  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
-    from ..postprocessing.plot_style import DEFAULT_SETTINGS  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+    from ..postprocessing.plot_style import DEFAULT_SETTINGS, merge_settings  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
     from ..postprocessing.presets import load_preset  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
     document = load_plot_document(Path(request['document_file']))
 
     settings = copy.deepcopy(DEFAULT_SETTINGS)
     if request.get('preset'):
-        _merge(settings, load_preset(request['preset']))
+        merge_settings(settings, load_preset(request['preset']))
     if request.get('settings'):
-        _merge(settings, request['settings'])
+        merge_settings(settings, request['settings'])
 
     output_dir = Path(request['output_dir'])
     plotter = Plotter(

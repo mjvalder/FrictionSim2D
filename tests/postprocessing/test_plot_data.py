@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from frictionsim2d.postprocessing.plot_data import Plotter
+from frictionsim2d.postprocessing.plot_style import merge_settings
 
 
 
@@ -253,7 +254,7 @@ def test_the_two_merges_disagree_on_purpose(tmp_path):
     settings_side = {'formats': ['png']}
     metadata_side = {'formats': ['png']}
 
-    plotter._deep_merge_dict(settings_side, {'formats': ['pdf']})  # pylint: disable=protected-access
+    merge_settings(settings_side, {'formats': ['pdf']})
     plotter._merge_metadata(metadata_side, {'formats': ['pdf']})  # pylint: disable=protected-access
 
     assert settings_side['formats'] == ['pdf']          # a value: replaced
