@@ -76,7 +76,7 @@ def test_create_lammps_instance_is_headless():
 
 
 def test_import_lammps_module_returns_the_lammps_module():
-    import lammps
+    lammps = pytest.importorskip("lammps")
     assert lmp_iface._import_lammps_module() is lammps
 
 

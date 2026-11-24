@@ -105,7 +105,10 @@ def _deterministic() -> Iterator[None]:
             patched.append(mod)
             mod.datetime = _FixedDatetime
     real_uuid4 = uuid.uuid4
-    uuid.uuid4 = lambda: uuid.UUID(int=next(counter))
+    pid = (os.getpid() & 0xFFFF) << 112
+    # pid and counter in the top bits: the 8 hex digits `_tmp_path` keeps differ per
+    # process, so concurrent runs do not share scratch files.
+    uuid.uuid4 = lambda: uuid.UUID(int=pid | (next(counter) << 96))
     random.seed(20260101)
     try:
         yield

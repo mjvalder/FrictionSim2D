@@ -426,7 +426,10 @@ def test_scan_registry_index_reports_the_ab_offset_and_aa_at_the_origin():
     frac_aa = np.linalg.solve(cell.T, result.aa_shift) % 1.0
     frac_ab = np.linalg.solve(cell.T, result.ab_shift) % 1.0
     assert np.allclose(np.minimum(frac_aa, 1.0 - frac_aa), 0.0, atol=1e-9)
-    assert np.all(np.minimum(frac_ab, 1.0 - frac_ab) > 0.2)   # AB is off the AA origin
+    # The 12-point scan minimum of this disk-overlap model is at (1/2, 7/12); the
+    # (1/3, 1/3) site the sublattice offset suggests has a clearly higher RI.
+    assert np.allclose(frac_ab, [0.5, 7 / 12])
+    assert result.ri_grid[4, 4] > result.ab_ri + 0.2
 
 
 def test_orthorhombic_wrapper_raises_when_no_tiling_fits():
