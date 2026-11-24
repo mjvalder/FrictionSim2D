@@ -426,8 +426,11 @@ def test_scan_registry_index_reports_the_ab_offset_and_aa_at_the_origin():
     frac_aa = np.linalg.solve(cell.T, result.aa_shift) % 1.0
     frac_ab = np.linalg.solve(cell.T, result.ab_shift) % 1.0
     assert np.allclose(np.minimum(frac_aa, 1.0 - frac_aa), 0.0, atol=1e-9)
-    # The 12-point scan minimum of this disk-overlap model is at (1/2, 7/12); the
-    # (1/3, 1/3) site the sublattice offset suggests has a clearly higher RI.
+    # Characterisation, behaviour pinned: the 12-point scan minimum of this
+    # disk-overlap model is at (1/2, 7/12). In this code's 120 deg cell the Bernal
+    # AB site is (1/3, 2/3) (RI 0.796), not (1/3, 1/3) (RI 0.924, as the 60 deg
+    # convention would give). The model has no sublattice distinction, so its
+    # minimum is the least-eclipsed shift, not the Bernal site.
     assert np.allclose(frac_ab, [0.5, 7 / 12])
     assert result.ri_grid[4, 4] > result.ab_ri + 0.2
 
