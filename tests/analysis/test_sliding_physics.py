@@ -310,3 +310,11 @@ def test_sliding_physics_refuses_pes_families():
                        fetch=_Fetch({}))
     with pytest.raises(ValueError, match='pes_tip'):
         cls().compute(source, cls.Params())
+
+
+def test_sliding_physics_drops_a_run_with_no_window_tier():
+    rows = [_row('p1'), _row('p2')]
+    frames = {'p1': {'peratom': _afm_frames()['peratom']}, 'p2': _afm_frames()}
+    table, source = _sliding(rows, frames)
+    assert source.dropped == [('p1', sp.NO_WINDOW)]
+    assert list(table['point_uuid']) == ['p2']
