@@ -409,32 +409,16 @@ def _embed_3x3(matrix_2x2: np.ndarray) -> np.ndarray:
     return p
 
 
-#: Tolerance (Å) within which a candidate in-plane translation must map every
-#: atom onto a same-species atom for :func:`detect_inplane_repeat` to accept it
-#: as a lattice translation of the assembled stack.
-#:
-#: Why 0.05 Å. Exact equality cannot be required: both materials are affinely
-#: strained onto the shared mean cell, and the assembled ``hetero.data`` is
-#: written with finite decimal precision. Measured on the MoS2/WS2 fixture the
-#: residual of a true translation is <= 1.9e-7 Å (an affine strain is uniform,
-#: so it preserves each sublattice's periodicity exactly; only the data file's
-#: write precision shows up), so 0.05 Å is ~2.5e5x the observed residual — no
-#: realistic false negative. In the other direction 0.05 Å is 1.6% of the
-#: smallest in-plane period these lattices have (~3.19 Å) and far below the
-#: closest same-species in-plane site separation (>= 1.8 Å), so it cannot
-#: produce a false positive either. The asymmetry matters: a tolerance that is
-#: too TIGHT is safe (it reports a superlattice of the true repeat, i.e. the
-#: pre-fix behaviour), while one that is too LOOSE would over-divide the energy.
-INPLANE_REPEAT_TOL = 0.05
-
-#: Shortest in-plane repeat (Å) :func:`detect_inplane_repeat` will propose. No
-#: 2D lattice has a shorter in-plane period, so this only bounds the search.
-MIN_INPLANE_REPEAT = 1.0
-
-#: Hard cap on the number of repeats searched along each axis (bounds the cost
-#: on very large boxes; exceeding it just yields a superlattice, never a
-#: too-small cell).
-MAX_INPLANE_REPEATS = 32
+#: Per-atom tolerance (A) for accepting a translation as a lattice repeat. The
+#: residual of a true repeat is ~1e-7 A (data-file write precision), and the
+#: closest same-species in-plane separation is >= 1.8 A. Too tight only yields a
+#: superlattice of the true repeat; too loose would over-divide the energy.
+_REPEAT_TOL = 0.05
+#: Shortest in-plane repeat (A) proposed; no 2D lattice has a shorter period.
+_MIN_REPEAT = 1.0
+#: Cap on repeats searched per axis; exceeding it yields a superlattice, never
+#: a too-small cell.
+_MAX_REPEATS = 32
 
 
 def _is_inplane_translation(
@@ -469,59 +453,36 @@ def _is_inplane_translation(
 
 def detect_inplane_repeat(
     data_path: PathLike,
-    tol: float = INPLANE_REPEAT_TOL,
-    max_repeats: int = MAX_INPLANE_REPEATS,
-    min_repeat: float = MIN_INPLANE_REPEAT,
 ) -> Tuple[Tuple[float, float], Tuple[int, int]]:
     """Find an assembled stack's MINIMAL axis-aligned in-plane repeat unit.
 
-    A coincidence match is *not* in general a minimal cell. ``build_monolayer``
-    tiles each material to the user's configured x/y footprint BEFORE
-    :func:`build_matched_supercells` matches them, so for a near-lattice-matched
-    pair the match matrices come back (near-)identity on cells that are already
-    an n x m tiling of their own primitive. The assembled box is then a
-    SUPERLATTICE of the interface's repeat unit: the interface is periodic with
-    the primitive cell, not with the box. Measured on the shipped MoS2/WS2
-    fixture the box holds 4x2 (footprint 12 Å) or 4x3 (footprint 14 Å) identical
-    interface repeat units.
+    A coincidence match is not in general a minimal cell: ``build_monolayer``
+    tiles each material to the configured x/y footprint before matching, so a
+    near-lattice-matched pair yields a box holding n x m identical interface
+    repeat units. The PES scan period must be the repeat unit, and the per-cell
+    energy normalisation must divide by the number of repeat units, or the
+    corrugation would scale with the footprint.
 
-    That matters twice over. The PES scan period must be the repeat unit or the
-    grid wastes its resolution re-measuring registries it has already visited;
-    and the per-cell energy normalization must divide by the number of repeat
-    units in the box or the reported corrugation is a per-box number that scales
-    with the simulation footprint — not a physical quantity at all.
+    The repeat is measured off the assembled structure: per axis, the largest
+    ``n`` such that translating by ``L/n`` maps every atom onto a same-species
+    atom at the same height. This holds however the match was built.
 
-    Detection rather than algebra. The repeat is measured directly off the
-    assembled structure: for each axis, the largest ``n`` such that translating
-    by ``L/n`` maps every atom onto a same-species atom at the same height
-    within ``tol``. This holds regardless of how the match was constructed
-    (identity match on pre-tiled cells, a genuine non-diagonal Zur-McGill match,
-    or a twisted moiré), where the algebraic route — the per-monolayer tile
-    count times ``det(matrix)`` — is only straightforward for a diagonal match.
-    ``tests/builders/test_hetero_pes_sheet.py`` cross-checks the two on the fixture.
-
-    Only axis-aligned candidates are tested. That is deliberate, not a
-    limitation: the scan grid steps along +x/+y, and the homogeneous PES path
-    normalizes per ORTHOGONALIZED unit cell (``build_sheet(unit_cell_out=...)``
-    -> ``_tile_count``). A centred-rectangular lattice's ``(a/2, b/2)`` glide is
-    therefore intentionally not counted, so hetero and homogeneous barriers are
-    reported in the same units and stay comparable.
-
-    Assumes an orthogonal box (both PES callers refuse a triclinic coincidence
-    cell before reaching here); the xy tilt is ignored.
+    Only axis-aligned candidates are tested: the scan grid steps along +x/+y and
+    the homogeneous PES path normalises per orthogonalised unit cell, so a
+    centred-rectangular glide is intentionally not counted. Assumes an
+    orthogonal box (both PES callers refuse a triclinic cell); xy tilt is
+    ignored.
 
     Args:
         data_path: Assembled LAMMPS data file (e.g. ``hetero.data``).
-        tol: Per-atom match tolerance in Å; see :data:`INPLANE_REPEAT_TOL`.
-        max_repeats: Largest repeat count searched per axis.
-        min_repeat: Shortest repeat (Å) considered.
 
     Returns:
-        ``((period_x, period_y), (nx, ny))`` — the minimal repeat and how many
-        of them tile the box, so ``nx * period_x == lx`` and
+        ``((period_x, period_y), (nx, ny))`` with ``nx * period_x == lx`` and
         ``ny * period_y == ly``. Falls back to ``((lx, ly), (1, 1))`` when no
-        sub-box translation is found (an incommensurate/twisted stack), which is
-        exactly the pre-fix behaviour and is always safe.
+        sub-box translation exists (an incommensurate or twisted stack).
+
+    Raises:
+        ValueError: If the in-plane box is not positive.
     """
     atoms = read_lammps_data(data_path)
     cell = atoms.cell
@@ -535,9 +496,10 @@ def detect_inplane_repeat(
     species = np.asarray(atoms.numbers)
 
     def _axis_repeat_count(axis: int, length: float) -> int:
-        n_cap = min(int(max_repeats), max(1, int(length // min_repeat)))
+        n_cap = min(_MAX_REPEATS, max(1, int(length // _MIN_REPEAT)))
         for n in range(n_cap, 1, -1):
-            if _is_inplane_translation(pos, species, lx, ly, axis, length / n, tol):
+            if _is_inplane_translation(
+                    pos, species, lx, ly, axis, length / n, _REPEAT_TOL):
                 return n
         return 1
 
