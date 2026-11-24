@@ -1,5 +1,7 @@
 """One family vocabulary and one model vocabulary (AiiDA spec §3 F1)."""
-from frictionsim2d.core.observables import FAMILIES, REGISTRY
+import pytest
+
+from frictionsim2d.core.observables import FAMILIES, PES_FAMILIES, REGISTRY
 from frictionsim2d.hpc.manifest import JobManifest
 from frictionsim2d.postprocessing.read_data import DataReader
 from frictionsim2d.run.naming import AFM_LIKE_MODELS, MODELS, SHEET_LIKE_MODELS
@@ -19,8 +21,23 @@ def test_models_are_the_top_directory_axis():
 
 
 def test_consumers_share_the_one_tuple():
-    assert DataReader._KNOWN_FAMILIES is FAMILIES
     assert JobManifest._TOP_DIRS is FAMILIES
+    for family in FAMILIES:
+        assert DataReader._registry_sim_type('tip', f'x family={family}') == family
+    with pytest.raises(ValueError, match='unknown family'):
+        DataReader._registry_sim_type('tip', 'x family=bogus')
+
+
+def test_pes_families_is_the_one_shared_tuple():
+    import frictionsim2d.aiida.calcjob as calcjob
+    import frictionsim2d.aiida.ingest as ingest
+    import frictionsim2d.data.models as models
+    import frictionsim2d.postprocessing.run_status as run_status
+    assert PES_FAMILIES == ('pes_tip', 'pes_sheet')
+    assert set(PES_FAMILIES) <= set(FAMILIES)
+    for module in (calcjob, ingest, models, run_status):
+        assert module.PES_FAMILIES is PES_FAMILIES
+        assert not hasattr(module, '_PES_FAMILIES')
 
 
 def test_manifest_accepts_an_indent_top_directory(tmp_path):

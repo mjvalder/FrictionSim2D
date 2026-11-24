@@ -262,3 +262,21 @@ def test_afm_gets_no_lateral_force_pairs():
     df = _window()
     df['react_x'] = df['react_y'] = np.ones(len(df))
     assert 'mean_lf_sx_sy' not in summarise_run({'window': df}, 'afm').extras
+
+
+def test_pes_summary_hashes_the_energy_column_alone():
+    from frictionsim2d.data.models import compute_time_series_hash
+    grid = pd.DataFrame({'dx': [0, 1, 0, 1], 'dy': [0, 0, 1, 1],
+                         'energy_eV': [-1.0, -0.5, -0.6, -0.2]})
+    out = summarise_run({'window': grid}, 'pes_tip')
+    assert out.time_series_hash == compute_time_series_hash(
+        grid['energy_eV'].to_numpy(dtype=float), np.zeros(1), np.zeros(1))
+
+
+def test_lf_pair_means_are_recorded_for_sheet_families_only():
+    n = 10
+    window = _window(n).assign(react_x=3.0, react_y=4.0, drive_fx=6.0, drive_fy=8.0)
+    sheet = summarise_run({'window': window}, 'sheetonsheet')
+    assert sheet.extras['mean_lf_sx_sy'] == pytest.approx(5.0)
+    assert sheet.extras['mean_lf_fx_fy'] == pytest.approx(10.0)
+    assert 'mean_lf_sx_sy' not in summarise_run({'window': window}, 'afm').extras

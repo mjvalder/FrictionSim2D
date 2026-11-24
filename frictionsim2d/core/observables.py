@@ -40,6 +40,9 @@ AFM_HOLD_STEPS: int = 10000
 #: derived for them.
 SLIDE_FAMILIES: Tuple[str, ...] = ('afm', 'sheetonsheet', 'hetero', 'flake')
 
+#: The static potential-energy-surface scan families: one grid evaluation per run.
+PES_FAMILIES: Tuple[str, ...] = ('pes_tip', 'pes_sheet')
+
 def tier_frequencies(config: Mapping[str, Any]) -> Dict[str, int]:
     """Output interval (steps) of each tier; `{}` if the window one is unknown."""
     try:

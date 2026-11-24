@@ -32,6 +32,7 @@ from typing import (
     TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple,
 )
 
+from ..core.observables import PES_FAMILIES
 from ..data.provenance import sha256_file
 from ..postprocessing.read_data import (
     FILE_PATTERN_SHEET, FILE_PATTERN_SHEET_ALT, FILE_PATTERN_TIP,
@@ -67,7 +68,6 @@ _INDENT_RE = re.compile(r'^indent_f(?P<load>\d+\.?\d*)N_l(?P<layers>\d+)\.csv$')
 #: along as an aux file on the one point instead.
 _PES_BASE_NAME = 'pes_scan.csv'
 _PES_REFINE_NAME = 'pes_scan_refine.csv'
-_PES_FAMILIES = ('pes_tip', 'pes_sheet')
 
 
 def group_label(label: str) -> str:
@@ -181,7 +181,7 @@ def load_points(locator) -> List[LoadPoint]:
     if not locator.results_dir.is_dir():
         return []
 
-    if family in _PES_FAMILIES:
+    if family in PES_FAMILIES:
         base = locator.results_dir / _PES_BASE_NAME
         if not base.is_file():
             return []
@@ -392,7 +392,7 @@ def _slide_outputs(locator, deck: 'Deck') -> List[Path]:
         elif indent is None or 'load' not in deck.point_filter or \
                 abs(float(indent['load']) - deck.point_filter['load']) <= 1e-9:
             found.append(path)
-    if locator.tokens.family in _PES_FAMILIES:
+    if locator.tokens.family in PES_FAMILIES:
         final = final_data_path(locator.data_dir, 'none', 0.0, 0.0)
         if final is not None:
             found.append(final)

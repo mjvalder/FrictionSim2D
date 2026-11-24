@@ -454,7 +454,7 @@ _SUMMARY_RETRACT = {
 _SUMMARY_POST_AFM = {'gap_min': _A, 'deflect_max': _A}
 _SUMMARY_POST_SHEET = {'gap_min_il': _A, 'corrugation_max': _A}
 
-#: ``data.models.LF_PAIRS``: |react_x, react_y| and |drive_fx, drive_fy|, nN.
+#: ``data.models._LF_PAIRS``: |react_x, react_y| and |drive_fx, drive_fy|, nN.
 _SUMMARY_LF_PAIRS = {'mean_lf_sx_sy': _NN, 'mean_lf_fx_fy': _NN}
 
 #: ``pes_scan.grid_descriptors``: ``energy_eV`` is the total PE in eV

@@ -26,6 +26,7 @@ import pandas as pd
 
 from frictionsim2d.core.config import IntegritySettings
 from frictionsim2d.core.observables import FAMILIES, expected_tier_rows, rename_map
+from frictionsim2d.data.models import EV_A_TO_NN
 
 from .integrity import (SKIP_DETAILS, IntegrityVerdict, check_point,
                         writes_end_snapshot)
@@ -59,8 +60,8 @@ SHEET_FAMILIES = ('sheetonsheet', 'hetero', 'flake', 'pes_sheet')
 #: Families on the AFM stack. Only these have a positional LEGACY_2026 fallback.
 AFM_FAMILIES = ('afm', 'indent', 'pes_tip')
 
-#: eV/A -> nN. Moved out of DataReader; the class keeps an alias.
-LF_SCHEMA1_CORRECTION = 1.602176565
+#: eV/A -> nN (the legacy schema-1 lateral-force correction).
+LF_SCHEMA1_CORRECTION = EV_A_TO_NN
 #: Output-schema version this reader understands.
 LF_SCHEMA_CURRENT = 2
 #: Column names matching `fix fc_ave` output order in afm/slide.lmp.
@@ -961,7 +962,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         return self.output_dir / filename
 
     _REGISTRY_SIM_TYPE = {'tip': 'afm', 'sheet': 'sheetonsheet'}
-    _KNOWN_FAMILIES = FAMILIES
 
     @classmethod
     def _registry_sim_type(cls, sim_type: str, header_line1: str) -> str:
@@ -975,10 +975,10 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         m = re.search(r'family=(\w+)', header_line1 or '')
         if m:
             family = m.group(1)
-            if family not in cls._KNOWN_FAMILIES:
+            if family not in FAMILIES:
                 raise ValueError(
                     f"unknown family {family!r} in results header; known: "
-                    f"{cls._KNOWN_FAMILIES}")
+                    f"{FAMILIES}")
             return family
         return cls._REGISTRY_SIM_TYPE.get(sim_type, 'afm')
 

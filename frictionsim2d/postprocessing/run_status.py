@@ -35,6 +35,8 @@ import json
 import logging
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from ..core.observables import PES_FAMILIES
+
 logger = logging.getLogger(__name__)
 
 #: A trace may be one row short: `fix ave/time` may or may not write a row at
@@ -57,9 +59,6 @@ HALT_RECORD = 'halted.txt'
 #: Families whose load grid is modelled as `speed x load x angle`.
 GRID_FAMILIES = ('afm', 'sheetonsheet', 'hetero', 'flake')
 
-#: One grid evaluation per PES run, no load at all.
-_PES_FAMILIES = ('pes_tip', 'pes_sheet')
-
 #: The `outer_loop` values each family's builder actually splits on
 #: (`SPLIT_OUTER_LOOPS` in `frictionsim2d/builders/afm/base.py` and
 #: `frictionsim2d/builders/sheetonsheet/base.py`; hetero and flake split nothing). Any
@@ -81,7 +80,7 @@ def point_key(kind: str, load: float, angle: float, speed: float) -> PointKey:
 
 def load_kind_for_family(family: str) -> str:
     """`force` for afm, `none` for PES, `pressure` for the sheet-like slides."""
-    if family in _PES_FAMILIES:
+    if family in PES_FAMILIES:
         return 'none'
     return 'force' if family == 'afm' else 'pressure'
 
@@ -112,7 +111,7 @@ def expected_chains(config: Optional[Mapping],
     general.outer_loop; None when the grid is unknown (no config, or no
     force/pressure for a slide family) or not modelled (indent).
     PES families: [[('none', 0.0, 0.0, 0.0)]]."""
-    if family in _PES_FAMILIES:
+    if family in PES_FAMILIES:
         return [[point_key('none', 0.0, 0.0, 0.0)]]
     if family not in GRID_FAMILIES or not isinstance(config, Mapping):
         return None

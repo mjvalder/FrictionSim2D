@@ -52,6 +52,7 @@ from aiida.common.folders import Folder
 from aiida.engine import CalcJob
 from aiida.parsers.parser import Parser
 
+from ..core.observables import PES_FAMILIES
 from .layout import Deck, content_hash, discover_decks, points_for, retrieve_patterns
 from .store import (
     StoreIndex, calcjob_extras, get_or_create_file, lammps_code, new_file, new_folder,
@@ -73,7 +74,6 @@ class ConfigMismatch(ValueError):
     """No candidate ``config.json`` of a run matches its ``config_hash``."""
 
 _CONFLICT = '.sync-conflict-'
-_PES_FAMILIES = ('pes_tip', 'pes_sheet')
 _PES_REFINE_NAME = 'pes_scan_refine.csv'
 _TOL = 1e-9
 
@@ -527,7 +527,7 @@ class LammpsFrictionParser(Parser):
         else:
             locator = _scratch_locator(root, rel_path, family)
             found = points_for(deck, load_points(locator))
-            if family in _PES_FAMILIES and deck.name.endswith('_refine'):
+            if family in PES_FAMILIES and deck.name.endswith('_refine'):
                 found = _refine_points(found, locator)
             halts = read_halt_registry(locator)
         on_disk = {point_key(p.load_kind, p.load, p.angle, p.speed): p for p in found}
