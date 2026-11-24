@@ -60,9 +60,15 @@ def _raw(name: str):
     return raw
 
 
+#: Not friction configs: `run quench` reads a [quench] section (the GUI
+#: "Amorphous block" family validates it, Task 7b).
+QUENCH_EXAMPLES = ['quench_config.ini']
+
+
 def test_the_two_example_lists_cover_every_config():
     on_disk = {p.name for p in EXAMPLES.glob('*.ini')}
-    assert set(BUILDABLE_EXAMPLES) | set(UNRESOLVABLE_EXAMPLES) == on_disk
+    assert (set(BUILDABLE_EXAMPLES) | set(UNRESOLVABLE_EXAMPLES)
+            | set(QUENCH_EXAMPLES)) == on_disk
 
 
 @pytest.mark.parametrize('name', BUILDABLE_EXAMPLES)

@@ -613,8 +613,9 @@ _SETTINGS: Dict[str, SectionOverride] = {
     ),
     'quench': SectionOverride(
         label='Quench',
-        help=('Melt-quench conditions; they key the amorphous block library, so '
-              'a run reuses only a block made under the same conditions.'),
+        help='Melt-quench conditions of amorphous blocks.',
+        detail=('They key the amorphous block library: a run reuses only a block '
+                'made under the same conditions, and never melt-quenches itself.'),
         fields={
             'quench_slab_dims': FieldOverride(
                 label='Quench slab', unit=A, order=1, editor='xyz_dims'),
