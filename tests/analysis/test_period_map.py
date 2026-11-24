@@ -51,3 +51,11 @@ def test_window_rows_keeps_the_window_loads_at_the_angle():
 
     assert list(got['load']) == [10.0, 20.0]
     assert list(periods.window_rows(source, periods.WindowParams(angle=15.0))['load']) == [10.0]
+
+
+def test_material_names_takes_a_name_a_list_or_nothing():
+    from frictionsim2d.analysis.source import material_names
+    assert material_names('h-MoS2') == ['h-MoS2']
+    assert material_names(('h-MoS2', 'h-WS2')) == ['h-MoS2', 'h-WS2']
+    assert material_names(None) == []
+    assert periods.material_key(['h-MoS2', 'h-WS2']) == periods.material_key('h-MoS2')

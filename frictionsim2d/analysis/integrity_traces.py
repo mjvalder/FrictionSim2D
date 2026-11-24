@@ -13,7 +13,7 @@ plus ``gap = comz_L2 - comz_L1``) with the point's stored s48 measures
 (``steps.check_integrity`` keeps them under ``measures``), never recomputed.
 ``run_status`` is one row per point: ``run_id, material, layer, force, angle,
 status`` (``run_status_l2.csv``'s columns) plus ``verdict``. ``status`` is the
-run's completion status (:func:`completion_status`), ``verdict`` the stored
+run's completion status (:func:`~frictionsim2d.postprocessing.run_status.completion_status`), ``verdict`` the stored
 integrity verdict.
 """
 from __future__ import annotations
@@ -25,26 +25,17 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, field_validator
 
+from ..postprocessing.run_status import completion_status
 from .base import Analysis, register
 from .periods import summary_identity
+from .source import NO_WINDOW
 
 __all__ = ['MEASURES', 'NO_WINDOW', 'IntegrityTraces', 'RunStatus', 'TraceParams',
-           'completion_status', 'run_id']
+           'run_id']
 
 #: The stored s48 measures carried per run (`integrity._RULES`' measure keys).
 MEASURES = ('hole', 'isolated', 'ejected', 'T_sigma', 'gap_rise')
-#: The drop reason of a point with no window tier to trace (halted, not reached, ...).
-NO_WINDOW = 'no_window_tier'
 _TRACE = ('temp_sheet_3d', 'comz_L1', 'comz_L2')
-
-
-def completion_status(verdict_status: Any) -> Any:
-    """The run's completion status from its integrity verdict status: a
-    ``failed_integrity`` or ``quarantined`` run finished, so it is
-    ``complete``, as in ``run_status_l2.csv``; any other status is unchanged.
-    (A ruling only moves a point between these, so ``original_status`` adds
-    nothing.)"""
-    return 'complete' if verdict_status in ('failed_integrity', 'quarantined') else verdict_status
 
 
 def run_id(row: Any) -> str:

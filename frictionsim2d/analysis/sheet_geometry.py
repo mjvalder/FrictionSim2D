@@ -21,7 +21,7 @@ from scipy.spatial import Delaunay, cKDTree  # pylint: disable=no-name-in-module
 
 from ..postprocessing.snapshot_geometry import expand_lammps_types
 from .base import Analysis, register
-from .source import PASS_STATUS
+from .source import PASS_STATUS, material_names
 
 __all__ = ['TOP_TOL', 'SheetGeometry', 'describe', 'read_lmp', 'read_settings']
 
@@ -180,8 +180,7 @@ class SheetGeometry(Analysis):  # pylint: disable=too-few-public-methods
         point of a material with no structure is recorded as dropped."""
         groups: Dict[Tuple[str, Optional[int]], List[Any]] = {}
         for row in source.all_rows.itertuples():
-            mats = row.materials
-            mats = [mats] if isinstance(mats, str) else list(mats)
+            mats = material_names(row.materials)
             layers = None if row.layers is None or pd.isna(row.layers) else int(row.layers)
             groups.setdefault((_material(mats[0]), layers), []).append(row)
         out = []

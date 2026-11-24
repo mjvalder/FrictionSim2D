@@ -46,6 +46,16 @@ TRUNCATION_SLACK_ROWS: int = 1
 STATUSES = ('complete', 'truncated', 'no_output', 'unreadable', 'halted',
             'failed_integrity', 'quarantined', 'not_reached')
 
+
+def completion_status(verdict_status: Any) -> Any:
+    """The run's completion status from its integrity verdict status: a
+    ``failed_integrity`` or ``quarantined`` run finished, so it is
+    ``complete``, as in ``run_status_l2.csv``; any other status is unchanged.
+    (A ruling only moves a point between these, so ``original_status`` adds
+    nothing.)"""
+    return 'complete' if verdict_status in ('failed_integrity', 'quarantined') else verdict_status
+
+
 #: Statuses whose point produced no frames at all.
 UNOBSERVED = ('no_output', 'not_reached')
 

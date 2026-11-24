@@ -22,6 +22,7 @@ import pandas as pd
 from .plot_config import TableSource
 from .plot_mixin_base import PlotDataError, PlotterMixinBase
 from .plot_style import GEM24_COLORS
+from .run_status import completion_status
 from .snapshot_geometry import parse_type_groups, radial_profile, read_type_groups
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,6 @@ class _DatasetRunFiles:
         """``{load: status}`` of the points at 0 degrees: the run's completion
         status (a failed-integrity run finished) or, for ``kind='verdict'``,
         the stored integrity verdict."""
-        from ..analysis.integrity_traces import completion_status  # pylint: disable=import-outside-toplevel
         rows = self.rows
         if 'angle' in rows:
             rows = rows[rows['angle'].astype(float) == 0.0]

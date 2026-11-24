@@ -44,6 +44,7 @@ import numpy as np
 import pandas as pd
 
 from .base import Analysis, register
+from .source import NO_WINDOW
 from .periods import (PeriodParams, TaxlibParams, _spring, drive_step, geometry_depends,
                       material_key, period_map, settle_skip, summary_identity)
 
@@ -80,8 +81,6 @@ TIP_CHANNELS = frozenset({'tipx', 'tipz', 'w_thermostat_tip', 'w_thermostat_sub'
                           'E_int_tip_sheet'})
 #: 1 nN/A^2 = 1e-9 N / 1e-20 m^2 = 1e11 Pa = 100 GPa.
 NN_PER_A2_TO_GPA = 100.0
-#: The drop reason of a run without a window tier.
-NO_WINDOW = 'no_window_tier'
 #: The note of a result over a dataset with no stored ``contact`` result.
 NO_CONTACT_NOTE = ('shear_strength_GPa, contact_area_A2: left out -- no stored contact '
                    'result for dataset {dataset!r} (run `analyse contact` first)')

@@ -29,6 +29,7 @@ import pandas as pd
 from pydantic import BaseModel, field_validator
 
 from .base import Analysis, register
+from .source import material_names
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +193,7 @@ def run_periods(family: str, frames: Dict[str, pd.DataFrame], speed: float,
 def material_key(materials: Any) -> str:
     """The material name `sheet_geometry` keys its rows by (s42:138)."""
     from .sheet_geometry import _material  # pylint: disable=import-outside-toplevel,protected-access
-    first = materials if isinstance(materials, str) else list(materials)[0]
-    return _material(first)
+    return _material(material_names(materials)[0])
 
 
 def _fmt(value: Any) -> str:
@@ -207,7 +207,7 @@ def summary_identity(row: Any) -> Dict[str, Any]:
     (plot_common.py:313-333): ``id``/``material`` underscored, ``size`` as
     ``100x100y``, ``force`` or ``pressure`` by ``load_kind``, ``layer``."""
     materials = getattr(row, 'materials', None)
-    materials = '+'.join([materials] if isinstance(materials, str) else list(materials or ()))
+    materials = '+'.join(material_names(materials))
     flake = getattr(row, 'flake_material', None)
     material = f'{materials}+flake-{flake}' if isinstance(flake, str) and flake else materials
     material = material.replace('-', '_')

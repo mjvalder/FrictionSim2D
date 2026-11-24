@@ -17,11 +17,14 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['PASS_STATUS', 'RunSource', 'StoreFetcher', 'dataset_table']
+__all__ = ['NO_WINDOW', 'PASS_STATUS', 'RunSource', 'StoreFetcher', 'dataset_table',
+           'material_names']
 
 #: The verdict status of an integrity-pass point (`steps._dataset_rows` keeps
 #: only these; `steps.postprocess_group` summarises only these).
 PASS_STATUS = 'complete'
+#: The drop reason of a point with no window tier to read (halted, not reached, ...).
+NO_WINDOW = 'no_window_tier'
 
 SnapshotKind = Literal['load', 'final']
 
@@ -381,8 +384,12 @@ def _is_load_file(filename: str, load: float) -> bool:
     return bool(match) and abs(float(match['load']) - load) <= _TOL
 
 
-def _materials(row: Any) -> List[str]:
-    value = getattr(row, 'materials', None)
+def material_names(value: Any) -> List[str]:
+    """A row's ``materials`` (one name or a list of them) as a list."""
     if isinstance(value, str):
         return [value]
     return list(value or [])
+
+
+def _materials(row: Any) -> List[str]:
+    return material_names(getattr(row, 'materials', None))

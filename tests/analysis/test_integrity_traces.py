@@ -107,7 +107,7 @@ def test_run_status_has_one_row_per_point_and_drops_none():
 
 
 def test_completion_status_maps_integrity_verdicts_to_complete():
-    from frictionsim2d.analysis.integrity_traces import completion_status
+    from frictionsim2d.postprocessing.run_status import completion_status
     assert [completion_status(v) for v in ('complete', 'failed_integrity', 'quarantined',
                                            'halted', 'no_output')] == \
         ['complete', 'complete', 'complete', 'halted', 'no_output']
