@@ -17,7 +17,7 @@ all: it is now being searched for next to the staging directory instead.
 This module fixes that at the staging boundary, not at the source: it takes
 a config mapping plus the *original* document's directory and returns a copy
 with path-like values resolved to absolute paths, using the exact same
-search (:func:`~frictionsim2d.core.utils.search_paths` / ``find_existing``) the
+search (:func:`~frictionsim2d.core.utils.paths.search_paths` / ``find_existing``) the
 builders use to resolve them at build time. A value that already resolves
 absolutely, or that cannot be resolved at all, is left untouched -- in the
 latter case so that the existing "missing file" validation still reports it,

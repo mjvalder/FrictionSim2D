@@ -47,7 +47,7 @@ from .controllers.quench_run import QuenchRunController
 from ..core.config import parse_config
 from ..run.hpc_dispatch import hpc_generation_blocker
 from ..run.naming import AFM_LIKE_MODELS
-from .controllers.settings_document import SettingsDocument
+from .controllers.settings_document import HIDDEN_SETTINGS, SettingsDocument
 from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
@@ -1279,7 +1279,12 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Saved {written}")
 
     def _revert_settings(self) -> None:
+        old = self.settings_document
         self.settings_document = SettingsDocument.defaults()
+        # Hidden groups have no form to revert from: keep what the CLI set.
+        for key in HIDDEN_SETTINGS:
+            if key in old.values:
+                self.settings_document.values[key] = copy.deepcopy(old.values[key])
         self.settings_form.document = self.settings_document
         self.settings_form.clear_highlights()
         self.settings_form.rebuild()

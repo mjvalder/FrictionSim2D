@@ -539,10 +539,9 @@ class TestPotTypeEditor:
 
 class TestPlainEditorsRoundTrip:
     """The generic list, scalar-or-list and JSON dict editors return what they
-    were given. (A one-item scalar-or-list reads back as the scalar, as
-    test_gui_assistant_integration's `force == 7` pins.)"""
+    were given -- including the arity of a scalar-or-list value."""
 
-    @pytest.mark.parametrize('value', [5, 2.5, [1, 2, 3]])
+    @pytest.mark.parametrize('value', [5, 2.5, [1, 2, 3], [7]])
     def test_scalar_or_list_keeps_its_arity(self, qt_app, value):
         from frictionsim2d.gui.widgets.fields import build_editor
 

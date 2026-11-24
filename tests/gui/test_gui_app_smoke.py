@@ -672,6 +672,31 @@ class TestMainWindow:
         out = window.document.save(tmp_path / 'saved.ini')
         assert parse_config(out) == parse_config(EXAMPLES / 'indent_config.ini')
 
+    def test_a_one_item_loop_list_survives_an_unchanged_save(self, window, tmp_path):
+        """`force = [7]` and `force = 7` hash differently: a form round trip
+        must not narrow the list to a scalar."""
+        from frictionsim2d.core.config import parse_config
+
+        text = (EXAMPLES / 'afm_config.ini').read_text(encoding='utf-8')
+        text = '\n'.join('force = [7]' if line.startswith('force =') else line
+                         for line in text.splitlines())
+        source = tmp_path / 'afm_one_force.ini'
+        source.write_text(text, encoding='utf-8')
+
+        window.document = ConfigDocument.from_file(source, 'afm')
+        window.form.document = window.document
+        window.form.rebuild()
+        window.form.commit()
+        out = window.document.save(tmp_path / 'saved.ini')
+
+        before, after = parse_config(source), parse_config(out)
+        # The in-file loop parameters (what config_hash sees) come back as
+        # written. (A gated-off key such as `[tip] tip_x_offset` is dropped
+        # by the form's commit; that is the gate, not this round trip.)
+        for key in ('force', 'scan_speed', 'scan_angle', 'pressure', 'scan_angle_force'):
+            assert after['general'].get(key) == before['general'].get(key), key
+        assert after['general']['force'] == [7]
+
     def test_viewport_starts_empty(self, window):
         assert window.viewport.system is None
 
@@ -683,14 +708,28 @@ class TestMainWindow:
         assert 'thermostat' in window.settings_form.sections
 
     def test_integrity_thresholds_are_hidden_but_still_saved(self, window):
-        """User ruling CFG-19: the `aiida` CLI owns the integrity group."""
+        """User ruling CFG-19: the `aiida` CLI owns the integrity group, so a
+        CLI-set value survives form commit, save, and Revert + save."""
         import yaml
 
         assert 'integrity' not in window.settings_form.sections
+        window.settings_document.values['integrity']['isolated_atoms'] = 987
+        window.settings_document.values['integrity']['gap_rise'] = 0.123
+
+        def saved():
+            window._save_settings()
+            return yaml.safe_load(
+                window.workspace.settings_path.read_text(encoding='utf-8'))['integrity']
+
         window.settings_form.commit()
-        window._save_settings()
-        data = yaml.safe_load(window.workspace.settings_path.read_text(encoding='utf-8'))
-        assert 'integrity' in data
+        data = saved()
+        assert (data['isolated_atoms'], data['gap_rise']) == (987, 0.123)
+
+        window._revert_settings()
+        window.settings_form.commit()
+        window.settings_document.dirty = True
+        data = saved()
+        assert (data['isolated_atoms'], data['gap_rise']) == (987, 0.123)
 
     def test_settings_survive_a_form_round_trip(self, window):
         """Committing the settings form unchanged must not invalidate them --

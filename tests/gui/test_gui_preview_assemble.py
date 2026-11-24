@@ -16,6 +16,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip('ovito')
+
 from frictionsim2d.run.artifacts import discover_preview_target, generate_package
 from frictionsim2d.gui.preview.assemble import assemble, build_data_collection
 from frictionsim2d.gui.preview.init_script import parse_assembly

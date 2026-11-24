@@ -519,6 +519,13 @@ class _ScalarOrListEditor(_ListEditor):
                 return text
         return super().value()
 
+    def set_value(self, value: Any) -> None:
+        # A one-item list keeps its brackets: `[7]` and `7` hash differently.
+        if isinstance(value, (list, tuple)) and len(value) == 1:
+            self.edit.setText(f'[{value[0]}]')
+        else:
+            super().set_value(value)
+
 
 class _PathEditor(FieldEditor):
     """A file path, with a browse button.

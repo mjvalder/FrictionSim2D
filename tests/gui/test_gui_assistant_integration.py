@@ -242,7 +242,7 @@ def test_as_new_replaces_document_and_removes_the_card(window, monkeypatch):
     pane.cards[change.id].apply_new_button.click()
     assert window.document is not old
     assert window.document.workspace_dir == window.workspace.configs_dir
-    assert window.document.get('general', 'force') == 7
+    assert window.document.get('general', 'force') == [7]
     assert pane.cards == {}
     window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
     assert window.document.get('general', 'force') == old.get('general', 'force')

@@ -8,7 +8,8 @@ test that expects a dialog patches it itself (its ``monkeypatch`` wins).
 
 The backstop: an item (setup, call and teardown) that runs longer than
 ``FS2D_GUI_TEST_TIMEOUT`` seconds (default 300) dumps every thread's traceback
-and exits the run (``faulthandler``; pytest-timeout is not installed).
+and exits the run (``faulthandler``; pytest-timeout is not installed). A value
+<= 0 disables it, e.g. for a debugger session.
 """
 
 from __future__ import annotations
@@ -39,6 +40,9 @@ class UnexpectedModal(AssertionError):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):  # pylint: disable=unused-argument
     """Arm the hang backstop around one item, teardown included."""
+    if TIMEOUT_S <= 0:
+        yield
+        return
     faulthandler.dump_traceback_later(TIMEOUT_S, exit=True, file=sys.stderr)
     try:
         yield
@@ -46,8 +50,18 @@ def pytest_runtest_protocol(item, nextitem):  # pylint: disable=unused-argument
         faulthandler.cancel_dump_traceback_later()
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Note a call phase that already failed on an `UnexpectedModal`."""
+    outcome = yield
+    report = outcome.get_result()
+    if (report.when == 'call' and report.failed and call.excinfo is not None
+            and call.excinfo.errisinstance(UnexpectedModal)):
+        item.modal_already_reported = True
+
+
 @pytest.fixture(autouse=True)
-def _no_real_modals(monkeypatch):
+def _no_real_modals(request, monkeypatch):
     try:
         from PySide6 import QtWidgets
     except ImportError:
@@ -69,5 +83,5 @@ def _no_real_modals(monkeypatch):
         for name in names:
             monkeypatch.setattr(cls, name, _stub(owner, name))
     yield
-    if reached:
+    if reached and not getattr(request.node, 'modal_already_reported', False):
         pytest.fail('unpatched modal dialog(s) reached: ' + '; '.join(reached))
