@@ -110,8 +110,7 @@ def _atom_type_count(root: Path, texts: List[str]) -> int:
     Two shapes. An assembled run (afm, indent, pes_tip) declares them up front
     with ``create_box N``. A pre-assembled one (pes_sheet) has no ``create_box``
     at all -- the cell and the type count come from the data file's own
-    ``N atom types`` header, which is why ``discover_preview_target`` carries an
-    ``is_preassembled`` flag.
+    ``N atom types`` header.
 
     Taken over the whole member, not per script: a slide script declares nothing
     itself. It reads back ``data/load_$(v_find)N.data``, a file the *run* writes

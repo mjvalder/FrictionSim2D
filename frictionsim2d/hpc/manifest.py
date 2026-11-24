@@ -1,4 +1,4 @@
-"""Job manifest for offline HPC workflow tracking."""
+"""The LAMMPS scripts discovered in a built simulation tree."""
 
 import re
 from pathlib import Path
@@ -118,10 +118,6 @@ class JobManifest:
     name: str = "friction2d_manifest"
     source_directory: Optional[str] = None
     jobs: List[JobEntry] = field(default_factory=list)
-
-    def __post_init__(self):
-        if self.jobs is None:
-            self.jobs = []
 
     @property
     def n_jobs(self) -> int:

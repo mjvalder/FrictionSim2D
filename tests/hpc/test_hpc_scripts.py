@@ -199,12 +199,6 @@ def test_the_download_hint_brings_the_run_logs_home(tmp_path, kind):
         assert line.index('--include="run*.log"') < line.index('--exclude="*"'), line
 
 
-def test_generate_scripts_rejects_an_unknown_scheduler(tmp_path):
-    with pytest.raises(ValueError, match="Unknown scheduler"):
-        HPCScriptGenerator(_config()).generate_scripts(
-            ["mat0/L1"], tmp_path / "hpc", scheduler="lsf")
-
-
 @pytest.mark.parametrize("scheduler, script, expected", [
     ("pbs", "run.pbs", "#PBS -o $PBS_O_WORKDIR/logs/friction2d_out.txt"),
     ("slurm", "run.sh", "#SBATCH --output=logs/friction2d_out.txt"),

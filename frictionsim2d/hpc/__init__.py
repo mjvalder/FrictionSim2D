@@ -1,8 +1,4 @@
-"""HPC script generation and job tracking for FrictionSim2D.
-
-This module provides HPC batch job script generation for PBS and SLURM schedulers,
-and manifest-based job tracking for offline HPC workflows.
-"""
+"""HPC script generation for PBS and SLURM schedulers, and the in-memory script list."""
 
 from .scripts import HPCScriptGenerator, HPCConfig
 from .manifest import JobManifest, JobEntry

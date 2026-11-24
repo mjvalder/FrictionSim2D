@@ -491,6 +491,14 @@ class TestPairExpansion:
         assert '[2D-2]' in preview.error
         assert '{mat2}' in preview.error
 
+    def test_a_colliding_sweep_reports_its_message_not_an_exception(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'afm_config.ini', 'afm')
+        document.set('general', 'temp', [300.0, 300.5])
+        preview = document.expansion_output_dirs()
+        assert preview.dirs == []
+        assert '[general] temp' in preview.error
+
 
 class TestMaterialEntries:
     """Pair-aware reading and writing of the material list."""
@@ -1113,18 +1121,15 @@ class TestExpansionOutputDirs:
         assert len(dirs) == 2
         assert len(set(dirs)) == 2
 
-    def test_temperatures_truncating_to_the_same_kelvin_collide(self, monkeypatch):
-        """K{int(temp)} truncates: a sweep of 300.1 and 300.9 both round down
-        to K300 and would build into the very same directory, silently
-        overwriting each other -- despite `temp` being a supported sweep
-        field. This is exactly the collision the Generate confirmation must
-        be able to surface."""
+    def test_temperatures_truncating_to_the_same_kelvin_are_reported(self, monkeypatch):
+        """K{int(temp)} truncates: 300.1 and 300.9 share K300, so expansion
+        refuses the sweep and the preview carries the message."""
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         document.set('general', 'temp', [300.1, 300.9])
-        dirs = document.expansion_output_dirs().dirs
-        assert len(dirs) == 2
-        assert len(set(dirs)) == 1
+        preview = document.expansion_output_dirs()
+        assert preview.dirs == []
+        assert '[general] temp' in preview.error
 
     def test_a_config_that_cannot_expand_reports_why(self, monkeypatch):
         """expand_config_sweeps raises when a materials_list resolves to

@@ -112,11 +112,19 @@ def test_pot_paths_with_distinct_stems_expand():
     assert len(expand_config_sweeps(base, base_dir=ROOT, model='afm')) == 2
 
 
-def test_a_numbered_primary_section_names_its_own_key_in_the_error():
+def test_a_numbered_primary_section_still_checks_general_axes():
     base = _afm(temp=[300.0, 300.4])
     base['2D-1'] = base.pop('2D')
 
     with pytest.raises(ValueError, match=r"\[general\] temp"):
+        expand_config_sweeps(base, base_dir=ROOT, model='afm')
+
+
+def test_a_blank_string_temperature_does_not_hide_other_axes():
+    base = _afm(temp=[300.0, ''])
+    base['2D']['pot_path'] = ['sw/a/x.sw', 'sw/a/x.sw']
+
+    with pytest.raises(ValueError, match=r"\[2D\] pot_path"):
         expand_config_sweeps(base, base_dir=ROOT, model='afm')
 
 

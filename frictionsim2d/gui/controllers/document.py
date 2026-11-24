@@ -1138,7 +1138,7 @@ class ConfigDocument:
         """
         try:
             expanded = expand_config_sweeps(
-                self.normalised_values(), self.base_dir)
+                self.normalised_values(), self.base_dir, model=self.model)
             return ExpansionDirs(
                 [output_dir_for(run_dict, self.model) for run_dict in expanded])
         except (ValueError, OSError, KeyError) as exc:

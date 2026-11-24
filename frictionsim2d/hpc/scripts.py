@@ -446,7 +446,8 @@ class HPCScriptGenerator:
         # A conda- or env_lines-based MLIP setup legitimately loads no modules.
         if not config.modules and not config.conda_env and not config.env_lines:
             raise ValueError(
-                "HPC modules list is empty and neither conda_env nor env_lines is set.")
+                "HPC modules list is empty; set hpc.modules, hpc.conda_env or "
+                "hpc.env_lines in settings.")
         if config.use_tmpdir and not config.scratch_dir:
             raise ValueError("HPC scratch_dir required when use_tmpdir is true.")
 

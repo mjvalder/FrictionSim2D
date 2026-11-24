@@ -617,7 +617,6 @@ _COLLISION_HINTS = {
                         "(not only a path) must carry a '{mat}' marker",
     '_pot_expand': "the directory token is pot_<type>_<file stem>, so each entry "
                    "needs a distinct type or file name",
-    'interlayer_style': "the directory token is il-<style> with '_' dropped",
 }
 
 
@@ -644,8 +643,8 @@ def _reject_colliding_sweeps(sweep_params: Dict[Tuple[str, str], List[Any]],
         for value in values:
             try:
                 out = output_dir_for(build({**first, axis: value}), model)
-            except (KeyError, TypeError):
-                return  # a half-filled config the naming rules cannot read yet
+            except (KeyError, TypeError, ValueError):
+                break  # a half-filled value the naming rules cannot read yet
             if out in seen:
                 label = 'materials_list' if key == '_material_expand' else (
                     'pot_path' if key == '_pot_expand' else key)
