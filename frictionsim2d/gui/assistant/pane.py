@@ -28,7 +28,7 @@ from ...agent.ollama_install import install_finetune
 from ...agent.plot_changes import PlotChange
 from ...agent.ollama_server import is_local, ollama_start_command
 from ...agent.providers import model_installed, ollama_binary, ollama_models
-from ...agent.settings import (ANTHROPIC_MODELS, AgentSettings, api_key,
+from ...agent.settings import (ANTHROPIC_MODELS, OPENAI_MODELS, AgentSettings, api_key,
                                fallback_ollama_model, save_agent_settings, store_api_key)
 from .cards import ChangeCard, FsCard, PlotCard
 from .worker import AgentWorker
@@ -54,9 +54,15 @@ ANTHROPIC_CONSENT_TEXT = (
     '(config contents, file names, and later unpublished results tables) are sent to '
     'Anthropic. API use is billed to your Anthropic account.\n\n'
     'Use Claude for the Assistant?')
+OPENAI_CONSENT_TEXT = (
+    'GPT runs in OpenAI\'s cloud. Your messages and the assistant\'s tool results '
+    '(config contents, file names, and later unpublished results tables) are sent to '
+    'OpenAI. API use is billed to your OpenAI account.\n\n'
+    'Use OpenAI for the Assistant?')
 #: Per cloud provider: (name in messages, consent text, where to get a key).
 CLOUD = {'gemini': ('Gemini', CONSENT_TEXT, 'aistudio.google.com/apikey'),
-         'anthropic': ('Claude', ANTHROPIC_CONSENT_TEXT, 'platform.claude.com')}
+         'anthropic': ('Claude', ANTHROPIC_CONSENT_TEXT, 'platform.claude.com'),
+         'openai': ('OpenAI', OPENAI_CONSENT_TEXT, 'platform.openai.com/api-keys')}
 
 #: How often the idle check runs (a server the pane started stops when idle).
 IDLE_CHECK_MS = 60_000
@@ -204,6 +210,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.provider_box.addItem('Claude (cloud)', 'anthropic')
         self.provider_box.setItemData(2, 'Anthropic API; needs a paid API key',
                                       Qt.ToolTipRole)
+        self.provider_box.addItem('OpenAI (cloud)', 'openai')
+        self.provider_box.setItemData(3, 'OpenAI API; needs a paid API key', Qt.ToolTipRole)
         self.provider_box.setCurrentIndex(self.provider_box.findData(self.settings.provider))
         self.provider_box.currentIndexChanged.connect(self._on_provider_changed)
         self.model_box = QComboBox(self)
@@ -340,12 +348,12 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         QApplication.clipboard().setText(self._start_command_fn(self.settings))
 
     def _fill_models(self, installed) -> None:
-        """Offer the installed models (Ollama), the Claude family, or the current one;
-        keep it selected."""
+        """Offer the installed models (Ollama), the Claude or GPT family, or the
+        current one; keep it selected."""
         provider = self.settings.provider
         current = getattr(self.settings, provider).model
-        names = {'ollama': list(installed),
-                 'anthropic': list(ANTHROPIC_MODELS)}.get(provider, [])
+        names = {'ollama': list(installed), 'anthropic': list(ANTHROPIC_MODELS),
+                 'openai': list(OPENAI_MODELS)}.get(provider, [])
         if current not in names:
             names.append(current)
         self.model_box.blockSignals(True)

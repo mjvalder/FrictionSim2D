@@ -34,7 +34,7 @@ from .tools import knowledge, materials_db
 
 logger = logging.getLogger(__name__)
 
-HISTORY_BUDGET = {'ollama': 6000, 'gemini': 32000, 'anthropic': 32000}
+HISTORY_BUDGET = {'ollama': 6000, 'gemini': 32000, 'anthropic': 32000, 'openai': 32000}
 #: Invalid tool calls a turn may correct before giving up; small local models need more.
 TOOL_RETRIES = {'ollama': 4}
 _RETRY_IN = re.compile(r'retry in ([\d.]+)\s*s', re.IGNORECASE)

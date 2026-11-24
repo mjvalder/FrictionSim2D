@@ -31,6 +31,14 @@ files) always wait for you to click Apply.**
   are sent to Google, and free-tier data may be used by Google. The free tier
   limits requests per minute; a reply costs 2-7 requests, and the pane shows a
   Retry button when the limit is hit.
+- **Claude (cloud).** Anthropic API, a paid key (`ANTHROPIC_API_KEY`, or pasted
+  when asked, as for Gemini). The model box offers `claude-opus-5-5` (default),
+  `claude-sonnet-5-5` and `claude-haiku-5-5`; `anthropic.effort` sets how hard
+  it thinks.
+- **OpenAI (cloud).** OpenAI API, a paid key (`OPENAI_API_KEY`, or pasted when
+  asked). The model box offers `gpt-5.5` (default), `gpt-5.4-mini` and
+  `gpt-5.4-nano`; any other name can be typed. Consent is asked once, as for
+  the other cloud providers.
 - **Ollama (local).** Fully offline. The default model is the fine-tune
   `fs2d-assistant:qwen3.5-4b` (Qwen3.5-4B trained on this app's tools; a few
   seconds per short reply on a Radeon 780M). It is not in the Ollama library:
@@ -127,15 +135,16 @@ Settings live in `~/.config/FrictionSim2D/agent.yaml`:
 
 | key | default | meaning |
 |---|---|---|
-| `provider` | `gemini` | `gemini` or `ollama` |
+| `provider` | `gemini` | `gemini`, `anthropic`, `openai` or `ollama` |
 | `ask_before_apply` | `false` | changes wait as cards (below) |
 | `max_requests_per_turn` | `50` | model requests one reply may make |
 | `ollama.model` | `fs2d-assistant:qwen3.5-4b` | local model |
-| `ollama.trained_knowledge` | `false` | give the model the knowledge files (set from a fine-tune's manifest) |
 | `ollama.idle_minutes` | `10` | stop a server the Assistant started after this long idle |
 | `ollama.context_tokens` | `16384` | `OLLAMA_CONTEXT_LENGTH` of a started server |
 | `ollama.keep_alive` | `2m` | `OLLAMA_KEEP_ALIVE` of a started server |
 | `gemini.model` | `gemini-3.5-flash-lite` | cloud model |
+| `anthropic.model` | `claude-opus-5-5` | cloud model |
+| `openai.model` | `gpt-5.5` | cloud model |
 | `materials_project.enabled` | `true` | allow Materials Project / 2DMatPedia lookups |
 
 ### Step cap
@@ -304,7 +313,7 @@ params, sweeps, materials, workspace, analysis, materials_db, must_ask,
 declines): setup per family, parameters, sweeps and reference load bands,
 materials, workspace, analysis and plots, Materials Project against a fake
 client, prompts that must be asked back, and requests that must be declined.
-Switches: `AGENT_EVAL_PROVIDER` (`gemini` default, `ollama`), `AGENT_EVAL_MODEL`,
+Switches: `AGENT_EVAL_PROVIDER` (`gemini` default, `anthropic`, `openai`, `ollama`), `AGENT_EVAL_MODEL`,
 `AGENT_EVAL_REPEATS` (default 3), `AGENT_EVAL_PAUSE` (seconds between turns).
 Each run writes `tests/agent/evals/.results/<provider>-<model>-<timestamp>.json`
 (gitignored; failed runs keep what the model did) and prints pass rates per

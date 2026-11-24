@@ -68,6 +68,18 @@ class AnthropicSettings(BaseModel):
     effort: Literal['low', 'medium', 'high', 'xhigh', 'max'] = 'medium'
 
 
+#: The OpenAI models the model box offers (any other name can still be typed).
+OPENAI_MODELS = ('gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4-nano')
+
+
+class OpenAISettings(BaseModel):
+    """Cloud provider: GPT through the OpenAI API (a paid key)."""
+
+    model: str = 'gpt-5.5'
+    api_key_env: str = 'OPENAI_API_KEY'
+    consent_given: bool = False
+
+
 class MaterialsProjectSettings(BaseModel):
     """Materials Project / 2DMatPedia lookups: only formulas and ids are sent."""
 
@@ -77,10 +89,11 @@ class MaterialsProjectSettings(BaseModel):
 class AgentSettings(BaseModel):
     """Everything the Assistant pane remembers between sessions."""
 
-    provider: Literal['gemini', 'ollama', 'anthropic'] = 'gemini'
+    provider: Literal['gemini', 'ollama', 'anthropic', 'openai'] = 'gemini'
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     anthropic: AnthropicSettings = Field(default_factory=AnthropicSettings)
+    openai: OpenAISettings = Field(default_factory=OpenAISettings)
     materials_project: MaterialsProjectSettings = Field(
         default_factory=MaterialsProjectSettings)
     #: Off: config/settings changes land in the Builder at once (with Undo).

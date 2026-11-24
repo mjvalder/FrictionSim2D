@@ -56,6 +56,13 @@ def build_model(settings: AgentSettings, key_lookup=api_key):
         return AnthropicModel(settings.anthropic.model,
                               provider=AnthropicProvider(api_key=key))
     from pydantic_ai.models.openai import OpenAIChatModel
+    if settings.provider == 'openai':
+        key = key_lookup(settings, 'openai')
+        if not key:
+            raise ProviderUnavailable('No OpenAI API key: set OPENAI_API_KEY or '
+                                      'enter it when the Assistant asks.')
+        from pydantic_ai.providers.openai import OpenAIProvider
+        return OpenAIChatModel(settings.openai.model, provider=OpenAIProvider(api_key=key))
     from pydantic_ai.profiles.openai import OpenAIModelProfile
     from pydantic_ai.providers.ollama import OllamaProvider
     base = settings.ollama.base_url.rstrip('/') + '/v1'
@@ -71,15 +78,18 @@ def run_settings(settings: AgentSettings) -> dict:
     """Per-request model settings for ``settings.provider``.
 
     Temperature 0 for Gemini and Ollama, a cap on Ollama's reply length and no
-    thinking for Ollama. Current Claude models reject sampling
-    parameters; they get an effort level instead, and caching of the long system
-    prompt and tool list plus the growing conversation (re-sent every step).
+    thinking for Ollama. Current Claude and GPT models reject sampling
+    parameters: Claude gets an effort level and caching of the long system
+    prompt and tool list plus the growing conversation (re-sent every step);
+    GPT only a reply cap (OpenAI caches long prompts by itself).
     """
     if settings.provider == 'ollama':
         # Thinking off: the fine-tunes were trained without it, and thinking
         # spends the reply cap before the model acts.
         return {'temperature': 0.0, 'max_tokens': settings.ollama.max_output_tokens,
                 'openai_reasoning_effort': 'none'}
+    if settings.provider == 'openai':
+        return {'max_tokens': 16000}
     if settings.provider != 'anthropic':
         return {'temperature': 0.0}
     return {'max_tokens': 16000, 'anthropic_effort': settings.anthropic.effort,

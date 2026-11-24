@@ -83,6 +83,16 @@ def test_anthropic_defaults():
     assert s.anthropic.effort == 'medium' and not s.anthropic.consent_given
 
 
+def test_openai_defaults_and_its_own_key(monkeypatch, tmp_path):
+    from frictionsim2d.agent.settings import OPENAI_MODELS
+    s = AgentSettings(provider='openai')
+    assert (s.openai.model, s.openai.api_key_env) == ('gpt-5.5', 'OPENAI_API_KEY')
+    assert s.openai.model in OPENAI_MODELS and not s.openai.consent_given
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    path = store_api_key('sk-o', 'openai', tmp_path / 'agent.secrets')
+    assert api_key(s, 'openai', path) == 'sk-o' and api_key(s, 'gemini', path) is None
+
+
 def test_key_never_written_to_settings_yaml(tmp_path, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'secret-value')
     path = save_agent_settings(AgentSettings(), tmp_path / 'agent.yaml')

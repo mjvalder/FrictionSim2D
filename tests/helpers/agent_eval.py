@@ -110,7 +110,7 @@ def build_session(env: EvalEnv, deps=None):
         from pydantic_ai.models.function import FunctionModel
         return AgentSession(AgentSettings(), model=FunctionModel(
             stream_function=_ask_back, model_name=FUNCTION_PROVIDER))
-    if env.provider not in ('gemini', 'ollama', 'anthropic'):
+    if env.provider not in ('gemini', 'ollama', 'anthropic', 'openai'):
         raise ProviderUnavailable(f'unknown AGENT_EVAL_PROVIDER {env.provider!r}')
     settings = AgentSettings(provider=env.provider)
     if env.model:

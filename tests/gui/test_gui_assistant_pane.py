@@ -852,6 +852,36 @@ def test_claude_offers_opus_sonnet_and_haiku(qt_app, env):
     assert s.anthropic.model == 'claude-haiku-5-5'
 
 
+def test_openai_asks_for_and_stores_its_own_key(qt_app, env, monkeypatch):
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    stored, consent = [], []
+    session = FakeSession([TurnEvent('done')])
+    s = AgentSettings(provider='openai')
+    pane = AssistantPane(session, lambda: object(), s, save_settings=lambda *a, **k: None,
+                         ask_key=lambda: 'sk-o', confirm_consent=lambda: consent.append(1) or True,
+                         store_key=lambda key, provider: stored.append((key, provider)),
+                         ollama_server=FakeServer())
+    _PANES.append(pane)
+    assert pane.provider_box.currentData() == 'openai'
+    assert pane.status_label.text() == 'OpenAI: no API key yet (you will be asked)'
+    assert not pane.cloud_badge.isHidden()
+    pane.send('x')
+    QApplication.processEvents()
+    assert consent == [1] and s.openai.consent_given
+    assert stored == [('sk-o', 'openai')]
+
+
+def test_openai_offers_its_model_list(qt_app, env):
+    from frictionsim2d.agent.settings import OPENAI_MODELS
+    s = AgentSettings(provider='openai')
+    pane = _pane([], settings=s)
+    assert tuple(pane.model_box.itemText(i)
+                 for i in range(pane.model_box.count())) == OPENAI_MODELS
+    pane.model_box.setCurrentIndex(1)
+    pane.model_box.activated.emit(1)
+    assert s.openai.model == OPENAI_MODELS[1]
+
+
 # ---------------------------------------------------------------- fine-tunes
 
 def _tune(tmp_path, schema_hash='b8b78921bc6dd497'):

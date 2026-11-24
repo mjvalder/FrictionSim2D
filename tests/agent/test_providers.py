@@ -32,6 +32,21 @@ def test_anthropic_model_built_with_its_own_key():
     assert asked == ['anthropic'] and model.model_name == 'claude-opus-5-5'
 
 
+def test_openai_without_key_is_unavailable():
+    with pytest.raises(ProviderUnavailable, match='OpenAI API key'):
+        build_model(AgentSettings(provider='openai'), key_lookup=lambda s, p: None)
+
+
+def test_openai_model_built_with_its_own_key():
+    """Built only: no request is sent."""
+    from pydantic_ai.models.openai import OpenAIChatModel
+    asked = []
+    model = build_model(AgentSettings(provider='openai'),
+                        key_lookup=lambda s, p: asked.append(p) or 'sk-test')
+    assert asked == ['openai'] and isinstance(model, OpenAIChatModel)
+    assert model.model_name == 'gpt-5.5' and 'api.openai.com' in model.base_url
+
+
 def test_run_settings_per_provider():
     assert run_settings(AgentSettings()) == {'temperature': 0.0}
     assert run_settings(AgentSettings(provider='ollama')) == {
@@ -39,6 +54,7 @@ def test_run_settings_per_provider():
     claude = run_settings(AgentSettings(provider='anthropic'))
     assert 'temperature' not in claude  # current Claude models reject sampling params
     assert claude['anthropic_effort'] == 'medium' and claude['anthropic_cache_instructions']
+    assert run_settings(AgentSettings(provider='openai')) == {'max_tokens': 16000}
 
 
 @pytest.mark.parametrize('model', ['fs2d-assistant:p6-4b-nt', 'qwen3.5:4b'])
