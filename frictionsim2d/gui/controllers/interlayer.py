@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, List, Mapping, Optional, Set
 
-from ...core.utils.paths import _find_existing  # noqa: PLC2701
+from ...core.utils.paths import find_existing
 from ...potentials.interlayer import default_interlayer_file, gaussian_g
 from ...run.placeholders import has_template_marker
 from ..config_validation import ConfigIssue
@@ -40,7 +40,7 @@ def sheet_elements(values: Mapping[str, Any],
         cif = values[key].get('cif_path')
         if not isinstance(cif, str) or not cif or has_template_marker(cif):
             return None
-        path = _find_existing(cif, base_dir)
+        path = find_existing(cif, base_dir)
         if path is None:
             return None
         try:

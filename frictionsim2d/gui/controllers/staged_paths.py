@@ -17,7 +17,7 @@ all: it is now being searched for next to the staging directory instead.
 This module fixes that at the staging boundary, not at the source: it takes
 a config mapping plus the *original* document's directory and returns a copy
 with path-like values resolved to absolute paths, using the exact same
-search (:func:`~frictionsim2d.core.utils.search_paths` / ``_find_existing``) the
+search (:func:`~frictionsim2d.core.utils.search_paths` / ``find_existing``) the
 builders use to resolve them at build time. A value that already resolves
 absolutely, or that cannot be resolved at all, is left untouched -- in the
 latter case so that the existing "missing file" validation still reports it,
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Union
 
 from ..config_validation import PATH_KEYS
-from ...core.utils.paths import _find_existing  # noqa: PLC2701
+from ...core.utils.paths import find_existing
 
 __all__ = ['absolutize_staged_paths']
 
@@ -65,7 +65,7 @@ _TEMPLATE_TOKEN = re.compile(r'\{[^{}]+\}')
 
 def _resolve_plain(value: str, base_dir: Optional[Union[str, Path]]) -> str:
     """Resolve a value that carries no template placeholder."""
-    found = _find_existing(value, base_dir)
+    found = find_existing(value, base_dir)
     # resolve(): a match against the cwd comes back relative, and the build
     # subprocess runs from a different directory.
     return str(found.resolve()) if found is not None else value
@@ -90,7 +90,7 @@ def _resolve_templated(value: str, base_dir: Optional[Union[str, Path]]) -> str:
         resolved_dir = Path(base_dir)
         return str(resolved_dir / basename) if resolved_dir.is_dir() else value
 
-    found_dir = _find_existing(str(directory), base_dir)
+    found_dir = find_existing(str(directory), base_dir)
     if found_dir is None or not found_dir.is_dir():
         return value
     return str(found_dir.resolve() / basename)

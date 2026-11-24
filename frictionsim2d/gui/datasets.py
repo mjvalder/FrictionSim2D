@@ -27,8 +27,7 @@ def dataset_files(folder: Path) -> List[Path]:
 def is_dataset(folder: Path) -> bool:
     """A dataset is a directory with an `outputs/` holding at least one
     `output_full_*.json` -- the same thing `Plotter` accepts as a `data_dir`."""
-    outputs = Path(folder) / 'outputs'
-    return outputs.is_dir() and any(outputs.glob('output_full_*.json'))
+    return bool(dataset_files(folder))
 
 
 def discover_datasets(workspace: Workspace) -> List[Path]:

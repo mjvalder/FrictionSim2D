@@ -211,6 +211,9 @@ def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
         def ok(self):
             return False
 
+        def clean(self):
+            return False
+
         def render(self):
             return 'ingested 1 run, 0 results (1 failure)'
 
@@ -267,3 +270,18 @@ def test_a_local_check_turns_a_broken_profile_into_a_failed_check(monkeypatch):
     failed = [c for c in result['checks'] if not c['ok']]
     assert 'no profile named friction2d' in failed[0]['detail']
     assert result['notes'], 'a failed check must say what to do about it'
+
+
+@pytest.mark.parametrize('failures, unparseable, dry_run, clean', [
+    ([], [], False, True),
+    ([('a', 'x')], [], False, False),
+    ([], ['afm/d'], False, False),
+    ([], ['afm/d'], True, True),
+])
+def test_import_report_clean_is_the_cli_exit_rule(failures, unparseable, dry_run, clean):
+    pytest.importorskip('aiida')
+    from frictionsim2d.aiida.ingest import ImportReport
+
+    report = ImportReport(label='x', failures=failures, unparseable=unparseable,
+                          dry_run=dry_run)
+    assert report.clean() is clean

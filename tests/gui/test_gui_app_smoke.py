@@ -682,6 +682,16 @@ class TestMainWindow:
         assert window.settings_form.sections
         assert 'thermostat' in window.settings_form.sections
 
+    def test_integrity_thresholds_are_hidden_but_still_saved(self, window):
+        """User ruling CFG-19: the `aiida` CLI owns the integrity group."""
+        import yaml
+
+        assert 'integrity' not in window.settings_form.sections
+        window.settings_form.commit()
+        window._save_settings()
+        data = yaml.safe_load(window.workspace.settings_path.read_text(encoding='utf-8'))
+        assert 'integrity' in data
+
     def test_settings_survive_a_form_round_trip(self, window):
         """Committing the settings form unchanged must not invalidate them --
         empty strings and nested sub-models are both easy to destroy."""

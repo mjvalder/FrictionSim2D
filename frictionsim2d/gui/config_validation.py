@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Type, Union
 from pydantic import BaseModel, ValidationError
 
 from ..run.placeholders import TEMPLATE_MARKERS, has_template_marker
-from ..core.utils.paths import _find_existing  # noqa: PLC2701
+from ..core.utils.paths import find_existing
 
 __all__ = ['ConfigIssue', 'ConfigValidation', 'validate_config', 'preflight_paths']
 
@@ -129,7 +129,7 @@ def preflight_paths(config: Mapping[str, Any],
                     section=section, key=key, kind='unexpanded_template',
                 ))
                 continue
-            if _find_existing(value, base_dir) is None:
+            if find_existing(value, base_dir) is None:
                 searched = f" (searched relative to {base_dir})" if base_dir else ""
                 issues.append(ConfigIssue(
                     message=f"file not found: '{value}'{searched}",

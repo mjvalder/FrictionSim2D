@@ -93,3 +93,31 @@ class TestPreviewControllerNeverStaysStuck:
         assert result, 'the "failed" signal never arrived -- the build is stuck'
         assert not controller.running, \
             'a failed-to-start build must not leave the controller "running" forever'
+
+
+class TestPartialBuildWarnings:
+    """A preview built while some members failed must say so (GC-10)."""
+
+    def test_build_warnings_reach_the_system(self, tmp_path, monkeypatch):
+        import json
+        from types import SimpleNamespace
+
+        import frictionsim2d.gui.controllers.preview as preview_module
+
+        QApplication.instance() or QApplication([])
+        system = SimpleNamespace(warnings=['skipped x'])
+        monkeypatch.setattr(preview_module, 'parse_assembly', lambda *a: object())
+        monkeypatch.setattr(preview_module, 'assemble', lambda *a: system)
+        result_file = tmp_path / 'result.json'
+        result_file.write_text(json.dumps({
+            'ok': True, 'init_script': 'in.x', 'simulation_root': str(tmp_path),
+            'settings_file': None, 'warnings': ['afm/b: build failed'],
+        }), encoding='utf-8')
+
+        controller = PreviewController(Workspace.open(tmp_path / 'ws'))
+        delivered = []
+        controller.finished.connect(delivered.append)
+        controller._deliver(result_file)  # pylint: disable=protected-access
+
+        assert delivered == [system]
+        assert system.warnings == ['skipped x', 'afm/b: build failed']

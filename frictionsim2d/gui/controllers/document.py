@@ -39,14 +39,15 @@ from ...run.expand import (
     missing_pressure, outer_loop_conflict, preflight_material_pairs,
     preflight_materials, read_material_entries, read_material_list,
 )
-from ...run.naming import loopability, output_dir_for
-from ...core.utils.paths import _find_existing  # noqa: PLC2701
+from ...run.naming import AFM_LIKE_MODELS, loopability, output_dir_for
+from ...core.utils.paths import find_existing
 from ..schema.introspect import SectionSpec, describe_model, describe_section
 from ..schema.overrides import override_for_section, overrides_for
 from ..schema.simulation_types import MODES, sections_for
 from .interlayer import interlayer_issues
 from .materials import STRUCTURE_EXTENSION
 from .quench import QUENCH_MODEL, plan_quench
+from .staged_paths import absolutize_staged_paths
 
 __all__ = ['ConfigDocument', 'DocumentError', 'ExpansionDirs',
            'hetero_support_error']
@@ -176,8 +177,6 @@ def hetero_support_error(model: str) -> Optional[str]:
 
 def root_model_for(model: str):
     """The pydantic root model a simulation model validates against."""
-    from ...run.naming import AFM_LIKE_MODELS  # noqa: PLC0415
-
     if model == QUENCH_MODEL:
         return QuenchSimulationConfig
     return AFMSimulationConfig if model in AFM_LIKE_MODELS else SheetOnSheetSimulationConfig
@@ -999,7 +998,7 @@ class ConfigDocument:
         current = self.get('2D', 'materials_list')
         if not isinstance(current, str) or not current:
             return None
-        return _find_existing(current, self.base_dir)
+        return find_existing(current, self.base_dir)
 
     def _relative_to_config(self, path: Path) -> Path:
         """A path relative to the config's directory where that is possible.
@@ -1347,8 +1346,6 @@ class ConfigDocument:
         old_base = self.base_dir
         if old_base is None or Path(old_base).resolve() == Path(new_base).resolve():
             return
-        from .staged_paths import absolutize_staged_paths  # noqa: PLC0415
-
         resolved = absolutize_staged_paths(self.values, old_base)
         root = Path(self.workspace_root).resolve() if self.workspace_root else None
         new_base = Path(new_base).resolve()

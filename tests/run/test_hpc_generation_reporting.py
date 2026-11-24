@@ -129,3 +129,23 @@ class TestWorkerPayload:
             'result_file': str(tmp_path / 'result.json'),
         })
         assert 'hpc_requested' not in payload
+
+    def test_nothing_created_is_not_ok_and_names_the_first_failure(self, tmp_path,
+                                                                    monkeypatch):
+        from frictionsim2d.gui import generate_worker
+        from frictionsim2d.run import artifacts
+
+        class Failure:
+            def render(self):
+                return 'afm/a: tip too large'
+
+        monkeypatch.setattr(artifacts, 'generate_package', lambda *a, **k: (
+            artifacts.GenerationResult(created=[], failures=[Failure()])))
+        payload = generate_worker.run({
+            'config_file': 'x.ini', 'model': 'afm',
+            'output_root': str(tmp_path), 'generate_hpc': False,
+        })
+        assert payload['ok'] is False
+        assert payload['error'] == 'afm/a: tip too large'
+        assert payload['failures'] == ['afm/a: tip too large']
+        assert 'jobs' not in payload

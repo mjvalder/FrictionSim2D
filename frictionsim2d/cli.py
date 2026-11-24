@@ -870,10 +870,7 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
         _raise_abort(f"❌ Import failed: {exc}", exc)
 
     click.echo(report.render())
-    failed = not report.ok()
-    if not dry_run:
-        failed = failed or bool(report.unparseable)
-    if failed:
+    if not report.clean():
         raise SystemExit(1)
 
 

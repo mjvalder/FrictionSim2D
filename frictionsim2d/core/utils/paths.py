@@ -47,7 +47,7 @@ def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List
     return candidates
 
 
-def _find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[Path]:
+def find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[Path]:
     """First existing candidate for ``name``, or None."""
     for candidate in search_paths(name, base_dir):
         if candidate.exists():
@@ -71,7 +71,7 @@ def get_material_path(mat_name: str,
     Raises:
         FileNotFoundError: If the material file is not found.
     """
-    found = _find_existing(mat_name, base_dir)
+    found = find_existing(mat_name, base_dir)
     if found is not None:
         return found
 
@@ -99,7 +99,7 @@ def get_potential_path(pot_name: str,
     Raises:
         FileNotFoundError: If the potential file is not found.
     """
-    found = _find_existing(pot_name, base_dir)
+    found = find_existing(pot_name, base_dir)
     if found is not None:
         return found
 

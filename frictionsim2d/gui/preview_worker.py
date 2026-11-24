@@ -1,27 +1,16 @@
-"""Subprocess entry point for a preview build.
+"""Subprocess entry point for a preview build (see :mod:`.worker_common`).
 
-Builds run out-of-process for two reasons that a thread cannot address:
-component construction calls LAMMPS in-process with output suppressed, so there
-is no interruption point to cancel at and no progress to report; and a
-C-level LAMMPS error aborts the whole process, which in a thread would take the
-application down with it.
-
-Invoked as ``python -m frictionsim2d.gui.preview_worker <request.json>``. Progress lines
-go to stdout as JSON; the result is written to the requested output file.
+Construction calls LAMMPS in-process: no cancel point in a thread, and a
+C-level abort would take the window down.
 """
 
 from __future__ import annotations
 
-import json
 import sys
-import traceback
 from pathlib import Path
 from typing import Any, Dict
 
-
-def _emit(kind: str, **payload: Any) -> None:
-    """Write one progress record to stdout."""
-    print(json.dumps({'kind': kind, **payload}), flush=True)
+from .worker_common import emit as _emit, run_worker
 
 
 def run_quench(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -118,27 +107,8 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def main(argv=None) -> int:
-    argv = list(argv if argv is not None else sys.argv[1:])
-    if not argv:
-        _emit('error', message='no request file given')
-        return 2
-
-    request_path = Path(argv[0])
-    request = json.loads(request_path.read_text(encoding='utf-8'))
-
-    try:
-        result = run(request)
-    except Exception as exc:  # pylint: disable=broad-except
-        result = {
-            'ok': False,
-            'error': f"{type(exc).__name__}: {exc}",
-            'traceback': traceback.format_exc(),
-        }
-
-    Path(request['result_file']).write_text(
-        json.dumps(result, indent=2), encoding='utf-8')
-    _emit('done', ok=result.get('ok', False))
-    return 0 if result.get('ok') else 1
+    """`python -m frictionsim2d.gui.preview_worker <request.json>`."""
+    return run_worker(run, argv)
 
 
 if __name__ == '__main__':

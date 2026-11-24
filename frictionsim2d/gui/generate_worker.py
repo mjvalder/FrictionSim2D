@@ -5,20 +5,16 @@ allowed to do: this one runs the full sweep and may emit HPC scripts. Neither
 ever melt-quenches: a missing amorphous block comes back as an error carrying
 the ``run quench --for`` command, and a quench config only has its decks written.
 
-Invoked as ``python -m frictionsim2d.gui.generate_worker <request.json>``.
+Protocol: :mod:`.worker_common`.
 """
 
 from __future__ import annotations
 
-import json
 import sys
-import traceback
 from pathlib import Path
 from typing import Any, Dict
 
-
-def _emit(kind: str, **payload: Any) -> None:
-    print(json.dumps({'kind': kind, **payload}), flush=True)
+from .worker_common import emit as _emit, run_worker
 
 
 def run(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -86,26 +82,8 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def main(argv=None) -> int:
-    argv = list(argv if argv is not None else sys.argv[1:])
-    if not argv:
-        _emit('error', message='no request file given')
-        return 2
-
-    request = json.loads(Path(argv[0]).read_text(encoding='utf-8'))
-
-    try:
-        result = run(request)
-    except Exception as exc:  # pylint: disable=broad-except
-        result = {
-            'ok': False,
-            'error': f"{type(exc).__name__}: {exc}",
-            'traceback': traceback.format_exc(),
-        }
-
-    Path(request['result_file']).write_text(
-        json.dumps(result, indent=2), encoding='utf-8')
-    _emit('done', ok=result.get('ok', False))
-    return 0 if result.get('ok') else 1
+    """`python -m frictionsim2d.gui.generate_worker <request.json>`."""
+    return run_worker(run, argv)
 
 
 if __name__ == '__main__':

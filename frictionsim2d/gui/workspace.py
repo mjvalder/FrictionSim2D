@@ -129,10 +129,6 @@ class Workspace:
             removed.append(stale)
         return removed
 
-    def clear_previews(self) -> None:
-        shutil.rmtree(self.preview_dir, ignore_errors=True)
-        self.preview_dir.mkdir(exist_ok=True)
-
     # ----------------------------------------------------------------- misc
 
     def default_config_path(self, model: str) -> Path:

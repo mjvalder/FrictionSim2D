@@ -28,7 +28,7 @@ from typing import Any, List, Optional, Set, Tuple
 
 
 from ...run.placeholders import has_template_marker, substitute_materials
-from ...core.utils.paths import _find_existing  # noqa: PLC2701
+from ...core.utils.paths import find_existing
 
 __all__ = ['scan_config_elements']
 
@@ -131,7 +131,7 @@ def _sweep_entries(document: Any) -> List[Tuple[str, ...]]:
 def _scan_component(cif_path: str, mat_text: Optional[str],
                     base_dir: Optional[Path]) -> Set[str]:
     """Elements for one component: its CIF if readable, else its `mat` text."""
-    found = _find_existing(cif_path, base_dir) if cif_path else None
+    found = find_existing(cif_path, base_dir) if cif_path else None
     if found is not None:
         try:
             text = found.read_text(encoding='utf-8', errors='ignore')

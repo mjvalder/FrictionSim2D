@@ -1,30 +1,16 @@
-"""Subprocess entry point for rendering plots.
+"""Subprocess entry point for rendering plots (see :mod:`.worker_common`).
 
-Out of process for the same reason previews are (see
-:mod:`frictionsim2d.gui.preview_worker`): matplotlib installs its own backend and its
-own font cache, and the GUI already runs ovito's Qt backend. Keeping the two
-in one process is how you get a second QApplication and a hang with nothing
-to click.
-
-Invoked as ``python -m frictionsim2d.gui.plot_worker <request.json>``. Progress lines
-go to stdout as JSON; the result is written to the requested output file.
-
-No Qt import anywhere in this module: it must run in a bare interpreter.
+Matplotlib must not share a process with ovito's Qt backend. No Qt import here.
 """
 
 from __future__ import annotations
 
 import copy
-import json
 import sys
-import traceback
 from pathlib import Path
 from typing import Any, Dict, List
 
-
-def _emit(kind: str, **payload: Any) -> None:
-    """Write one progress record to stdout."""
-    print(json.dumps({'kind': kind, **payload}), flush=True)
+from .worker_common import emit as _emit, run_worker
 
 
 def run(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -84,27 +70,7 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
 
 def main(argv=None) -> int:
     """`python -m frictionsim2d.gui.plot_worker <request.json>`."""
-    argv = list(argv if argv is not None else sys.argv[1:])
-    if not argv:
-        _emit('error', message='no request file given')
-        return 2
-
-    request_path = Path(argv[0])
-    request = json.loads(request_path.read_text(encoding='utf-8'))
-
-    try:
-        result = run(request)
-    except Exception as exc:  # pylint: disable=broad-except
-        result = {
-            'ok': False,
-            'error': f"{type(exc).__name__}: {exc}",
-            'traceback': traceback.format_exc(),
-        }
-
-    Path(request['result_file']).write_text(
-        json.dumps(result, indent=2), encoding='utf-8')
-    _emit('done', ok=result.get('ok', False))
-    return 0 if result.get('ok') else 1
+    return run_worker(run, argv)
 
 
 if __name__ == '__main__':

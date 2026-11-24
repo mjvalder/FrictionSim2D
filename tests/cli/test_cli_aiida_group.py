@@ -17,12 +17,18 @@ from frictionsim2d.cli import cli
 class _Report:
     """Stands in for `ingest.ImportReport`: just what the CLI reads off it."""
 
-    def __init__(self, ok=True, unparseable=()):
+    def __init__(self, ok=True, unparseable=(), dry_run=False):
         self._ok = ok
         self.unparseable = list(unparseable)
+        self.dry_run = dry_run
 
     def ok(self):
         return self._ok
+
+    def clean(self):
+        # The real rule, over this fake's fields.
+        from frictionsim2d.aiida.ingest import ImportReport
+        return ImportReport.clean(self)
 
     def render(self):
         return 'set X\n  runs created:    2\n  results created: 4'
@@ -124,7 +130,8 @@ def test_import_dry_run_ignores_unparseable(tmp_path, monkeypatch):
     monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
         'frictionsim2d.aiida.ingest.import_root',
-        lambda *a, **k: _Report(unparseable=['h_MoS2/broken']))
+        lambda *a, dry_run=False, **k: _Report(unparseable=['h_MoS2/broken'],
+                                               dry_run=dry_run))
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path), '--dry-run'])
 

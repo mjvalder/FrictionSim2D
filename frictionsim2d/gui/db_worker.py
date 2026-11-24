@@ -1,12 +1,8 @@
 """Subprocess entry point for database queries and downloads.
 
-Everything the Database pane asks for runs here, for the reason the preview
-worker exists: ``import aiida`` plus ``load_profile`` is slow and
-process-global, and psycopg2 can hang. A hung or crashed query kills
-this process, not the window.
-
-Invoked as ``python -m frictionsim2d.gui.db_worker <request.json>``. Progress lines go to
-stdout as JSON; the result is written to ``request['result_file']``.
+Everything the Database pane asks for runs here (protocol:
+:mod:`.worker_common`): ``import aiida`` plus ``load_profile`` is slow and
+process-global, and psycopg2 can hang.
 
 Every heavy import (aiida, pandas) is inside a function: ``frictionsim2d.gui``
 must stay importable on a machine that has none of them.
@@ -19,7 +15,10 @@ import sys
 import time
 import traceback
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from .worker_common import emit as _emit, run_worker
 
 #: The kwargs `Friction2DDB.query` accepts. Anything else in a request's
 #: `filters` block is dropped rather than passed through -- a typo in the pane
@@ -35,11 +34,6 @@ FILTER_KEYS = (
 #: The combo-box choices a `list` response carries back, beside `materials`.
 FACET_KEYS = ('families', 'models', 'potentials', 'layers', 'temperatures',
               'set_labels')
-
-
-def _emit(kind: str, **payload: Any) -> None:
-    """Write one progress record to stdout."""
-    print(json.dumps({'kind': kind, **payload}), flush=True)
 
 
 def _load_profile(request: Dict[str, Any]):
@@ -266,7 +260,6 @@ def _csv_value(value: Any) -> Any:
 
 def _export_response(request: Dict[str, Any], dest, files: List[Any],
                      warnings: Any = ()) -> Dict[str, Any]:
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
     paths = sorted({Path(p) for p in files})
     return {
         'ok': True, 'kind': 'export', 'what': request['what'], 'dest': str(dest),
@@ -371,7 +364,6 @@ def _export_run_tree(request: Dict[str, Any], dest) -> Dict[str, Any]:
 
 def _export(request: Dict[str, Any]) -> Dict[str, Any]:
     """One download. Raises; `main` turns that into the error shape."""
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
     what = request.get('what')
     if what not in EXPORT_KINDS:
         raise ValueError(f"unknown export kind: {what!r}")
@@ -399,16 +391,15 @@ def _import(request: Dict[str, Any]) -> Dict[str, Any]:
 
     The one write action the pane offers: it is the step a remote-manual user
     does on every return trip. `ok` says the import ran; `ingest_ok` says it
-    ran clean -- a report with failures is still a report worth reading.
+    ran clean (`ImportReport.clean`, the `aiida import` exit rule).
     """
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
     _load_profile(request)
     root = Path(request['root']).expanduser()
     _emit('progress', message=f"importing {root}")
     report = _ingest_root(root, request.get('label') or None,
                           request.get('profile'), bool(request.get('dry_run')))
     return {
-        'ok': True, 'kind': 'import', 'ingest_ok': bool(report.ok()),
+        'ok': True, 'kind': 'import', 'ingest_ok': bool(report.clean()),
         'label': report.label, 'group_uuid': report.group_uuid,
         'created_decks': list(report.created_decks),
         'skipped_decks': list(report.skipped_decks),
@@ -498,30 +489,9 @@ def dispatch(request: Dict[str, Any]) -> Dict[str, Any]:
         return _error(kind, exc)
 
 
-def _read(path: str) -> str:
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
-    return Path(path).read_text(encoding='utf-8')
-
-
-def _write(path: str, text: str) -> None:
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
-    Path(path).write_text(text, encoding='utf-8')
-
-
 def main(argv=None) -> int:
-    """Read the request, dispatch it, write the result. No try/except of its
-    own -- `dispatch` already turns every handler exception into the error
-    shape, so there is nothing left here for one to escape into."""
-    argv = list(argv if argv is not None else sys.argv[1:])
-    if not argv:
-        _emit('error', message='no request file given')
-        return 2
-
-    request = json.loads(_read(argv[0]))
-    result = dispatch(request)
-    _write(request['result_file'], json.dumps(result, indent=2, default=str))
-    _emit('done', ok=result.get('ok', False))
-    return 0 if result.get('ok') else 1
+    """`python -m frictionsim2d.gui.db_worker <request.json>`."""
+    return run_worker(dispatch, argv)
 
 
 if __name__ == '__main__':

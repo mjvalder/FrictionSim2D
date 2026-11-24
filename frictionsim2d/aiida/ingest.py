@@ -238,6 +238,11 @@ class ImportReport:
         """No run or deck failed."""
         return not self.failures
 
+    def clean(self) -> bool:
+        """What `aiida import` exits 0 on: nothing failed and, on a real
+        import, every run's provenance parsed."""
+        return self.ok() and (self.dry_run or not self.unparseable)
+
     def render(self) -> str:
         """The report as text: counts, then every notable entry."""
         head = f"{'DRY RUN: ' if self.dry_run else ''}set {self.label!r}"

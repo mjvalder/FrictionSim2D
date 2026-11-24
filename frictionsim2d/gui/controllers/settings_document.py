@@ -5,9 +5,9 @@ Presents ``GlobalSettings`` through the same small interface as
 built by the same form machinery as the config tab rather than a parallel one.
 
 **The file is always written complete.** ``load_settings`` takes the first file
-it finds and validates it on its own -- it does not merge onto the current
-values -- so a partial file would silently reset every setting it omitted to a
-built-in default.
+it finds and does not merge, so a partial file would reset what it omitted.
+Groups in `HIDDEN_SETTINGS` are kept in the values and the file, but get no
+form section (the ``aiida`` CLI owns them).
 
 **A settings.yaml in the working directory is not picked up automatically.**
 The search is the explicit ``--settings-file`` argument, then
@@ -29,12 +29,16 @@ import yaml
 from pydantic import ValidationError
 
 from ...core.config import GlobalSettings, load_settings, settings_origin
+from ..config_validation import ConfigIssue, ConfigValidation
 from ..schema.introspect import SectionSpec, describe_section
 from ..schema.overrides import SETTINGS_MODEL
 
-__all__ = ['SettingsDocument', 'SETTINGS_FILENAME']
+__all__ = ['SettingsDocument', 'SETTINGS_FILENAME', 'HIDDEN_SETTINGS']
 
 SETTINGS_FILENAME = 'settings.yaml'
+
+#: Settings groups the Settings tab does not show (user ruling CFG-19).
+HIDDEN_SETTINGS = ('integrity',)
 
 
 @dataclass
@@ -70,9 +74,11 @@ class SettingsDocument:
     # ---------------------------------------------------------------- schema
 
     def sections(self) -> List[SectionSpec]:
-        """One section per settings sub-model."""
+        """One section per settings sub-model, except `HIDDEN_SETTINGS`."""
         specs: List[SectionSpec] = []
         for name, info in GlobalSettings.model_fields.items():
+            if name in HIDDEN_SETTINGS:
+                continue
             annotation = info.annotation
             if isinstance(annotation, type) and hasattr(annotation, 'model_fields'):
                 specs.append(describe_section(
@@ -102,18 +108,16 @@ class SettingsDocument:
         if enabled and key not in self.values:
             self.values[key] = {}
 
-    def is_section_locked(self, key: str) -> bool:
+    def is_section_locked(self, _key: str) -> bool:
         return True
 
-    def section_lock_reason(self, key: str) -> Optional[str]:
+    def section_lock_reason(self, _key: str) -> Optional[str]:
         return 'Every settings group is always present.'
 
     # ------------------------------------------------------------ validation
 
     def validate(self):
         """Validate against ``GlobalSettings``, reporting per field."""
-        from ..config_validation import ConfigIssue, ConfigValidation
-
         try:
             settings = GlobalSettings.model_validate(copy.deepcopy(self.values))
         except ValidationError as exc:
@@ -136,12 +140,7 @@ class SettingsDocument:
     # --------------------------------------------------------------- output
 
     def save(self, path: Union[str, Path]) -> Path:
-        """Write the complete settings to ``path``.
-
-        Complete, not just what was edited: ``load_settings`` replaces rather
-        than merges, so anything omitted here would come back as a built-in
-        default rather than as its current value.
-        """
+        """Write the complete settings (hidden groups included) to ``path``."""
         settings = self.as_settings()
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)

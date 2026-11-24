@@ -19,7 +19,7 @@ from .placeholders import (
     has_template_marker,
     substitute_materials,
 )
-from ..core.utils.paths import _find_existing  # noqa: PLC2701
+from ..core.utils.paths import find_existing
 from .naming import (
     AFM_LIKE_MODELS,
     LAMMPS_LOOP_PARAMS,
@@ -107,7 +107,7 @@ def read_material_entries(path: Union[str, Path],
         ValueError: If a line mixes ',' and '+', or a '+' line does not name
             exactly two materials.
     """
-    found = _find_existing(str(path), base_dir)
+    found = find_existing(str(path), base_dir)
     if found is None:
         raise FileNotFoundError(f"Material list file '{path}' not found.")
 
@@ -226,7 +226,7 @@ def preflight_materials(materials: List[str],
             if not isinstance(template, str) or not template:
                 continue
             candidate = substitute_materials(template, mat)
-            if _find_existing(candidate, base_dir) is None:
+            if find_existing(candidate, base_dir) is None:
                 missing.append(f"{key}={candidate}")
         if missing:
             result.skipped.append((mat, "missing " + ", ".join(missing)))
@@ -272,7 +272,7 @@ def preflight_material_pairs(entries: List[Tuple[str, str]],
             if not isinstance(template, str) or not template:
                 continue
             candidate = substitute_materials(template, mat1, mat2)
-            if _find_existing(candidate, base_dir) is None:
+            if find_existing(candidate, base_dir) is None:
                 missing.append(f"[{label}] {key}={candidate}")
         if missing:
             result.skipped.append((f"{mat1} + {mat2}", "missing " + ", ".join(missing)))
@@ -350,7 +350,7 @@ def resolve_lj_override_file(section: Dict[str, Any],
     if not file_path:
         return result
 
-    found = _find_existing(str(file_path), base_dir)
+    found = find_existing(str(file_path), base_dir)
     if found is None:
         logger.warning("LJ override file '%s' not found; ignoring.", file_path)
         return result

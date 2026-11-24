@@ -139,10 +139,10 @@ class PlotEditorDocument:
         if enabled and key not in self.values:
             self.values[key] = {}
 
-    def is_section_locked(self, key: str) -> bool:  # pylint: disable=unused-argument
+    def is_section_locked(self, _key: str) -> bool:
         return True
 
-    def section_lock_reason(self, key: str) -> Optional[str]:  # pylint: disable=unused-argument
+    def section_lock_reason(self, _key: str) -> Optional[str]:
         return 'Every plot group is always present.'
 
     # ------------------------------------------------------------ validation

@@ -10,20 +10,21 @@ a system built by the previous code.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
 from ...core.config import write_config
 from ...run.expand import expand_config_sweeps
 from .staged_paths import absolutize_staged_paths
-from ..preview.assemble import AssembledSystem, assemble, assemble_data_file
+from ..preview.assemble import assemble, assemble_data_file
 from ..preview.init_script import parse_assembly
 from ..preview.settings_file import parse_identity
 from ..workspace import Workspace
@@ -35,9 +36,7 @@ __all__ = ['PreviewController', 'PreviewRequest', 'cache_key']
 #: Source trees whose contents change what a build produces.
 _CODE_ROOTS = ('builders', 'templates')
 
-_code_fingerprint_cache: Optional[str] = None
-
-
+@functools.cache
 def code_fingerprint() -> str:
     """A digest of the code that turns a config into a package.
 
@@ -45,10 +44,6 @@ def code_fingerprint() -> str:
     true if the code is part of the input -- and on this project the builders
     are under active development.
     """
-    global _code_fingerprint_cache  # pylint: disable=global-statement
-    if _code_fingerprint_cache is not None:
-        return _code_fingerprint_cache
-
     digest = hashlib.sha256()
     package_root = Path(__file__).resolve().parents[2]
     for name in _CODE_ROOTS:
@@ -60,8 +55,7 @@ def code_fingerprint() -> str:
                 digest.update(path.name.encode())
                 digest.update(str(path.stat().st_mtime_ns).encode())
 
-    _code_fingerprint_cache = digest.hexdigest()[:16]
-    return _code_fingerprint_cache
+    return digest.hexdigest()[:16]
 
 
 def cache_key(config: Dict[str, Any], model: str, layer: Optional[int],
@@ -432,6 +426,7 @@ class PreviewController(QObject):
                 self.failed.emit(f"Could not read the crystal slab: {exc}")
                 return
             self.current_label = result.get('label') or self.current_label
+            system.warnings.extend(result.get('warnings') or [])
             self.finished.emit(system)
             return
 
@@ -446,4 +441,6 @@ class PreviewController(QObject):
             self.failed.emit(f"Could not read the generated system: {exc}")
             return
 
+        # Partial-build failures: the issues pane shows `system.warnings`.
+        system.warnings.extend(result.get('warnings') or [])
         self.finished.emit(system)

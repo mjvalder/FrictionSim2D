@@ -11,17 +11,13 @@ request names the quench root and the result file.
 
 from __future__ import annotations
 
-import json
 import logging
 import signal
 import sys
-import traceback
 from pathlib import Path
 from typing import Any, Dict
 
-
-def _emit(kind: str, **payload: Any) -> None:
-    print(json.dumps({'kind': kind, **payload}), flush=True)
+from .worker_common import emit as _emit, run_worker
 
 
 class _ProgressHandler(logging.Handler):
@@ -73,29 +69,14 @@ def _on_terminate(_signum, _frame) -> None:
     sys.exit(1)
 
 
+def _problems_from_error(result: Dict[str, Any]) -> None:
+    result['problems'] = [result['error']]
+
+
 def main(argv=None) -> int:
-    argv = list(argv if argv is not None else sys.argv[1:])
-    if not argv:
-        _emit('error', message='no request file given')
-        return 2
-
-    request = json.loads(Path(argv[0]).read_text(encoding='utf-8'))
+    """`python -m frictionsim2d.gui.quench_worker <request.json>`."""
     signal.signal(signal.SIGTERM, _on_terminate)
-
-    try:
-        result = run(request)
-    except Exception as exc:  # pylint: disable=broad-except
-        result = {
-            'ok': False,
-            'error': f"{type(exc).__name__}: {exc}",
-            'problems': [f"{type(exc).__name__}: {exc}"],
-            'traceback': traceback.format_exc(),
-        }
-
-    Path(request['result_file']).write_text(
-        json.dumps(result, indent=2), encoding='utf-8')
-    _emit('done', ok=result.get('ok', False))
-    return 0 if result.get('ok') else 1
+    return run_worker(run, argv, on_error=_problems_from_error)
 
 
 if __name__ == '__main__':

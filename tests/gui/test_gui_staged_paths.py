@@ -75,9 +75,9 @@ class TestPlainRelativePaths:
         # And, crucially, resolving the *staged* value against `unrelated`
         # (what search_paths would do once written there) must still work,
         # because it is now absolute.
-        from frictionsim2d.core.utils.paths import _find_existing  # noqa: PLC2701
-        assert _find_existing(result['2D']['cif_path'], unrelated) is not None
-        assert _find_existing(result['2D']['pot_path'], unrelated) is not None
+        from frictionsim2d.core.utils.paths import find_existing
+        assert find_existing(result['2D']['cif_path'], unrelated) is not None
+        assert find_existing(result['2D']['pot_path'], unrelated) is not None
 
 
 class TestTemplatedRelativePaths:
@@ -116,8 +116,8 @@ class TestTemplatedRelativePaths:
         result = absolutize_staged_paths(config, config_dir)
         substituted = result['2D']['cif_path'].replace('{mat}', 'h_MoS2')
 
-        from frictionsim2d.core.utils.paths import _find_existing  # noqa: PLC2701
-        assert _find_existing(substituted, unrelated) is not None
+        from frictionsim2d.core.utils.paths import find_existing
+        assert find_existing(substituted, unrelated) is not None
 
 
 class TestMaterialsList:
@@ -141,8 +141,8 @@ class TestMaterialsList:
         config = {'2D': {'materials_list': 'materials.txt'}}
         result = absolutize_staged_paths(config, config_dir)
 
-        from frictionsim2d.core.utils.paths import _find_existing  # noqa: PLC2701
-        assert _find_existing(result['2D']['materials_list'], unrelated) is not None
+        from frictionsim2d.core.utils.paths import find_existing
+        assert find_existing(result['2D']['materials_list'], unrelated) is not None
 
 
 class TestPassThroughs:
