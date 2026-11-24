@@ -106,3 +106,31 @@ def test_preflight_flag_writes_preflight_files_through_the_shared_helper(tmp_pat
     assert result.exit_code == 0, result.output
     assert (root / "hpc" / "preflight.sh").exists()
     assert (root / "hpc" / "preflight.pbs").exists()
+
+
+def _lammps_dir(root: Path, *names: str) -> Path:
+    lammps = root / "afm" / "m" / "L1" / "lammps"
+    lammps.mkdir(parents=True)
+    for name in names:
+        (lammps / name).write_text("# deck\n", encoding="utf-8")
+    return root
+
+
+def test_a_glob_entry_in_lammps_scripts_selects_matching_trees(tmp_path):
+    root = _lammps_dir(tmp_path, "slide_5ms.in")
+
+    assert hpc_dispatch.collect_hpc_simulation_paths(root, ["slide*.in"]) == ["afm/m/L1"]
+    assert hpc_dispatch.collect_hpc_simulation_paths(root, ["quench*.in"]) == []
+
+
+def test_system_in_is_satisfied_by_any_system_deck(tmp_path):
+    root = _lammps_dir(tmp_path, "system_x.in")
+
+    assert hpc_dispatch.collect_hpc_simulation_paths(root, ["system.in"]) == ["afm/m/L1"]
+    assert hpc_dispatch.collect_hpc_simulation_paths(root, ["slide.in"]) == []
+
+
+def test_slide_in_is_satisfied_by_any_slide_deck(tmp_path):
+    root = _lammps_dir(tmp_path, "slide_f2N.in")
+
+    assert hpc_dispatch.collect_hpc_simulation_paths(root, ["slide.in"]) == ["afm/m/L1"]

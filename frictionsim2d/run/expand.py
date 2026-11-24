@@ -38,7 +38,7 @@ from .naming import (
     AFM_LIKE_MODELS,
     LAMMPS_LOOP_PARAMS,
     SHEET_LIKE_MODELS,
-    _numbered_sheet_keys,
+    _numbered_keys,
     loopability,
     primary_sheet,
 )
@@ -467,7 +467,7 @@ def expand_config_sweeps(base_config: Dict[str, Any],
     if '2D' in base_config:
         primary_key: Optional[str] = '2D'
     else:
-        numbered = _numbered_sheet_keys(base_config)
+        numbered = _numbered_keys(base_config, '2D-')
         primary_key = numbered[0] if numbered else None
 
     has_second_sheet = '2D-2' in base_config

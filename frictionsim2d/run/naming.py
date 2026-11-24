@@ -1,13 +1,4 @@
-"""Output-tree naming: tokens, directory layout, loop classification.
-
-Split out of run.py. Pure string/path logic -- it imports no builder and no
-simulation machinery, which is what lets frictionsim2d/run/ later split without a cycle.
-
-It also owns AFM_LIKE_MODELS / SHEET_LIKE_MODELS. Those are model-name
-vocabulary rather than simulation machinery, and the flake-section rules here
-need them, so they live in the leaf module and the runner imports them from
-here -- not the other way round, which would be a cycle.
-"""
+"""Output-tree naming: tokens, directory layout, loop classification; owns the model vocabulary."""
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -54,7 +45,7 @@ def layer_aware_path_sort_key(path_str: str) -> Tuple[Tuple[int, Union[int, str]
 #:   'scalar'   a list here is not supported
 LOOPABILITY: Dict[Tuple[str, str], str] = {
     ('2D', 'materials_list'): 'sweep',
-    ('2D', 'pot_path'): 'sweep',   # spec §13: one pot_ directory per member
+    ('2D', 'pot_path'): 'sweep',
     ('general', 'temp'): 'sweep',
     ('general', 'interlayer_style'): 'sweep',
     ('2D', 'layers'): 'layer',
@@ -67,13 +58,8 @@ LOOPABILITY: Dict[Tuple[str, str], str] = {
 
 
 #: Keys the LAMMPS scripts loop over internally; excluded from sweep expansion.
-#: Derived from :data:`LOOPABILITY`'s ``'in_file'`` entries under ``'general'``
-#: rather than listed again by hand, so this set and ``LOOPABILITY`` cannot
-#: drift apart the way they did when ``scan_angle_force`` was added to
-#: ``LOOPABILITY`` but not here: a list-valued ``scan_angle_force`` was
-#: silently swept into separate configs that all built to the identical
-#: output directory (``output_dir_for`` never looks at it) and overwrote each
-#: other. See :func:`~frictionsim2d.run.expand.expand_config_sweeps`, the sole consumer.
+#: Derived from the ``'in_file'`` entries of :data:`LOOPABILITY`; its consumer is
+#: :func:`~frictionsim2d.run.expand.expand_config_sweeps`.
 LAMMPS_LOOP_PARAMS = frozenset(
     key for (section, key), kind in LOOPABILITY.items()
     if section == 'general' and kind == 'in_file'
@@ -101,14 +87,13 @@ def loopability(section: str, key: str) -> str:
     return LOOPABILITY.get((loopability_section(section), key), 'scalar')
 
 
-def _numbered_sheet_keys(run_dict: Dict[str, Any]) -> List[str]:
-    """Every '2D-N' key in ``run_dict``, sorted by N ascending.
+def _numbered_keys(run_dict: Dict[str, Any], prefix: str) -> List[str]:
+    """Every ``<prefix>N`` key in ``run_dict`` ('2D-', 'Flake-'), sorted by N.
 
-    Keys are matched by prefix and sorted numerically (so '2D-2' sorts
-    before '2D-10'); a non-numeric suffix sorts last rather than raising.
+    A non-numeric suffix sorts last rather than raising.
     """
     return sorted(
-        (k for k in run_dict if isinstance(k, str) and k.startswith('2D-')),
+        (k for k in run_dict if isinstance(k, str) and k.startswith(prefix)),
         key=lambda key: int(key.split('-', 1)[1])
         if key.split('-', 1)[1].isdigit() else 10**9,
     )
@@ -123,39 +108,17 @@ def primary_sheet(run_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
     if '2D' in run_dict:
         return run_dict['2D']
-    numbered = _numbered_sheet_keys(run_dict)
+    numbered = _numbered_keys(run_dict, '2D-')
     if numbered:
         return run_dict[numbered[0]]
     raise KeyError('2D')
 
 
-def _numbered_flake_keys(run_dict: Dict[str, Any]) -> List[str]:
-    """Every 'Flake-N' key in ``run_dict``, sorted by N ascending.
-
-    Mirrors :func:`_numbered_sheet_keys` for the dedicated hetero-flake
-    sections (folded into ``flake_sheets`` by the pydantic model).
-    """
-    return sorted(
-        (k for k in run_dict if isinstance(k, str) and k.startswith('Flake-')),
-        key=lambda key: int(key.split('-', 1)[1])
-        if key.split('-', 1)[1].isdigit() else 10**9,
-    )
-
-
 def _flake_section(run_dict: Dict[str, Any], model: Optional[str]) -> Any:
-    """The raw ``[Flake]``/``[flake]`` section, whichever alias applies.
+    """The raw single ``[Flake]``/``[flake]`` section for ``model``.
 
-    The single-flake-shape section's key differs by family:
-    ``SheetOnSheetSimulationConfig.flake`` aliases ``'Flake'`` (capital),
-    ``AFMSimulationConfig.flake`` aliases ``'flake'`` (lowercase) -- same
-    ``FlakeConfig`` model, different ini/dict key. This mirrors
-    :func:`_routing_view`'s already-established
-    ``flake_key = 'flake' if model in AFM_LIKE_MODELS else 'Flake'`` rule
-    (the routing functions hit this exact casing split first) rather than
-    inventing a second convention. When ``model`` isn't known (the two
-    existing bare ``material_token(run_dict)`` call sites, with no model
-    param, predate this fix) both keys are checked -- a real run_dict from a
-    single family only ever populates one of them.
+    The key is ``'flake'`` for the AFM family and ``'Flake'`` for sheet-on-sheet;
+    with no ``model`` both are checked.
     """
     if model is not None:
         return run_dict.get('flake' if model in AFM_LIKE_MODELS else 'Flake')
@@ -164,43 +127,16 @@ def _flake_section(run_dict: Dict[str, Any], model: Optional[str]) -> Any:
 
 
 def flake_material_token(run_dict: Dict[str, Any], model: Optional[str] = None) -> Optional[str]:
-    """Directory-token contribution for a ``[Flake]``/``[flake]``/``[Flake-N]``
-    section, or ``None`` when the flake doesn't change the built system's
-    material identity.
+    """Directory token for the flake section(s), or ``None`` when the flake does
+    not change the built system's material.
 
-    A flake config -- :class:`~frictionsim2d.builders.sheetonsheet.flake_slide.FlakeSlideSimulation`
-    (routed from ``run sheetonsheet`` by a ``[Flake]`` section) or an AFM
-    ``[flake]`` (the finite shaped flake between tip and sheet, built by
-    :class:`~frictionsim2d.builders.afm.AFMSimulation`) -- was named off the substrate
-    material only: ``material_token``/``output_dir_for`` never looked at
-    ``flake_sheets``/``[Flake-N]``/``[flake]`` at all, so two flake configs
-    differing ONLY in their flake material silently built into the same
-    output directory and overwrote each other. (The first fix for this only
-    checked the capital-F ``'Flake'`` key, so it closed the sheet-on-sheet
-    flake path but missed AFM's lowercase ``'flake'`` alias entirely --
-    ``run_dict.get('Flake')`` is always ``None`` for an AFM config, so the
-    AFM ``[flake]`` collision was never actually closed. See
-    :func:`_flake_section` for the casing rule.)
-
-    A hetero flake (``[Flake-1]``/``[Flake-2]``, folded into ``flake_sheets``
-    for both families) always names two materials explicitly (``mat`` is
-    required on those sections), so it always contributes -- there is no
-    established directory convention for it to stay byte-identical to (today
-    it always collides).
-
-    A single flake section may omit ``mat`` entirely for the sheet-on-sheet
-    family, in which case the builder reuses the substrate ``[2D]``'s
-    material
-    (``FlakeSlideSimulation._filled_flake_config``).
-    That's the common case there, and it must keep building into today's
-    directory (no flake section at all), so it contributes nothing here. AFM's
-    own ``[flake]`` has no such substrate fallback (its builder always needs
-    an explicit ``mat``/``cif_path``/``pot_path`` to carve the flake), so a
-    configured AFM flake always contributes. Either way, only an EXPLICIT
-    ``mat`` contributes -- that's the case that actually changes what gets
-    built and so must change the directory.
+    - ``[Flake-N]`` sections (hetero flake) always contribute: ``mat1+mat2+...``.
+    - A sheet-on-sheet ``[Flake]`` without ``mat`` contributes nothing; the
+      builder reuses the substrate's material.
+    - A single flake with an explicit ``mat`` (sheet-on-sheet ``[Flake]`` or AFM
+      ``[flake]``) contributes that material.
     """
-    numbered = _numbered_flake_keys(run_dict)
+    numbered = _numbered_keys(run_dict, 'Flake-')
     if numbered:
         return '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
     flake = _flake_section(run_dict, model)
@@ -212,20 +148,12 @@ def flake_material_token(run_dict: Dict[str, Any], model: Optional[str] = None) 
 def material_token(run_dict: Dict[str, Any], model: Optional[str] = None) -> str:
     """Directory token for the material(s): 'mat' or 'mat1+mat2+...'.
 
-    Two hetero runs differing only in material 2 must not share a directory,
-    so every numbered sheet section contributes its 'mat' in numeric order.
-    Joined with '+' rather than '-': material names themselves contain '-'
-    (e.g. 'h-MoS2'), which would make a '-' join unsplittable, and
-    postprocessing already folds '-' into '_' for its own filter keys.
-
-    A flake section (see :func:`flake_material_token`) that names a distinct
-    flake material contributes a '+flake-<mat...>' suffix, so a flake config
-    doesn't collide with a hetero substrate ([2D-1]/[2D-2]) config whose
-    material token happens to look the same joined with a bare '+'. ``model``
-    is optional (existing callers predate it) but should be passed whenever
-    known -- see :func:`_flake_section`.
+    Every numbered sheet section contributes its 'mat' in numeric order. The
+    join is '+' because material names contain '-' (e.g. 'h-MoS2'). A flake
+    with its own material (see :func:`flake_material_token`) appends
+    ``+flake-<mat...>``; pass ``model`` whenever it is known.
     """
-    numbered = _numbered_sheet_keys(run_dict)
+    numbered = _numbered_keys(run_dict, '2D-')
     if numbered:
         base = '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
     else:
@@ -257,17 +185,10 @@ def interlayer_dir_token(style: str, comparison: bool) -> Optional[str]:
 
 
 def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
-    """The output directory a run config builds into, relative to the
-    simulation root.
+    """The output directory a run config builds into, relative to the simulation root.
 
-    Extracted verbatim from the naming block in `run_simulations` so callers
-    that never build anything -- the GUI's Generate preview, in particular --
-    can predict a run's directory (and so spot sweep members that would
-    collide) without duplicating the layout rules here.
-
-    ``mat`` covers every numbered sheet section (see :func:`material_token`)
-    so two hetero runs differing only in the second material do not collide;
-    ``x``/``y`` come from the primary sheet (see :func:`primary_sheet`).
+    Pure naming, so callers that build nothing (the GUI's Generate preview) can
+    predict a run's directory. ``x``/``y`` come from :func:`primary_sheet`.
     """
     mat = material_token(run_dict, model)
     sheet = primary_sheet(run_dict)
@@ -276,10 +197,7 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     temp = run_dict['general'].get('temp', 300)
     size_token = f"{format_dimension_token(x)}x_{format_dimension_token(y)}y"
 
-    # Potential token (spec §13.4): always emitted when the sheet names a
-    # potential, so paths are self-describing and a pot_path sweep can never
-    # collide (the LOOPABILITY rule: sweepable only if it changes the
-    # directory name). LEGACY_2026 layouts without the segment stay readable.
+    # Emitted whenever the sheet names a potential.
     pot_segment = None
     pot_path = sheet.get('pot_path')
     if pot_path:
@@ -335,10 +253,7 @@ class RunTokens:
     ``sheetonsheet/``), so :func:`parse_run_path` sets it to ``model`` and
     :func:`frictionsim2d.run.tree.discover_runs` replaces it from ``provenance.json``.
     ``substrate`` and ``tip_material`` are the bare material name with any
-    amorphous marker stripped (``'Si'``, never ``'amorph-Si'``/``'aSi'``);
-    ``substrate_amorphous`` carries the substrate's flag separately (see
-    :func:`_split_amorph_token`). There is no ``tip_amorphous`` -- nothing
-    downstream needs the tip's amorphous flag as a standalone field.
+    amorphous marker stripped; ``substrate_amorphous`` carries the flag.
     """
     model: str
     family: str
@@ -372,7 +287,6 @@ def mlip_flavor_from_pot_token(pot_token: Optional[str]) -> Optional[Tuple[str, 
     text between ``pot_`` and the next underscore. A classical slug, or
     anything that is not a pot token, gives ``None``.
 
-    Imports the stdlib-only MLIP registry lazily so this module stays a leaf.
     """
     if not pot_token or not pot_token.startswith('pot_'):
         return None
@@ -393,20 +307,9 @@ _AMORPH_PREFIX = 'amorph-'
 def _split_amorph_token(token: str) -> Tuple[str, bool]:
     """Split a substrate/tip token into ``(material, is_amorphous)``.
 
-    ``output_dir_for`` writes the literal prefix ``'amorph-'`` when
-    ``amorph == 'a'`` (2026-09-21 user decision, Task 3b) -- an unambiguous
-    encoding that needs no heuristic, so ``'amorph-Si'`` -> ``('Si', True)``
-    and ``'h-MoS2'``/``'h_MoS2'`` (materials that carry their own structure
-    prefix -- see the domain conventions) -> unchanged, ``False``.
-
-    Legacy read: trees on disk from before Task 3b instead wrote a bare
-    leading ``'a'`` followed by the material's own capitalised first letter
-    (``'aSi'`` -> ``('Si', True)``). That legacy shape is recognised ONLY
-    when the remainder starts with an uppercase letter -- the ``'^[a-z][-_]'``
-    heuristic Task 3 added to also catch prefixed 2D names (``'ah-MoS2'``)
-    was guesswork and is gone: ``'ah-MoS2'`` is now just a crystalline
-    material literally named that (no such material exists; that is
-    accepted).
+    The ``amorph-`` prefix marks an amorphous material (``'amorph-Si'`` ->
+    ``('Si', True)``). A bare ``'a'`` followed by a capital (``'aSi'``) is also
+    read as amorphous; anything else is returned unchanged.
     """
     if token.startswith(_AMORPH_PREFIX):
         return token[len(_AMORPH_PREFIX):], True
@@ -430,11 +333,7 @@ def parse_run_path(rel_path: str) -> RunTokens:
 
     The exact inverse of :func:`output_dir_for`, plus the optional trailing
     ``L{n}`` level the AFM-family builders add. Raises ``ValueError`` on
-    anything it cannot account for -- silently returning partial tokens is
-    how the old duplicated parser mis-filed hetero runs. A substrate or tip
-    token is amorphous iff it starts with ``'amorph-'``, or (legacy trees,
-    see :func:`_split_amorph_token`) is a bare ``'a'`` + capitalised letter;
-    either way the token's material is the remainder.
+    anything it cannot account for rather than returning partial tokens.
     """
     text = str(rel_path).replace('\\', '/').strip('/')
     parts = PurePosixPath(text).parts
