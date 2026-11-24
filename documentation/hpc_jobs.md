@@ -15,7 +15,6 @@ Generated scripts separate these phases so slide jobs start only after successfu
 
 In `hpc/` you can expect files such as:
 
-- `manifest.json`
 - `manifest_system.txt` (AFM)
 - `manifest_slide.txt`
 - `run_system.pbs` or `run_system.sh` (AFM)
@@ -38,16 +37,12 @@ cores. See [mlip.md](mlip.md) §8.
 
 ### The manifest is a script list
 
-`manifest.json` (`frictionsim2d/hpc/manifest.py`) records, per generated LAMMPS script,
-which simulation it belongs to and which script within it (`system`/`slide`,
-material, layers, force, angle, speed). It is a **script list**, not a live
-job tracker: there is no AiiDA-uuid field linking an entry back to a stored
-node, and none of the status-mutation methods that used to update a job's
-lifecycle (`submitted` → `running` → `completed`) as jobs progressed remain —
-FrictionSim2D is not installed on the cluster in the normal workflow, so
-nothing local was ever in a position to update those fields anyway. The
-script-list half — which script belongs to which simulation, in what order —
-is what `hpc_dispatch` actually needs, and that stays.
+`JobManifest` (`frictionsim2d/hpc/manifest.py`) is built in memory from the tree, one
+entry per LAMMPS script: which simulation it belongs to and which script within it
+(`system`/`slide`, material, layers, force, angle, speed, MLIP group). It is not
+written to disk and tracks no job status: FrictionSim2D is not installed on the
+cluster in the normal workflow, so nothing local could update one. The per-group
+`manifest*.txt` files in `hpc/` are what the job scripts read.
 
 ## Submission model
 

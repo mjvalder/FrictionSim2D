@@ -110,14 +110,3 @@ class TestManifestInfersGPUFields:
         manifest = JobManifest.from_simulation_directory(tmp_path)
         assert manifest.jobs
         assert all(j.framework == 'deepmd' and j.needs_gpu for j in manifest.jobs)
-
-    def test_round_trips_through_json(self, tmp_path):
-        """The new fields must survive save/load."""
-        _make_sim(tmp_path, f'{SHEET}/pot_deepmd_dpa3')
-        manifest = JobManifest.from_simulation_directory(tmp_path)
-        out = tmp_path / 'manifest.json'
-        manifest.save(out)
-        reloaded = JobManifest.load(out)
-        assert [(j.needs_gpu, j.framework) for j in reloaded.jobs] == \
-               [(j.needs_gpu, j.framework) for j in manifest.jobs]
-        assert reloaded.jobs[0].needs_gpu is True

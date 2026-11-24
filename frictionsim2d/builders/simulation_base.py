@@ -624,10 +624,6 @@ class SimulationBase(ABC):
         else:
             base_dir = '$SLURM_SUBMIT_DIR'
 
-        manifest_json_path = hpc_dir / 'manifest.json'
-        manifest.save(manifest_json_path)
-        logger.info("Saved manifest to %s", manifest_json_path)
-
         if manifest.has_system_jobs():
             logger.info("Detected system initialization jobs - using two-phase submission")
             scripts = generator.generate_two_phase_scripts(

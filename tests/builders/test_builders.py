@@ -225,10 +225,10 @@ def test_afm_builder_structure(afm_config, temp_dir):
     assert "group" in slide_in
 
     # Real HPC script generation (settings.hpc.modules set above so
-    # _generate_hpc_scripts doesn't refuse): a manifest and at least one
-    # real job script were written, not merely "the call didn't raise".
+    # _generate_hpc_scripts doesn't refuse): at least one real job script was
+    # written, and no manifest.json -- the script list is not a file.
     hpc_dir = builder._get_hpc_output_dir()
-    assert (hpc_dir / "manifest.json").exists()
+    assert not (hpc_dir / "manifest.json").exists()
     assert any(hpc_dir.glob("*.pbs")) or any(hpc_dir.glob("*.sh")) or any(hpc_dir.glob("*.slurm"))
 
 

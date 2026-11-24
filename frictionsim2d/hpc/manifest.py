@@ -1,31 +1,11 @@
 """Job manifest for offline HPC workflow tracking."""
 
-import json
-import logging
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass, field, fields, asdict
+from dataclasses import dataclass, field
 
 from ..core.observables import FAMILIES
-
-logger = logging.getLogger(__name__)
-
-
-def _known_fields(data_cls: type, data: Dict[str, Any], kind: str) -> Dict[str, Any]:
-    """Drop dict keys that are not fields of *data_cls*, logging what's dropped.
-
-    Tolerates a manifest.json written by an older version of the dataclass --
-    e.g. the AiiDA-uuid fields and status methods dropped from ``JobEntry`` --
-    so an existing file still loads instead of raising ``TypeError`` on the
-    unexpected keyword.
-    """
-    known = {f.name for f in fields(data_cls)}
-    legacy_keys = data.keys() - known
-    if legacy_keys:
-        logger.debug("Dropping legacy %s keys: %s", kind, sorted(legacy_keys))
-    return {k: v for k, v in data.items() if k in known}
 
 
 def parse_mlip_flavor(path_str: str) -> Optional[Tuple[str, str]]:
@@ -83,7 +63,6 @@ class JobEntry:
         force: Applied force in nN.
         angle: Scan angle in degrees.
         speed: Sliding speed in m/s.
-        created_at: ISO timestamp of creation.
         needs_gpu: Whether this job must run on a GPU node.
         framework: MLIP framework driving the job ('deepmd' | 'mace'), or None
             for a classical potential. Together with ``needs_gpu`` this is the
@@ -99,57 +78,23 @@ class JobEntry:
     force: float = 0.0
     angle: float = 0.0
     speed: float = 2.0
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    # --- MLIP resource fields. Defaults describe a plain CPU job, so a
-    # manifest.json written before MLIP support still loads through from_dict().
+    # MLIP resource fields; the defaults describe a plain CPU job.
     needs_gpu: bool = False
     framework: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'JobEntry':
-        """Create JobEntry from dictionary.
-
-        Tolerates legacy keys no longer in the dataclass (see `_known_fields`).
-
-        Args:
-            data: Dictionary with job entry fields.
-
-        Returns:
-            New JobEntry instance.
-        """
-        return cls(**_known_fields(cls, data, 'JobEntry'))
 
 
 @dataclass
 class JobManifest:
-    """Batch job tracker for offline HPC workflows with AiiDA integration.
-    
-    Central tracking system for simulations in disconnected HPC workflows where
-    AiiDA cannot directly monitor jobs. Stores job metadata, status, and enables
-    manual HPC job management while maintaining provenance.
-    
+    """The LAMMPS scripts discovered in a built simulation tree.
+
     Attributes:
         name: Manifest identifier.
-        created_at: ISO timestamp of creation.
-        last_updated: ISO timestamp of last modification.
-        config_file: Path to source config file.
         source_directory: Path to simulation root directory.
         jobs: List of job entries.
-        scheduler: HPC scheduler type ('pbs' or 'slurm').
-        package_directory: Path to HPC package if exported.
     """
     name: str = "friction2d_manifest"
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    last_updated: str = field(default_factory=lambda: datetime.now().isoformat())
-    config_file: Optional[str] = None
     source_directory: Optional[str] = None
     jobs: List[JobEntry] = field(default_factory=list)
-    scheduler: str = "pbs"
-    package_directory: Optional[str] = None
 
     #: Top-directory vocabulary for `from_simulation_directory`'s material
     #: parse. An alias of `core.observables.FAMILIES` -- see the constraint
@@ -173,7 +118,6 @@ class JobManifest:
             entry: JobEntry to add.
         """
         self.jobs.append(entry)
-        self._update_timestamp()
 
     def get_system_jobs(self) -> List[JobEntry]:
         """Get all system initialization jobs.
@@ -200,45 +144,6 @@ class JobManifest:
             True if system jobs exist.
         """
         return bool(self.get_system_jobs())
-
-    def _update_timestamp(self) -> None:
-        self.last_updated = datetime.now().isoformat()
-
-    def save(self, filepath: Path) -> None:
-        """Save manifest to JSON file.
-        
-        Args:
-            filepath: Path to save manifest.
-        """
-        data = {
-            'name': self.name,
-            'created_at': self.created_at,
-            'last_updated': self.last_updated,
-            'config_file': self.config_file,
-            'source_directory': self.source_directory,
-            'scheduler': self.scheduler,
-            'package_directory': self.package_directory,
-            'jobs': [job.to_dict() for job in self.jobs],
-        }
-        Path(filepath).write_text(json.dumps(data, indent=2), encoding='utf-8')
-
-    @classmethod
-    def load(cls, filepath: Path) -> 'JobManifest':
-        """Load manifest from JSON file.
-
-        Tolerates legacy keys no longer in the dataclass (see `_known_fields`).
-
-        Args:
-            filepath: Path to manifest file.
-
-        Returns:
-            Loaded JobManifest instance.
-        """
-        data = json.loads(Path(filepath).read_text(encoding='utf-8'))
-        jobs = [JobEntry.from_dict(j) for j in data.pop('jobs', [])]
-        manifest = cls(**_known_fields(cls, data, 'JobManifest'))
-        manifest.jobs = jobs
-        return manifest
 
     @classmethod
     def from_simulation_directory(cls, sim_dir: Path,
