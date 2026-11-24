@@ -232,8 +232,8 @@ The full field table, units and defaults are in `frictionsim2d/aiida/block_schem
   used as a substrate share one material node.
 - **Coverage is enforced.** A test fails when a config or settings model gains
   a field that is neither assigned to a block nor listed in `EXCLUDED`
-  (`hpc.*`, `aiida.*`, `integrity.*`, `quench.run_local`/`n_procs`/
-  `allow_generate`, `materials_list`, `outer_loop`, `scan_angle_force`, and the
+  (`hpc.*`, `aiida.*`, `integrity.*`, the removed `quench.run_local`/`n_procs`/
+  `allow_generate` that older trees still carry, `materials_list`, `outer_loop`, `scan_angle_force`, and the
   record's own identity fields).
 - **Every numeric field has a unit**, ASCII, metal units: lengths in
   `angstrom`, springs in the drive block in `N/m`, `drive_k` in

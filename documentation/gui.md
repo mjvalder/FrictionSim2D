@@ -371,9 +371,9 @@ substituted, `materials_list` gone.
 
 **Render** (**Ctrl+R**) builds the configured components, assembles them as
 the generated LAMMPS script specifies, and displays the result. It never
-minimises and never runs a melt-quench: if an amorphous structure is not
-already cached, the build refuses rather than spending minutes in `mpiexec`
-and writing into the packaged materials directory.
+minimises and never runs a melt-quench: if no amorphous block in the library
+matches the run's quench conditions and size, the build refuses and the message
+names the `FrictionSim2D run quench --for` command that creates the job.
 
 What you see is parsed out of the build's own outputs — the assembly script for
 the cell and component placement, `system.in.settings` for component membership
@@ -456,8 +456,8 @@ is reported in a dialog and written into the issues panel, and nothing is
 generated: it names the section at fault and what to put in it, which an empty
 list of output directories does not.
 
-Unlike Render, this may generate a missing amorphous structure, because here it
-is what you asked for rather than a side effect of looking.
+Like Render, this never melt-quenches: a missing amorphous block stops the
+generation with the `run quench --for` command that creates its job.
 
 Validation (not just the Generate confirmation) also warns — without
 blocking — when an AFM-like sheet's footprint is under twice the tip

@@ -154,6 +154,34 @@ The former central database and REST API (`FrictionSim2D db ...`,
 `FrictionSim2D aiida export` on one side, `FrictionSim2D aiida import-archive`
 on the other (see [aiida.md](aiida.md#9-archives)).
 
+## 11. Make an amorphous block (melt-quench)
+
+An `amorph = a` tip or substrate is cut from a pre-made amorphous block. A run
+reuses a block only when its material, potential (sha256) and the
+`settings.quench` conditions match and it is large enough; otherwise it stops,
+writes nothing, and prints the command below. No friction run ever melt-quenches.
+
+```bash
+# 1. Write one quench job per missing block (decks only; nothing runs)
+FrictionSim2D run quench --for examples/afm_config.ini -o ./quench
+#    or from a [quench] config, members = material x every listed condition
+FrictionSim2D run quench examples/quench_config.ini -o ./quench
+
+# 2. Run it on the HPC like any simulation (one array task per member) ...
+FrictionSim2D hpc generate ./quench/quench_YYYYMMDD_HHMMSS --scheduler pbs
+#    ... or here, serially, for hours: add --local to step 1 (it imports too)
+
+# 3. Add the finished blocks to the library ($XDG_DATA_HOME/FrictionSim2D/amorphous)
+FrictionSim2D quench import ./quench/quench_YYYYMMDD_HHMMSS
+
+# 4. Rerun the friction command; it now finds the block
+FrictionSim2D quench list Si
+```
+
+`quench import` copies only complete members (provenance, `data/amor_<mat>__<key8>.lmp`,
+a finished `lammps/run_quench.log`) and exits 1 listing the rest. It never writes into
+the package or the materials pack. `aiida import` refuses a quench root.
+
 ## Related docs
 
 - [commands.md](commands.md)

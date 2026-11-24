@@ -77,6 +77,49 @@ curve, with a fresh recorded velocity seed per `(material, layer)`. Requires an
 Replaces the former separate `run poke` (hold-only) and `run adhesion`
 (retract-only) commands. See [indent.md](indent.md).
 
+### run quench
+
+```bash
+FrictionSim2D run quench CONFIG_FILE [OPTIONS]
+FrictionSim2D run quench --for FRICTION_CONFIG [OPTIONS]
+```
+
+Write melt-quench jobs that make amorphous blocks: one member
+(`quench/<mat>/<key8>/`) per block. `CONFIG_FILE` has a `[quench]` section
+(`examples/quench_config.ini`); with `--for`, the members are the blocks a friction
+config is missing. Nothing runs: submit with `hpc generate`, then `quench import`.
+
+Options: those of `run afm`, plus
+
+- `--local` — then run every member here with serial `lmp` (hours) and import it
+- `--force` — keep members a library block already satisfies
+
+An AFM-family `run` whose amorphous block is missing exits 1 before writing
+anything and prints the `run quench --for` line to use. See
+[examples.md](examples.md) §11.
+
+## quench
+
+### quench import
+
+```bash
+FrictionSim2D quench import ROOT [--replace]
+```
+
+Copy every complete member of a quench root into
+`$XDG_DATA_HOME/FrictionSim2D/amorphous`. Incomplete members are listed and the
+command exits 1. A same-key block is replaced only by a larger one, or with
+`--replace`.
+
+### quench list
+
+```bash
+FrictionSim2D quench list [MATERIAL] [--json]
+```
+
+Every block in the packaged library, the materials pack and the user library, with
+its key, box, atom count and conditions (`unkeyed (…)` when its sidecar cannot key it).
+
 ## settings
 
 ### settings show

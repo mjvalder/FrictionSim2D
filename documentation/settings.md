@@ -206,20 +206,35 @@ Defaults:
 
 ```yaml
 quench:
-  run_local: true
-  n_procs: 16
   quench_slab_dims: [200, 200, 50]
   quench_rate: 1e12
   quench_melt_temp: 2500.0
   quench_target_temp: 300.0
   timestep: 0.002
-  melt_steps: 50000
-  equilibrate_steps: 20000
+  melt_steps: 20000
+  equilibrate_steps: 10000
 ```
 
 Implementation note: model fields also support aliases such as `melt_temp` and `quench_temp`.
 
-`quench_rate` is in K/s; the quench runs `(melt_temp - quench_temp) / (quench_rate * timestep * 1e-12)` steps (default: 1,100,000), so doubling the rate halves the run. Before the `quench_rate is K/s` fix (commit `e531b54`) the step count was proportional to the rate instead, so a non-default rate was applied inverted (a rate of `1e13` ran 100 times too long, not 10 times too short). The default `1e12` gave the same step count under both formulas, at any timestep. An amorphous substrate built earlier with a non-default rate should be regenerated: delete its cached `amor_<material>.lmp` (and `amor_<material>.lmp.json`) in the materials directory, because the cache is reused whatever the quench settings.
+These are the conditions an amorphous block is made under, and the key it is
+found by. A friction run with an `amorph = a` tip or substrate reuses a block only
+if its material, potential file (by sha256) and all six conditions above match,
+and it is at least as large as the component; it never melt-quenches. With no
+match the run stops before writing anything and prints the
+`FrictionSim2D run quench --for CONFIG` line that creates the job (see
+[examples.md](examples.md) §11). The defaults are the conditions of the shipped
+amorphous Si block, so the examples find it.
+
+`quench_rate` is in K/s; the quench runs `(melt_temp - quench_temp) / (quench_rate * timestep * 1e-12)` steps (default: 1,100,000), so doubling the rate halves the run. Floats match to 6 significant digits (`1e12` and `1000000000000.0` are the same key).
+
+`quench_slab_dims` is the default crystal slab a quench melts; `run quench --for`
+takes the axis-wise maximum of it and the size the run needs. It is not part of the
+key.
+
+Removed (2026-11): `run_local`, `n_procs` and `allow_generate`. An old
+settings file that names them still loads, with one `DeprecationWarning`; they
+are ignored. Use `FrictionSim2D run quench … --local` to quench on this machine.
 
 ## hpc
 
