@@ -278,11 +278,10 @@ class GPUSettings(BaseModel):
 class FrameworkOverlay(BaseModel):
     """Per-MLIP-framework HPC overrides.
 
-    MACE (ACEsuit fork + Kokkos/libtorch) and DeePMD (pinned mainline +
-    deepmd-kit plugin) are two *incompatible* LAMMPS builds, so a campaign that
-    mixes them must resolve a different binary — and often different modules and
-    environment exports — per framework. This is the settings-side counterpart
-    of ``frictionsim2d.core.mlip.LauncherSpec.binary_key``.
+    MACE (symmetrix + Kokkos) and DeePMD (pinned mainline + deepmd-kit plugin)
+    are two *incompatible* LAMMPS builds, so a campaign that mixes them must
+    resolve a different binary — and often different modules and environment
+    exports — per framework. Keyed by framework name (``hpc.frameworks``).
     """
     binary: Optional[str] = None
     modules: List[str] = Field(default_factory=list)
@@ -611,7 +610,7 @@ class SubstrateConfig(_EmptyAmorphDefault, ComponentConfig):
 #: Config keys struck by the v4 MLIP redesign. Pydantic *ignores* unknown keys
 #: by default, which for these would silently change a run's physics, so
 #: :meth:`SheetConfig.reject_removed_mlip_keys` rejects them by name with a
-#: pointer at the spec that removed them.
+#: pointer at documentation/mlip.md.
 REMOVED_SHEET_KEYS = {
     'mlip_interlayer': (
         "It only ever selected between a partitioned cell ('lj') and full "
@@ -671,7 +670,7 @@ class SheetConfig(ComponentConfig):
     @model_validator(mode='before')
     @classmethod
     def reject_removed_mlip_keys(cls, data):
-        """Fail loudly on keys the v4 redesign removed (v4 spec §5)."""
+        """Fail loudly on keys the v4 redesign removed."""
         if not isinstance(data, dict):
             return data
         for key, reason in REMOVED_SHEET_KEYS.items():
@@ -679,8 +678,7 @@ class SheetConfig(ComponentConfig):
                 raise ValueError(
                     f"'{key}' was removed and is no longer accepted (got "
                     f"{data[key]!r}). {reason} See "
-                    f"docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md "
-                    f"§5."
+                    f"documentation/mlip.md §2."
                 )
         return data
 
@@ -689,7 +687,7 @@ class SheetConfig(ComponentConfig):
         """Enforce the v4 config-layer rules for MLIP sheets.
 
         These come straight from the binding capability matrix
-        (``docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md`` §3/§5);
+        (documentation/mlip.md §1-§2);
         each message names the rule it enforces so a rejected config is
         self-diagnosing. Cell-level rules that need to see *sibling* components
         (no classical component alongside an MLIP; no multi-component full cell)

@@ -85,12 +85,10 @@ def test_registry_capability_flags():
     assert deepmd.virtual_atom_element == "Mo"
     assert mace.virtual_atom_element == "Mo"
 
-    assert deepmd.launcher.binary_key == "deepmd"
     assert deepmd.launcher.mpi_ranks == 1
     assert deepmd.launcher.lmp_flags == ""
     assert any("LAMMPS_PLUGIN_PATH" in line for line in deepmd.launcher.env_lines)
 
-    assert mace.launcher.binary_key == "mace"
     assert mace.launcher.mpi_ranks == 1
     assert mace.launcher.lmp_flags == "-k on t ${OMP_NUM_THREADS:-8} -sf kk -pk kokkos neigh half"
     # REGRESSION GUARD -- the PACKAGE default must stay on the Kokkos host

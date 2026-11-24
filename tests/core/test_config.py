@@ -951,7 +951,7 @@ def test_mlip_interlayer_is_rejected_loudly(sheet_kwargs, tmp_path, value):
     keys by default, which for this one would silently change the physics of an
     existing config -- hence the explicit rejection.
     """
-    with pytest.raises(ValidationError, match=r"2026-08-11-mlip-post-m0-design"):
+    with pytest.raises(ValidationError, match=r"documentation/mlip.md"):
         SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd',
                        'pot_path': _model(tmp_path, 'm.pth'), 'lat_c': 6.15,
                        'mlip_interlayer': value})
@@ -960,7 +960,7 @@ def test_mlip_interlayer_is_rejected_loudly(sheet_kwargs, tmp_path, value):
 def test_mlip_interlayer_is_rejected_on_a_classical_sheet_too(sheet_kwargs, tmp_path):
     pot = tmp_path / "MoS2.sw"
     pot.write_text("# sw\n", encoding="utf-8")
-    with pytest.raises(ValidationError, match=r"2026-08-11-mlip-post-m0-design"):
+    with pytest.raises(ValidationError, match=r"documentation/mlip.md"):
         SheetConfig(**{**sheet_kwargs, 'pot_type': 'sw', 'pot_path': str(pot),
                        'mlip_interlayer': 'native'})
 
@@ -1077,7 +1077,7 @@ def test_ini_carrying_the_removed_key_fails_loudly(tmp_path):
         encoding="utf-8",
     )
     parsed = parse_config(ini)
-    with pytest.raises(ValidationError, match=r"2026-08-11-mlip-post-m0-design"):
+    with pytest.raises(ValidationError, match=r"documentation/mlip.md"):
         SheetOnSheetSimulationConfig(**{**parsed, 'settings': load_settings()})
 
 

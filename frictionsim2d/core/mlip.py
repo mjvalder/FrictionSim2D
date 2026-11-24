@@ -39,13 +39,12 @@ __all__ = [
 class LauncherSpec:
     """How to launch LAMMPS for a given MLIP framework.
 
-    MACE (ACEsuit fork + Kokkos/libtorch) and DeePMD (pinned mainline +
-    deepmd-kit plugin) are two *incompatible* LAMMPS builds, so a job must
-    resolve the right binary. ``binary_key`` is the lookup key into an HPC
-    profile's ``frameworks:`` overlay -- this module never hard-codes paths.
+    MACE (symmetrix + Kokkos) and DeePMD (pinned mainline + deepmd-kit plugin)
+    are two *incompatible* LAMMPS builds, so a job must resolve the right
+    binary. The framework name keys an HPC profile's ``frameworks:`` overlay --
+    this module never hard-codes paths.
     """
 
-    binary_key: str
     mpi_ranks: int = 1
     lmp_flags: str = ''
     env_lines: tuple = ()
@@ -123,7 +122,6 @@ MLIP_REGISTRY: Dict[str, MLIPSpec] = {
         file_extensions=('.pb', '.pth'),
         virtual_atom_element='Mo',
         launcher=LauncherSpec(
-            binary_key='deepmd',
             mpi_ranks=1,
             lmp_flags='',
             # The plugin .so lives in a different directory per install method;
@@ -145,7 +143,6 @@ MLIP_REGISTRY: Dict[str, MLIPSpec] = {
         file_extensions=('.json',),
         virtual_atom_element='Mo',
         launcher=LauncherSpec(
-            binary_key='mace',
             mpi_ranks=1,
             # KOKKOS host (OpenMP) backend, chosen for safety, not speed: the CUDA
             # backend is silently wrong on a stock symmetrix checkout (`mace_types`

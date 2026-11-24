@@ -74,7 +74,7 @@ def mlip_template_context(pot_type: Optional[str]) -> Dict[str, Any]:
     """The ``mlip_sheet`` / ``mlip_deck_directives`` template keys.
 
     ``pot_type`` names the whole cell's framework: a cell is uniform by
-    construction (v6 §4 -- every component uses the SAME MLIP, enforced by
+    construction (every component uses the SAME MLIP, enforced by
     ``validate_mlip_cell`` and again at emission).
 
     LOAD-BEARING, both keys. The templates render them behind

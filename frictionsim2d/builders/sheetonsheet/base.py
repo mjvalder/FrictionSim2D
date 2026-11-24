@@ -483,7 +483,7 @@ class SheetOnSheetSimulation(SimulationBase):
         n_layers = self.n_layers
         constraint_mode = self.config.settings.simulation.constraint_mode
 
-        # Capability-matrix rules that need the whole cell (v4 spec §3/§6).
+        # Capability-matrix rules that need the whole cell.
         # A sheet-on-sheet cell is the sheet alone, so only the sheet-side rules
         # can fire here -- chiefly the constraint_mode x MLIP refusal.
         validate_mlip_cell(self.config.sheet, constraint_mode=constraint_mode)

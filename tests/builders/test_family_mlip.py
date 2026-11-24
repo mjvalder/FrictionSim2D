@@ -1,18 +1,11 @@
-"""MLIP support across the builder families, under the v4 capability matrix.
+"""MLIP support across the builder families (documentation/mlip.md §1, §6).
 
-The deliverable used to be "an MLIP ``pot_type`` works in *every* family". The
-executed Milestone-0 results narrow that (see
-``docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md``): a partitioned
-cell needs a NULL-padded ``pair_coeff`` type map, and **both** frameworks reject
-one (§1, E2/E3 for DeePMD; ACEsuit #1314 for MACE). The builders register one
-MLIP instance per *component*, so any multi-component cell is a NULL-map
-topology however uniform its ``pot_type`` looks (§6).
+A partitioned cell needs a NULL-padded ``pair_coeff`` type map, and **both**
+frameworks reject one (DeePMD; ACEsuit #1314 for MACE), so every MLIP cell is
+full-cell: one instance whose type map spans every component.
 
-What is left, and what this file tests:
-
-* **single-component sheet families** (sheetonsheet, pes-sheet) build;
-* **multi-component families** (afm, pes-tip, indent, hetero, flake) are
-  refused up front, with a message pointing at the spec.
+This file tests single- and multi-component full-cell MLIP builds across the
+families; partial cells are refused.
 
 The building tests run a **full** ``build()``. That is the real proof that this
 machine, which has no MLIP-enabled python-LAMMPS, can still *generate* MLIP

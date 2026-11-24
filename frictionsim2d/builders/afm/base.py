@@ -487,8 +487,7 @@ class AFMSimulation(SimulationBase):
         Returns:
             Configured PotentialManager instance.
         """
-        # Capability-matrix rules that need the whole cell -- see
-        # docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md (v4) §3/§6:
+        # Capability-matrix rules that need the whole cell (documentation/mlip.md §1):
         # no MLIP alongside any classical component (partial-cell is dead for
         # BOTH frameworks), no multi-component full-cell, and no molecular
         # constraint modes with an MLIP sheet. In practice this means an AFM

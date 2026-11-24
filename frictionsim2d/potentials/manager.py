@@ -249,7 +249,7 @@ class TypeRegistry:
         This is the map a full-cell MLIP requires. Unlike
         :meth:`build_null_map`, which partitions the cell by component and pads
         the rest with ``NULL``, this names a real element for every type --
-        because both MLIP frameworks reject NULL entries (v4 spec §1, E2/E3)
+        because both MLIP frameworks reject NULL entries
         and DeePMD additionally refuses a type-range restriction
         (``pair_deepmd.cpp:816``), so an MLIP's ``pair_coeff`` must be ``* *``
         with one entry per type.
@@ -548,7 +548,7 @@ class PotentialManager:
             # The line below is wrong for BOTH frameworks -- deepmd carries the
             # model in the pair_style line, mace in the pair_coeff line -- and
             # the only callers are the generation-time melt-quench builds, which
-            # cannot evaluate an MLIP anyway (v6 §5). Refuse, never emit.
+            # cannot evaluate an MLIP anyway. Refuse, never emit.
             raise ValueError(
                 f"'{pot_type}' cannot be used for a single-component "
                 f"generation-time build (this is the amorph = 'a' melt-quench "
@@ -556,7 +556,7 @@ class PotentialManager:
                 f"evaluate, and its result depends on forces, so the "
                 f"`pair_style zero` surrogate is not an option either. Use "
                 f"amorph = 'c', or prepare the amorphous structure separately "
-                f"with a classical potential. See the v6 spec §5."
+                f"with a classical potential. See documentation/mlip.md §1."
             )
         pot_path = self._get_potential_path(config.pot_path)
 
@@ -615,7 +615,7 @@ class PotentialManager:
             pot_counts = {el: (2 if el in split else n) for el, n in pot_counts.items()}
 
         if is_mlip(pot_type):
-            # An MLIP is scoped to the CELL, not the component (v6 spec §3):
+            # An MLIP is scoped to the CELL, not the component:
             # ONE instance covers every type, so registering a second MLIP
             # component must not add a second sub-style token. Set rather than
             # increment. Rule 1 of validate_mlip_cell already guarantees every
@@ -791,10 +791,10 @@ class PotentialManager:
         if is_mlip(pot_lower):
             # An MLIP behaves like an internal-LJ potential, and has no other
             # option: the per-layer alternative needed one instance per layer
-            # with NULL-padded type maps, which BOTH frameworks reject (v4 spec
-            # §1, E2/E3). One instance spans every layer of the component and
+            # with NULL-padded type maps, which BOTH frameworks reject.
+            # One instance spans every layer of the component and
             # supplies the interlayer physics itself, so no explicit lj/cut is
-            # added. Overlaying LJ on top is rejected on physics too (v4 §2):
+            # added. Overlaying LJ on top is rejected on physics too:
             # the MLIP cutoff already spans the interlayer gap, so a UFF-mixed
             # LJ parameterised to BE the interlayer potential double-counts.
             return False
@@ -827,7 +827,7 @@ class PotentialManager:
     def mlip_framework(self) -> Optional[str]:
         """The single MLIP framework in this cell, or ``None`` if classical.
 
-        A cell is uniform by construction (v6 §4: every component must use the
+        A cell is uniform by construction (every component must use the
         SAME MLIP), so "the frameworks in use" is at most one name. Builders
         that assemble their own render context use this to supply the
         ``mlip_sheet`` / ``mlip_deck_directives`` template keys without having
@@ -856,8 +856,8 @@ class PotentialManager:
         FrictionSim2D runs LAMMPS *at generation time* to stack layers and to
         assemble hetero/flake cells. Those runs only place atoms and renumber
         types — but they ``include`` the real settings file, which for an MLIP
-        would demand an MLIP-enabled LAMMPS on the generation machine and in CI
-        (spec §3.3). ``pair_style zero`` is stock LAMMPS, is defined for every
+        would demand an MLIP-enabled LAMMPS on the generation machine and in CI.
+        ``pair_style zero`` is stock LAMMPS, is defined for every
         element and exerts exactly zero force, so it satisfies the parser
         without being able to influence the geometry.
 
@@ -880,8 +880,8 @@ class PotentialManager:
         """Build the cell-wide MLIP type map, with the §1.4 virtual placeholder.
 
         The map spans EVERY atom type in the cell (:meth:`TypeRegistry.build_full_map`)
-        because an MLIP is cell-scoped, not component-scoped (v6 spec §3): both
-        frameworks reject NULL entries (v4 E2/E3) and DeePMD refuses a
+        because an MLIP is cell-scoped, not component-scoped: both
+        frameworks reject NULL entries and DeePMD refuses a
         type-range restriction (``pair_deepmd.cpp:816``), so the only shape
         either accepts is ``pair_coeff * *`` naming a real element per type.
 
@@ -919,7 +919,7 @@ class PotentialManager:
 
         Raises:
             ValueError: if the cell is not uniformly one MLIP. That is the
-                "loud fail" of v6 §4 -- an SW tip beside an MLIP sheet, or MACE
+                "loud fail" for an SW tip beside an MLIP sheet, or MACE
                 beside DeePMD. Neither can be expressed: one ``pair_coeff * *``
                 claims every type, so a classical component would have its types
                 silently absorbed by the MLIP, and a second framework's ``* *``
@@ -934,8 +934,7 @@ class PotentialManager:
                 f"Two MLIP frameworks in one cell ({', '.join(sorted(frameworks))}). "
                 f"Each needs its own 'pair_coeff * *' spanning every atom type, "
                 f"so the second silently overrides the first. Every component in "
-                f"a cell must use the SAME MLIP. See the v6 spec "
-                f"(2026-09-03-mlip-multicomponent-fullcell-design.md) §4."
+                f"a cell must use the SAME MLIP. See documentation/mlip.md §1."
             )
 
         pot_type = frameworks[0]
@@ -949,17 +948,17 @@ class PotentialManager:
             raise ValueError(
                 f"Cannot mix '{pot_type}' with a classical potential in one cell: "
                 f"{listed}. An MLIP's type map covers EVERY atom type "
-                f"('pair_coeff * *' is the only form either framework accepts -- "
-                f"v4 spec E2/E3), so those components' types would be silently "
+                f"('pair_coeff * *' is the only form either framework accepts), "
+                f"so those components' types would be silently "
                 f"absorbed by {pot_type} rather than handled by their own "
                 f"potential. Make the whole cell {pot_type}, or the whole cell "
-                f"classical. See the v6 spec §4."
+                f"classical. See documentation/mlip.md §1."
             )
 
         atom_list = self._mlip_atom_list(pot_type)
         self._check_model_covers(pot_type, atom_list)
         pot_path = self._mlip_model_paths.get(pot_type, '')
-        # potential_usage is 1 for an MLIP by construction (v6 §3), so a
+        # potential_usage is 1 for an MLIP by construction, so a
         # full-cell MLIP is never a numbered hybrid sub-style.
         index_str = f" {self.potential_indices[pot_type]}" \
             if self.potential_usage[pot_type] > 1 else ""
@@ -969,8 +968,8 @@ class PotentialManager:
     def _check_model_covers(self, pot_type: str, atom_list: List[str]) -> None:
         """Refuse a type map naming an element the model does not have.
 
-        v6 §4 rule 3b. This matters more than a typical validation because the
-        failure is **silent**: v4 E7 measured that an element the model lacks
+        This matters more than a typical validation because the
+        failure is **silent**: measured, an element the model lacks
         does not error -- LAMMPS maps the types to the model's first N elements
         and returns a plausible, wrong energy.
 
@@ -991,10 +990,10 @@ class PotentialManager:
             f"missing {', '.join(missing)} (model has "
             f"{', '.join(sorted(covered))}). Naming an element the model lacks "
             f"does NOT error at run time -- LAMMPS maps those types to the "
-            f"model's first N elements and returns a plausible, WRONG energy "
-            f"(v4 spec E7). Re-extract the model with every element the cell "
+            f"model's first N elements and returns a plausible, WRONG energy. "
+            f"Re-extract the model with every element the cell "
             f"needs, e.g. `symmetrix_extract_mace -m <model> --chemical-symbols "
-            f"{' '.join(sorted(set(atom_list)))}`. See the v6 spec §4."
+            f"{' '.join(sorted(set(atom_list)))}`. See documentation/mlip.md §1."
         )
 
     def _all_self_interaction_lines(self, hybrid: bool = True) -> List[str]:
@@ -1097,7 +1096,7 @@ class PotentialManager:
         """Add self-interaction for a specific layer.
 
         Classical potentials only: this is the per-layer, NULL-partitioned
-        topology, which no MLIP can express (v4 spec §1, E2/E3), and
+        topology, which no MLIP can express, and
         :meth:`is_sheet_lj` is ``False`` for every MLIP so an MLIP component
         never reaches here.
 
@@ -1132,8 +1131,8 @@ class PotentialManager:
         if mlip1 and mlip2:
             # The MLIP already describes this pair -- its cutoff spans the
             # inter-component gap -- so a UFF-mixed LJ parameterised to BE that
-            # interaction double-counts it (v6 §3, the v4 §2 argument applied
-            # between components rather than between layers).
+            # interaction double-counts it (the same argument as between layers,
+            # applied between components).
             logger.debug(
                 "Skipping %s-%s cross LJ: both components are covered by one "
                 "MLIP, which supplies that interaction itself.",
@@ -1152,7 +1151,7 @@ class PotentialManager:
                 f"'{mlip_name}' and {other_pot} component '{other}': an MLIP's "
                 f"type map already claims every atom type, so this LJ term "
                 f"would double-count on types the MLIP owns. Such a cell is "
-                f"refused outright (v6 spec §4); it should not have reached "
+                f"refused outright; it should not have reached "
                 f"here. Make the whole cell one MLIP, or the whole cell "
                 f"classical."
             )
@@ -1201,7 +1200,7 @@ class PotentialManager:
             raise ValueError(f"Component '{component_name}' not registered.")
         if self._is_mlip_component(component_name):
             # One MLIP instance spans every layer and supplies the interlayer
-            # physics itself; overlaying LJ double-counts (v4 spec §2).
+            # physics itself; overlaying LJ double-counts.
             logger.debug(
                 "Skipping interlayer LJ for '%s': its MLIP covers every layer.",
                 component_name,
