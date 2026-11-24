@@ -40,11 +40,8 @@ class GenerationFailure:
     config: Dict[str, Any]
     error: Exception
 
-    @property
-    def name(self) -> str:
-        return self.output_dir.name
-
     def render(self) -> str:
+        """One line naming the failed directory and the error."""
         return f"{self.output_dir}: {type(self.error).__name__}: {self.error}"
 
 
@@ -60,13 +57,16 @@ class GenerationResult:
 
     @property
     def ok(self) -> bool:
+        """True when something was built and nothing failed."""
         return bool(self.created) and not self.failures
 
     @property
     def requested(self) -> int:
+        """Number of expanded configs the run set out to build."""
         return len(self.configs)
 
     def render(self) -> str:
+        """Multi-line summary: count, output root, one line per failure."""
         lines = [f"{len(self.created)}/{self.requested} simulations generated"]
         if self.simulation_root:
             lines.append(f"output: {self.simulation_root}")
@@ -135,15 +135,6 @@ class PreviewTarget:
     init_script: Path
     settings_file: Optional[Path]
     layer: Optional[int] = None
-
-    @property
-    def is_preassembled(self) -> bool:
-        """True when the init script reads one already-assembled data file.
-
-        Those scripts carry no ``region ... block`` line, so the simulation cell
-        has to come from the data file's own header instead.
-        """
-        return _REGION_BOX.search(self.init_script.read_text(encoding='utf-8')) is None
 
 
 def find_assembly_script(lammps_dir: Path) -> Optional[Path]:

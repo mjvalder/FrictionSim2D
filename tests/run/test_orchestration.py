@@ -8,6 +8,7 @@ producing an empty preview.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -86,12 +87,17 @@ def test_read_data_paths_resolve_from_the_simulation_root(name, model, script, l
         assert not (target.init_script.parent / ref).exists()
 
 
+def _opens_a_box(target) -> bool:
+    text = target.init_script.read_text(encoding='utf-8')
+    return re.search(r'^\s*region\s+\S+\s+block\s', text, re.MULTILINE) is not None
+
+
 def test_pes_sheet_is_preassembled(generated):
     """Its script has no region/create_box, so the cell must come from the data
     file header instead."""
     result = generated['pes_sheet_config.ini']
     target = discover_preview_target(result.simulation_root, result.created[0])
-    assert target.is_preassembled
+    assert not _opens_a_box(target)
 
 
 @pytest.mark.parametrize('name', ['indent_config.ini', 'afm_flake_config.ini',
@@ -99,7 +105,7 @@ def test_pes_sheet_is_preassembled(generated):
 def test_afm_family_is_not_preassembled(name, generated):
     result = generated[name]
     target = discover_preview_target(result.simulation_root, result.created[0])
-    assert not target.is_preassembled
+    assert _opens_a_box(target)
 
 
 class TestLayerSelection:
