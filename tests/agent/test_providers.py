@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip('pydantic_ai')
 
 from frictionsim2d.agent.providers import (ProviderUnavailable, build_model,  # noqa: E402
-                                 ollama_models, ollama_status, run_settings)
+                                 ollama_models, run_settings)
 from frictionsim2d.agent.settings import AgentSettings  # noqa: E402
 
 
@@ -52,25 +52,6 @@ def test_ollama_model_uses_openai_endpoint():
     assert model.model_name == 'fs2d-assistant:qwen3.5-4b'
 
 
-def test_ollama_status_unreachable(monkeypatch):
-    def boom(*a, **k):
-        raise httpx.ConnectError('down')
-    monkeypatch.setattr(httpx, 'get', boom)
-    ok, message = ollama_status(AgentSettings(provider='ollama'))
-    assert not ok and 'not running' in message
-
-
-def test_ollama_status_model_missing(monkeypatch):
-    class Resp:
-        def raise_for_status(self):
-            return None
-        def json(self):
-            return {'models': [{'name': 'qwen3:8b'}]}
-    monkeypatch.setattr(httpx, 'get', lambda *a, **k: Resp())
-    ok, message = ollama_status(AgentSettings(provider='ollama'))
-    assert not ok and 'fs2d-assistant:qwen3.5-4b' in message  # qwen3:8b is not it
-
-
 def _tags(*names):
     def get(url, timeout=None):
         assert url.endswith('/api/tags')
@@ -90,27 +71,10 @@ def test_ollama_models_none_when_down():
     assert ollama_models(AgentSettings(), http_get=down) is None
 
 
-def test_ollama_status_ready_with_exact_model(monkeypatch):
-    monkeypatch.setattr(httpx, 'get', _tags('fs2d-assistant:qwen3.5-4b'))
-    assert ollama_status(AgentSettings(provider='ollama')) == (
-        True, 'Ollama ready (fs2d-assistant:qwen3.5-4b)')
-
-
 def test_untagged_model_matches_latest():
     from frictionsim2d.agent.providers import model_installed
     assert model_installed('mymodel', ['mymodel:latest'])
     assert not model_installed('qwen3:4b', ['qwen3:8b'])
-
-
-def test_ollama_status_not_ollama(monkeypatch):
-    class Resp:
-        def raise_for_status(self):
-            return None
-        def json(self):
-            raise ValueError('not json')
-    monkeypatch.setattr(httpx, 'get', lambda *a, **k: Resp())
-    ok, message = ollama_status(AgentSettings(provider='ollama'))
-    assert not ok and 'did not answer like Ollama' in message
 
 
 def test_ollama_binary_prefers_path(tmp_path):
@@ -132,14 +96,16 @@ def test_ollama_binary_plain_name_when_not_found(tmp_path):
 
 
 def test_start_command_is_throttled_and_names_the_binary(tmp_path):
-    from frictionsim2d.agent.providers import ollama_start_command
+    from frictionsim2d.agent.ollama_server import ollama_start_command
     settings = AgentSettings(provider='ollama')
     command = ollama_start_command(settings, which=lambda name: '/opt/x/ollama', home=tmp_path)
     for part in ('OLLAMA_IGPU_ENABLE=1', 'OLLAMA_VULKAN=1', 'OLLAMA_MAX_LOADED_MODELS=1',
                  'OLLAMA_NUM_PARALLEL=1', 'OLLAMA_KEEP_ALIVE=2m', 'OLLAMA_CONTEXT_LENGTH=16384',
                  'nice -n 10'):
         assert part in command
-    assert command.endswith('/opt/x/ollama serve')
+    assert command == ('OLLAMA_IGPU_ENABLE=1 OLLAMA_VULKAN=1 OLLAMA_MAX_LOADED_MODELS=1 '
+                       'OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE=2m OLLAMA_CONTEXT_LENGTH=16384 '
+                       'nice -n 10 /opt/x/ollama serve')
 
 
 def test_ollama_reply_cap_goes_out_as_max_tokens():

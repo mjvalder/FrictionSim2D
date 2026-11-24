@@ -16,7 +16,6 @@ import os
 import shutil
 import tempfile
 import textwrap
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Literal, Optional, Sequence, Tuple
@@ -25,10 +24,7 @@ from ..gui.config_validation import PATH_KEYS
 from ..gui.controllers.document import DocumentError
 from .sandbox import (PathLike, SandboxError, check_write_target, display_path, from_display,
                       resolve_readable, within_roots, write_path)
-from .tools import compact
-
-#: Most characters a change handle (a tool result) may take.
-HANDLE_LIMIT = 600
+from .tools import capped, clean_error, new_id
 
 OpKind = Literal['set', 'set_model', 'enable_section', 'material_dirs',
                  'materials', 'settings_set']
@@ -107,18 +103,28 @@ class ChangeSet:
         head = (f"change {self.id} proposed ('{self.title}'): {len(self.diff)} "
                 f"field(s), {state}{runs}.")
         if direct:
-            return _capped(head, "It will be applied unless it is refused; the user "
+            return capped(head, "It will be applied unless it is refused; the user "
                                  "sees the outcome and can undo it.")
-        return _capped(head, "Proposed only: the user sees it as a card and decides "
+        return capped(head, "Proposed only: the user sees it as a card and decides "
                              "whether to apply it; do not say it is applied.")
-
-    def changes_model(self, current: str) -> bool:
-        """Whether applying this switches the simulation model away from ``current``."""
-        return any(op.kind == 'set_model' and op.value != current for op in self.ops)
 
     def touches_settings(self) -> bool:
         """Whether applying this edits the settings document."""
         return any(op.kind == 'settings_set' for op in self.ops)
+
+    def describe(self) -> str:
+        """Plain-text body of its card."""
+        lines = [self.title, 'Changes:']
+        for d in self.diff:
+            where = f'[{d.section}] {d.key}'.strip() if d.key else d.section
+            lines += _wrapped(f'  {d.scope} {where}: {d.before!r} -> {d.after!r}')
+        if self.side_effects:
+            lines += ['Writes:'] + [f'  - {s}' for s in self.side_effects]
+        if self.notes:
+            lines += ['Notes:'] + [f'  - {n}' for n in self.notes]
+        if self.expansion_text:
+            lines.append(f'Runs: {self.expansion_text}')
+        return '\n'.join(lines + [_validation(self)])
 
 
 @dataclass
@@ -144,21 +150,17 @@ class FsChangeSet:
         """What the model sees. File operations always wait for the user, so
         ``direct`` (the config apply mode) does not change it."""
         state = 'valid' if self.ok else 'refused: ' + '; '.join(self.issues[:3])
-        return _capped(f"change {self.id} proposed ('{self.title}'): {len(self.ops)} "
+        return capped(f"change {self.id} proposed ('{self.title}'): {len(self.ops)} "
                        f"file operation(s), {state}.",
                        "The user decides whether to apply it; do not say it is done.")
 
-
-def _capped(head: str, instruction: str) -> str:
-    """``head`` cut so the whole handle fits `HANDLE_LIMIT`; ``instruction`` kept whole."""
-    return compact(head, HANDLE_LIMIT - len(instruction) - 1) + ' ' + instruction
-
-
-def _clean_error(exc: Exception) -> str:
-    """An exception's text without pydantic's "For further information visit" lines."""
-    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
-    return '\n'.join(line for line in lines
-                     if not line.startswith('For further information'))
+    def describe(self) -> str:
+        """Plain-text body of its card."""
+        shown = self.shown or [(op[0], *(Path(p).name for p in _op_paths(op)))
+                               for op in self.ops]
+        lines = [self.title] + [f'  {op[0]}: ' + ' -> '.join(op[1:]) for op in shown]
+        lines += [f'  {note}' for note in self.notes]
+        return '\n'.join(lines + [_validation(self)])
 
 
 def fingerprint(document, settings_document) -> str:
@@ -166,10 +168,6 @@ def fingerprint(document, settings_document) -> str:
     payload = json.dumps([document.model, document.values, settings_document.values],
                          sort_keys=True, default=str)
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
-
-
-def _new_id() -> str:
-    return uuid.uuid4().hex[:6]
 
 
 def _replay(ops: Sequence[Op], document, settings_document,
@@ -295,7 +293,7 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
     _check_proposed_values(ops)
     document = copy.deepcopy(live)
     settings_document = copy.deepcopy(deps.settings_document)
-    change = ChangeSet(id=_new_id(), title=title, ops=list(ops), notes=list(notes),
+    change = ChangeSet(id=new_id(), title=title, ops=list(ops), notes=list(notes),
                        base_fingerprint=fingerprint(live, deps.settings_document))
     scratch = _scratch(Path(deps.roots.workspace), 'agent-', ops)
     try:
@@ -306,7 +304,7 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
             try:
                 settings = settings_document.as_settings()
             except Exception as exc:  # pylint: disable=broad-except
-                problems.append('settings: ' + _clean_error(exc))
+                problems.append('settings: ' + clean_error(exc))
         validation = document.validate(settings)
         change.issues = [_render_issue(i) for i in validation.issues] + problems
         try:
@@ -357,7 +355,7 @@ def _settings_problem(settings_document) -> str:
     try:
         settings_document.as_settings()
     except Exception as exc:  # pylint: disable=broad-except
-        lines = _clean_error(exc).splitlines()
+        lines = clean_error(exc).splitlines()
         return '; '.join(lines[1:] or lines)[:300]
     return ''
 
@@ -424,7 +422,7 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]],
         except SandboxError as exc:
             issues.append(str(exc))
     shown = [(op[0], *(display_path(p, deps.roots) for p in _op_paths(op))) for op in checked]
-    return FsChangeSet(id=_new_id(), title=title, ops=checked, issues=issues, shown=shown,
+    return FsChangeSet(id=new_id(), title=title, ops=checked, issues=issues, shown=shown,
                        notes=list(notes))
 
 
@@ -569,25 +567,9 @@ def _wrapped(line: str, indent: str = '      ') -> List[str]:
 
 def describe_change(change) -> str:
     """Plain-text body of a proposal card."""
-    if hasattr(change, 'describe'):  # a PlotChange describes itself
-        return change.describe()
-    lines = [change.title]
-    if isinstance(change, FsChangeSet):
-        shown = change.shown or [(op[0], *(Path(p).name for p in _op_paths(op)))
-                                 for op in change.ops]
-        lines += [f'  {op[0]}: ' + ' -> '.join(op[1:]) for op in shown]
-        lines += [f'  {note}' for note in change.notes]
-    else:
-        lines.append('Changes:')
-        for d in change.diff:
-            where = f'[{d.section}] {d.key}'.strip() if d.key else d.section
-            lines += _wrapped(f'  {d.scope} {where}: {d.before!r} -> {d.after!r}')
-        if change.side_effects:
-            lines += ['Writes:'] + [f'  - {s}' for s in change.side_effects]
-        if change.notes:
-            lines += ['Notes:'] + [f'  - {n}' for n in change.notes]
-        if change.expansion_text:
-            lines.append(f'Runs: {change.expansion_text}')
-    lines.append('Validation: OK' if change.ok else
-                 'Issues:\n' + '\n'.join(f'  - {i}' for i in change.issues))
-    return '\n'.join(lines)
+    return change.describe()
+
+
+def _validation(change) -> str:
+    return ('Validation: OK' if change.ok else
+            'Issues:\n' + '\n'.join(f'  - {i}' for i in change.issues))

@@ -24,24 +24,15 @@ class AgentDeps:
     pending: List[Any] = field(default_factory=list)
     on_proposal: Optional[Callable[[Any], None]] = None
     material_index: Any = None
-    #: Whether the GUI applies config/settings change sets as they arrive
-    #: (the default) or shows them as cards first; it changes what the model
-    #: is told about a proposal.
+    #: Whether the GUI applies config/settings change sets at once (else as cards).
     direct_apply: bool = False
-    #: The Plots tab's document as a dict (a copy taken on the GUI thread),
-    #: so plot tools know which datasets are loaded; None without a Plots tab.
+    #: The Plots tab's document as a dict (a GUI-thread copy); None without a Plots tab.
     plot_document: Optional[dict] = None
-    #: Builds the Materials Project / 2DMatPedia client from a ``should_stop``
-    #: keyword (raising
-    #: `MaterialsDBError` when off or without a key). The GUI passes
-    #: `materials_db.default_materials_db`; tests a fake; None: unavailable.
+    #: Materials Project / 2DMatPedia client factory (``should_stop=``); None: unavailable.
     materials_db: Optional[Callable[..., Any]] = None
-    #: Returns the knowledge corpus index (`knowledge_index.KnowledgeIndex`), or
-    #: None when no corpus is installed. The GUI passes
-    #: `knowledge_index.load_knowledge`; tests a fixture corpus; None: unavailable.
+    #: Returns the knowledge corpus index, or None when none is installed.
     knowledge: Optional[Callable[[], Any]] = None
-    #: Whether the user pressed Stop on this turn; `AgentSession.run_turn`
-    #: points it at the turn's token. Long downloads check it between requests.
+    #: Whether the user pressed Stop on this turn (checked between downloads).
     cancelled: Callable[[], bool] = field(default=lambda: False)
 
     def propose(self, change: Any) -> str:

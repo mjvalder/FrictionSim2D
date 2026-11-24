@@ -1,6 +1,6 @@
 """The agent loop: pydantic-ai Agent, tool wrappers, events and history.
 
-All pydantic-ai *run* APIs live here (spec §3); `providers.py` builds models.
+All pydantic-ai *run* APIs live here; `providers.py` builds models.
 """
 from __future__ import annotations
 
@@ -403,7 +403,7 @@ class AgentSession:
 
 @functools.lru_cache(maxsize=1)
 def tool_schemas() -> List[dict]:
-    """The registered tools' JSON schemas, as a fine-tune was trained on them."""
+    """The registered tools' JSON schemas, as the model receives them."""
     from pydantic_ai.models.function import FunctionModel  # pylint: disable=import-outside-toplevel
     session = AgentSession(AgentSettings(), model=FunctionModel(lambda m, i: None))
     tools = session.agent._function_toolset.tools  # pylint: disable=protected-access
@@ -415,6 +415,6 @@ def tool_schemas() -> List[dict]:
 
 @functools.lru_cache(maxsize=1)
 def tool_schema_hash() -> str:
-    """16 hex digits naming the tool set; a fine-tune's manifest records the one it learnt."""
+    """16 hex digits naming the tool set; fine-tunes record the ones they were verified on."""
     text = json.dumps(tool_schemas(), sort_keys=True)
     return hashlib.sha256(text.encode()).hexdigest()[:16]

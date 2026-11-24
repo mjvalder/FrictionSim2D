@@ -404,3 +404,25 @@ def test_tool_schema_hash_is_16_hex():
     from frictionsim2d.agent.runtime import tool_schema_hash  # pylint: disable=import-outside-toplevel
     assert re.fullmatch('[0-9a-f]{16}', tool_schema_hash())
 
+
+
+@pytest.mark.parametrize('body, delay', [
+    ({'error': {'message': 'Please retry in 12s.'}}, 12.0),
+    ({'error': {'details': [{'retryDelay': '41s'}]}}, 41.0),
+    ({'error': {'message': 'quota'}}, 30.0),
+])
+def test_retry_after_reads_both_forms_and_defaults(body, delay):
+    from frictionsim2d.agent.runtime import _retry_after  # pylint: disable=import-outside-toplevel
+    assert _retry_after(ModelHTTPError(429, 'gemini', body=body)) == pytest.approx(delay)
+
+
+def test_unreachable_walks_the_cause_chain():
+    import httpx  # pylint: disable=import-outside-toplevel
+    from frictionsim2d.agent.runtime import _unreachable  # pylint: disable=import-outside-toplevel
+    inner = httpx.ConnectError('refused')
+    outer = RuntimeError('wrapped')
+    outer.__cause__ = inner
+    top = ValueError('top')
+    top.__cause__ = outer
+    assert _unreachable(top)
+    assert not _unreachable(ValueError('plain'))

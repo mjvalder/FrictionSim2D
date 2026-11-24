@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, Iterable, List, Optional
 
 import httpx
 
@@ -25,21 +25,6 @@ def ollama_binary(which: Callable[[str], Optional[str]] = shutil.which,
         return found
     local = (home if home is not None else Path.home()) / OLLAMA_USER_BINARY
     return str(local) if local.is_file() else 'ollama'
-
-
-def ollama_start_command(settings: AgentSettings,
-                         which: Callable[[str], Optional[str]] = shutil.which,
-                         home: Optional[Path] = None) -> str:
-    """The throttled ``ollama serve`` line for the user to run (never run here).
-
-    OLLAMA_IGPU_ENABLE=1 is what lets Ollama use an integrated GPU such as
-    the Radeon 780M (Phase 0); OLLAMA_VULKAN is honoured though not listed
-    by ``ollama serve --help``.
-    """
-    env = ('OLLAMA_IGPU_ENABLE=1 OLLAMA_VULKAN=1 OLLAMA_MAX_LOADED_MODELS=1 '
-           f'OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE={settings.ollama.keep_alive} '
-           f'OLLAMA_CONTEXT_LENGTH={settings.ollama.context_tokens}')
-    return f'{env} nice -n 10 {ollama_binary(which, home)} serve'
 
 
 class ProviderUnavailable(RuntimeError):
@@ -91,9 +76,8 @@ def run_settings(settings: AgentSettings) -> dict:
     prompt and tool list plus the growing conversation (re-sent every step).
     """
     if settings.provider == 'ollama':
-        # Thinking off: a stock model, and a Qwen3.5 fine-tune (trained without it),
-        # think by default and spend the reply cap before they act. A Qwen3 fine-tune's
-        # template ignores the switch (the training repository's export.py).
+        # Thinking off: the fine-tunes were trained without it, and thinking
+        # spends the reply cap before the model acts.
         return {'temperature': 0.0, 'max_tokens': settings.ollama.max_output_tokens,
                 'openai_reasoning_effort': 'none'}
     if settings.provider != 'anthropic':
@@ -121,20 +105,3 @@ def ollama_models(settings: AgentSettings, http_get: Callable = httpx.get,
         return None
     except (ValueError, AttributeError, TypeError):
         return []
-
-
-def ollama_status(settings: AgentSettings, timeout: float = 2.0) -> Tuple[bool, str]:
-    """Whether Ollama answers and has the configured model."""
-    url = settings.ollama.base_url.rstrip('/') + '/api/tags'
-    try:
-        response = httpx.get(url, timeout=timeout)
-        response.raise_for_status()
-    except httpx.HTTPError:
-        return False, f'Ollama is not running at {settings.ollama.base_url}.'
-    try:
-        names = [m.get('name', '') for m in response.json().get('models', [])]
-    except (ValueError, AttributeError, TypeError):
-        return False, f'Ollama at {settings.ollama.base_url} did not answer like Ollama.'
-    if not model_installed(settings.ollama.model, names):
-        return False, f'Ollama is running but has no model {settings.ollama.model}.'
-    return True, f'Ollama ready ({settings.ollama.model})'

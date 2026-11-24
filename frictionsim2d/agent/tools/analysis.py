@@ -408,9 +408,6 @@ def plot_types(deps) -> str:  # pylint: disable=unused-argument
     return compact('\n'.join(lines))
 
 
-_ROW = re.compile(r'^\| `([^`]+)` \| `(.*)` \| (.*) \|$')
-
-
 def _strip_optional(text: str) -> str:
     """``Optional[X]`` -> ``X`` everywhere, brackets balanced."""
     while 'Optional[' in text:
@@ -442,20 +439,17 @@ def _wrapped(label: str, items: List[str], width: int = 110) -> List[str]:
 
 
 def plot_schema(deps, plot_type: str) -> str:  # pylint: disable=unused-argument
-    """The fields one plot type accepts, from the plot schema; its own fields first."""
+    """The fields one plot type accepts, from its plot model; its own fields first."""
     if plot_type not in plot_config.PLOT_TYPES:
         raise ToolInputError(f'unknown plot type {plot_type!r}; one of: '
                              + ', '.join(plot_config.PLOT_TYPES))
-    section = plot_config.schema_markdown().split(f'## `{plot_type}`', 1)[1]
-    section = section.split('\n## ', 1)[0]
     common = set(plot_config.PlotBase.model_fields)
     described, own, shared = [], [], []
-    for line in section.splitlines():
-        match = _ROW.match(line)
-        if match is None or match.group(1) == 'plot_type':
+    for name, info in _plot_models()[plot_type].model_fields.items():
+        if name == 'plot_type':
             continue
-        name, kind = match.group(1), _short_type(match.group(2))
-        meaning = match.group(3).replace(r'\|', '/').strip()
+        kind = _short_type(str(info.annotation).replace('typing.', ''))
+        meaning = (info.description or '').replace('|', '/').strip()
         if meaning:
             described.append(f'{name} ({kind}): {meaning}')
         else:

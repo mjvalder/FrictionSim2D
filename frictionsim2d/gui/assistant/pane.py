@@ -26,9 +26,8 @@ from ...agent.bundles import catalogue
 from ...agent.changes import FsChangeSet
 from ...agent.ollama_install import install_finetune
 from ...agent.plot_changes import PlotChange
-from ...agent.ollama_server import is_local
-from ...agent.providers import (model_installed, ollama_binary, ollama_models,
-                                ollama_start_command)
+from ...agent.ollama_server import is_local, ollama_start_command
+from ...agent.providers import model_installed, ollama_binary, ollama_models
 from ...agent.settings import (ANTHROPIC_MODELS, AgentSettings, api_key,
                                fallback_ollama_model, save_agent_settings, store_api_key)
 from .cards import ChangeCard, FsCard, PlotCard

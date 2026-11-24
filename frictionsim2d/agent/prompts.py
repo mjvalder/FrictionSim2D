@@ -6,7 +6,7 @@ from pathlib import Path
 
 KNOWLEDGE_DIR = Path(__file__).with_name('knowledge')
 KNOWLEDGE_FILES = ('conventions', 'families', 'sweeps', 'geometry', 'defaults', 'workspace')
-#: Spec §4.4: the whole prompt for a small local model stays under this.
+#: The whole prompt for a small local model stays under this.
 OLLAMA_BUDGET_TOKENS = 2500
 
 ROLE = """You are the FrictionSim2D assistant inside its GUI. You help the user set up
@@ -37,15 +37,12 @@ def estimate_tokens(text: str) -> int:
 
 
 def build_system_prompt(provider: str) -> str:
-    """Role, then every knowledge file under its own heading -- for every model.
-
-    The fine-tunes are trained with this prompt too: on the role and rules alone the
-    Qwen3.5-4B fine-tune passed 86 % of the eval, with the knowledge files 93 %."""
+    """Role, then every knowledge file under its own heading."""
     parts = [ROLE]
     for name in KNOWLEDGE_FILES:
         body = (KNOWLEDGE_DIR / f'{name}.md').read_text(encoding='utf-8').strip()
         parts.append(f'## {name}\n{body}')
     prompt = '\n\n'.join(parts)
-    # Phase 0: /no_think at the very top switches Qwen3's thinking off through
-    # Ollama's OpenAI-compatible endpoint.
+    # /no_think at the very top switches Qwen's thinking off through Ollama's
+    # OpenAI-compatible endpoint.
     return f'/no_think\n{prompt}' if provider == 'ollama' else prompt

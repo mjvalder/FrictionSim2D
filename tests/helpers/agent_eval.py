@@ -102,7 +102,8 @@ def build_session(env: EvalEnv, deps=None):
     unrecorded warm-up turn (`warm_up`), so the model load is not timed.
     """
     # pylint: disable=import-outside-toplevel
-    from frictionsim2d.agent.providers import ProviderUnavailable, build_model, ollama_status
+    from frictionsim2d.agent.providers import (ProviderUnavailable, build_model,
+                                               model_installed, ollama_models)
     from frictionsim2d.agent.runtime import AgentSession
     from frictionsim2d.agent.settings import AgentSettings
     if env.provider == FUNCTION_PROVIDER:
@@ -116,9 +117,11 @@ def build_session(env: EvalEnv, deps=None):
         getattr(settings, env.provider).model = env.model
     if env.provider == 'ollama':
         settings.ollama.prefetch_passages = int(os.environ.get('AGENT_EVAL_PREFETCH', '0'))
-        ok, message = ollama_status(settings)
-        if not ok:
-            raise ProviderUnavailable(message)
+        installed = ollama_models(settings)
+        if installed is None:
+            raise ProviderUnavailable(f'Ollama is not running at {settings.ollama.base_url}.')
+        if not model_installed(settings.ollama.model, installed):
+            raise ProviderUnavailable(f'Ollama has no model {settings.ollama.model}.')
         session = AgentSession(settings)
         if deps is not None:
             warm_up(session, deps)

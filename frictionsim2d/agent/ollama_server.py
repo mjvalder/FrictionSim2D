@@ -54,22 +54,33 @@ def is_local(settings: AgentSettings) -> bool:
     return (urlparse(settings.ollama.base_url).hostname or '') in LOOPBACK_HOSTS
 
 
-def server_env(settings: AgentSettings) -> dict:
-    """The environment ``ollama serve`` runs with: throttled for a laptop iGPU.
+def throttle_env(settings: AgentSettings) -> dict:
+    """The OLLAMA_* variables ``ollama serve`` runs with: throttled for a laptop iGPU.
 
-    OLLAMA_IGPU_ENABLE=1 lets Ollama use an integrated GPU such as the
-    Radeon 780M; OLLAMA_VULKAN is honoured though not listed by
-    ``ollama serve --help``.
+    OLLAMA_IGPU_ENABLE=1 lets Ollama use an integrated GPU; OLLAMA_VULKAN is
+    honoured though not listed by ``ollama serve --help``.
     """
-    env = dict(os.environ)
-    env.update({'OLLAMA_IGPU_ENABLE': '1', 'OLLAMA_VULKAN': '1',
-                'OLLAMA_MAX_LOADED_MODELS': '1', 'OLLAMA_NUM_PARALLEL': '1',
-                'OLLAMA_KEEP_ALIVE': settings.ollama.keep_alive,
-                'OLLAMA_CONTEXT_LENGTH': str(settings.ollama.context_tokens)})
+    return {'OLLAMA_IGPU_ENABLE': '1', 'OLLAMA_VULKAN': '1',
+            'OLLAMA_MAX_LOADED_MODELS': '1', 'OLLAMA_NUM_PARALLEL': '1',
+            'OLLAMA_KEEP_ALIVE': settings.ollama.keep_alive,
+            'OLLAMA_CONTEXT_LENGTH': str(settings.ollama.context_tokens)}
+
+
+def server_env(settings: AgentSettings) -> dict:
+    """The environment ``ollama serve`` runs with: ours, `throttle_env`, OLLAMA_HOST."""
+    env = {**os.environ, **throttle_env(settings)}
     host = urlparse(settings.ollama.base_url).netloc
     if host:
         env['OLLAMA_HOST'] = host
     return env
+
+
+def ollama_start_command(settings: AgentSettings,
+                         which: Callable[[str], Optional[str]] = shutil.which,
+                         home: Optional[Path] = None) -> str:
+    """The throttled ``ollama serve`` line for the user to run (never run here)."""
+    env = ' '.join(f'{name}={value}' for name, value in throttle_env(settings).items())
+    return f'{env} nice -n 10 {ollama_binary(which, home)} serve'
 
 
 def _die_with_parent() -> None:  # pragma: no cover  (runs in the forked child)

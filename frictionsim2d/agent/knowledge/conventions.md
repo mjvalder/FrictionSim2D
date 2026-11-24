@@ -1,4 +1,4 @@
 - Units: lengths and sizes in Angstrom, loads in nN, pressures in GPa, speeds in m/s, temperatures in K, spring constants in N/m. If the user gives a unit that does not fit (for example a load in nm), ask; never convert silently.
 - Material names are file stems exactly as search_structures returns them, e.g. h-MoS2, t-MoS2, h-WS2. The prefix is the phase: h- hexagonal, t- T-phase, b- buckled, p- phosphorene-like.
-- Potential types: sw (Stillinger-Weber), tersoff, rebo, airebo, rebomos, reaxff, meam, extep, vashishta. The type must match the potential file; search_potentials reports it.
-- Output folders carry size tokens such as 100x100y.
+- Potential types include sw (Stillinger-Weber), tersoff, rebo, airebo, rebomos, reaxff, meam, extep, vashishta and machine-learned types. The type must match the potential file; search_potentials reports it.
+- Output folders carry size tokens such as 100x_100y (100x100y in exported tables).

@@ -4,9 +4,8 @@ import stat
 import pytest
 from pydantic import ValidationError
 
-from frictionsim2d.agent.settings import (AgentSettings, api_key, config_dir, gemini_key,
-                                load_agent_settings, save_agent_settings,
-                                store_api_key, store_gemini_key)
+from frictionsim2d.agent.settings import (AgentSettings, api_key, config_dir,
+                                load_agent_settings, save_agent_settings, store_api_key)
 
 
 def test_defaults_match_phase0():
@@ -15,7 +14,7 @@ def test_defaults_match_phase0():
     assert s.gemini.model == 'gemini-3.5-flash-lite'
     assert s.gemini.api_key_env == 'GEMINI_API_KEY'
     assert s.ollama.model == 'fs2d-assistant:qwen3.5-4b'
-    assert (s.ollama.max_threads, s.ollama.context_tokens, s.ollama.keep_alive) == (8, 16384, '2m')
+    assert (s.ollama.context_tokens, s.ollama.keep_alive) == (16384, '2m')
     assert s.ollama.idle_minutes == 10
     assert s.max_requests_per_turn == 50
     assert s.materials_project.enabled is True
@@ -45,23 +44,23 @@ def test_invalid_provider_rejected(tmp_path):
 
 
 def test_env_key_wins_over_file(monkeypatch, tmp_path):
-    secrets = store_gemini_key('file-key', tmp_path / 'agent.secrets')
+    secrets = store_api_key('file-key', 'gemini', tmp_path / 'agent.secrets')
     monkeypatch.setenv('GEMINI_API_KEY', ' env-key ')
-    assert gemini_key(AgentSettings(), secrets) == 'env-key'
+    assert api_key(AgentSettings(), 'gemini', secrets) == 'env-key'
     monkeypatch.delenv('GEMINI_API_KEY')
-    assert gemini_key(AgentSettings(), secrets) == 'file-key'
+    assert api_key(AgentSettings(), 'gemini', secrets) == 'file-key'
 
 
 def test_no_key_anywhere(monkeypatch, tmp_path):
     monkeypatch.delenv('GEMINI_API_KEY', raising=False)
-    assert gemini_key(AgentSettings(), tmp_path / 'absent') is None
+    assert api_key(AgentSettings(), 'gemini', tmp_path / 'absent') is None
 
 
 def test_secrets_file_is_owner_only_even_if_it_existed(tmp_path):
     path = tmp_path / 'agent.secrets'
     path.write_text('old')
     path.chmod(0o644)
-    store_gemini_key('k', path)
+    store_api_key('k', 'gemini', path)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert path.read_text() == 'gemini=k\n'
 
@@ -69,9 +68,9 @@ def test_secrets_file_is_owner_only_even_if_it_existed(tmp_path):
 def test_each_provider_keeps_its_own_key(monkeypatch, tmp_path):
     monkeypatch.delenv('GEMINI_API_KEY', raising=False)
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-    path = store_gemini_key('g', tmp_path / 'agent.secrets')
+    path = store_api_key('g', 'gemini', tmp_path / 'agent.secrets')
     store_api_key('a', 'anthropic', path)
-    store_gemini_key('g2', path)
+    store_api_key('g2', 'gemini', path)
     s = AgentSettings()
     assert (api_key(s, 'gemini', path), api_key(s, 'anthropic', path)) == ('g2', 'a')
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'env-a')
@@ -166,7 +165,7 @@ def test_user_choice_untouched(tmp_path):
 def test_key_with_line_break_refused(tmp_path, key):
     path = tmp_path / 'agent.secrets'
     with pytest.raises(ValueError, match='line break'):
-        store_gemini_key(key, path)
+        store_api_key(key, 'gemini', path)
     assert not path.exists()
 
 
@@ -176,13 +175,13 @@ def test_key_file_symlink_not_followed(tmp_path):
     link = tmp_path / 'agent.secrets'
     link.symlink_to(victim)
     with pytest.raises(OSError):
-        store_gemini_key('k', link)
+        store_api_key('k', 'gemini', link)
     assert victim.read_text() == 'keep'
 
 
 def test_new_config_dir_is_owner_only(tmp_path):
     path = tmp_path / 'cfg' / 'FrictionSim2D' / 'agent.secrets'
-    store_gemini_key('k', path)
+    store_api_key('k', 'gemini', path)
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
 
 

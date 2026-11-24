@@ -1,9 +1,8 @@
 """BM25 search over the installed knowledge corpus.
 
-The corpus is ``passages.jsonl`` built by ``corpus.py`` in the training repository:
-attributed passages from Wikipedia and openly licensed papers. It is not
-shipped with the package (CC-BY-SA share-alike, size); it is installed to
-`knowledge_dir` and the assistant works without it.
+The corpus is ``passages.jsonl``: attributed passages from Wikipedia and openly
+licensed papers. It is not shipped with the package (CC-BY-SA share-alike,
+size); it is installed to `knowledge_dir` and the assistant works without it.
 """
 from __future__ import annotations
 

@@ -136,9 +136,8 @@ def test_materials_list_path_refused(deps):
         build_changeset(deps, 'bad', [Op('set', '2D', 'materials_list', '/etc/passwd')])
 
 
-def test_model_change_flags(deps):
+def test_model_change_is_in_the_diff(deps):
     cs = build_changeset(deps, 'm', [Op('set_model', value='sheetonsheet')])
-    assert cs.changes_model('afm') and not cs.changes_model('sheetonsheet')
     assert any(d.section == '(model)' for d in cs.diff)
 
 

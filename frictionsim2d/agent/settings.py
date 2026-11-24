@@ -15,8 +15,7 @@ from pydantic import BaseModel, Field
 
 SETTINGS_NAME = 'agent.yaml'
 SECRETS_NAME = 'agent.secrets'
-#: The default local model: the fine-tune, installed from its bundle
-#: (frictionsim2d/agent/bundles.py).
+#: The default local model: the 4B fine-tune (`FrictionSim2D fetch model`).
 OLLAMA_DEFAULT_MODEL = 'fs2d-assistant:qwen3.5-4b'
 #: Used when the fine-tune can be neither found nor installed: stock 71 %, and
 #: unlike qwen3:4b its thinking can be switched off.
@@ -33,25 +32,22 @@ SETTINGS_VERSION = 2
 
 
 class OllamaSettings(BaseModel):
-    """Local provider: a fine-tune by default (Phase 0: ~67 s per cold turn on a 780M)."""
+    """Local provider: a FrictionSim2D fine-tune by default."""
 
     base_url: str = 'http://localhost:11434'
     model: str = OLLAMA_DEFAULT_MODEL
-    max_threads: int = Field(8, ge=1)
     context_tokens: int = Field(16384, ge=2048)
     keep_alive: str = '2m'
     #: A server the pane started is stopped after this long without a turn.
     idle_minutes: int = Field(10, ge=1)
-    #: Tokens one reply may generate: a small model that loops fails fast instead
-    #: of running until the context fills (18-50 min per turn on the A4000). 1024
-    #: cut off a setup naming 156 materials (~1000 tokens for the call alone).
+    #: Tokens one reply may generate, so a small model that loops fails fast.
     max_output_tokens: int = Field(4096, ge=64)
     #: Corpus passages found for the user's message and attached to it (0: none).
     prefetch_passages: int = Field(0, ge=0, le=3)
 
 
 class GeminiSettings(BaseModel):
-    """Cloud provider; the default since Phase 0 (8/10 correct, ~2 s per turn)."""
+    """Cloud provider: Gemini through the Google API (the default provider)."""
 
     model: str = 'gemini-3.5-flash-lite'
     api_key_env: str = 'GEMINI_API_KEY'
@@ -70,10 +66,6 @@ class AnthropicSettings(BaseModel):
     consent_given: bool = False
     #: How hard Claude thinks; lower is faster and cheaper per turn.
     effort: Literal['low', 'medium', 'high', 'xhigh', 'max'] = 'medium'
-
-
-#: The providers that send the conversation to a cloud service and need a key.
-CLOUD_PROVIDERS = ('gemini', 'anthropic')
 
 
 class MaterialsProjectSettings(BaseModel):
@@ -160,12 +152,6 @@ def api_key(settings: AgentSettings, provider: str,
     return _read_secrets(secrets_path or config_dir() / SECRETS_NAME).get(provider)
 
 
-def gemini_key(settings: AgentSettings,
-               secrets_path: Optional[Path] = None) -> Optional[str]:
-    """The Gemini key (see `api_key`)."""
-    return api_key(settings, 'gemini', secrets_path)
-
-
 def _read_secrets(path: Path) -> Dict[str, str]:
     """``provider=key`` lines of agent.secrets; empty keys are left out."""
     if not path.is_file():
@@ -179,13 +165,9 @@ def _read_secrets(path: Path) -> Dict[str, str]:
 
 
 def store_api_key(key: str, provider: str, secrets_path: Optional[Path] = None) -> Path:
-    """Write ``provider``'s key to agent.secrets, keeping the other providers' keys,
-    readable by the owner only.
+    """Write ``provider``'s key to agent.secrets (owner-only), keeping the others.
 
-    ``os.open`` with mode 0o600 creates the file private from the first byte;
-    ``fchmod`` covers a file that already existed with a wider mode, which
-    O_CREAT alone would leave untouched. ``O_NOFOLLOW`` refuses a symlink
-    planted in its place, and a config folder created here is owner-only.
+    ``fchmod`` also narrows a file that already existed; ``O_NOFOLLOW`` refuses a symlink.
     """
     key = key.strip()
     if '\n' in key or '\r' in key:
@@ -201,8 +183,3 @@ def store_api_key(key: str, provider: str, secrets_path: Optional[Path] = None) 
     with os.fdopen(fd, 'w', encoding='utf-8') as handle:
         handle.write(''.join(f'{name}={value}\n' for name, value in keys.items()))
     return path
-
-
-def store_gemini_key(key: str, secrets_path: Optional[Path] = None) -> Path:
-    """Write the Gemini key (see `store_api_key`)."""
-    return store_api_key(key, 'gemini', secrets_path)

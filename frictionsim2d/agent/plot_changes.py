@@ -17,7 +17,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..gui.datasets import is_dataset
 from ..postprocessing import plot_config
-from .changes import ToolInputError, _capped, _clean_error, _new_id
+from .changes import ToolInputError
+from .tools import capped, clean_error, new_id
 from .sandbox import SandboxError, SearchRoots, display_path, resolve_readable, within_roots
 
 _PLOT = TypeAdapter(plot_config.AnyPlot)
@@ -65,9 +66,9 @@ class PlotChange:  # pylint: disable=too-many-instance-attributes
                 f"{', '.join(self.labels) or 'the loaded datasets'}; adds "
                 f"{len(self.add_datasets)} dataset(s){loaded}; {state}.")
         if direct:
-            return _capped(head, 'It will be added to the Plots tab unless it is refused; '
+            return capped(head, 'It will be added to the Plots tab unless it is refused; '
                                  'the user sees it and can undo it.')
-        return _capped(head, 'Proposed only: the user sees it as a card and decides '
+        return capped(head, 'Proposed only: the user sees it as a card and decides '
                              'whether to add it; do not say it is applied.')
 
     def summary(self) -> str:
@@ -219,10 +220,10 @@ def build_plot_change(deps, title: str, plot_type: str, fields: Dict[str, Any],
     try:
         plot = _PLOT.validate_python(data).model_dump(mode='json', exclude_unset=True)
     except ValidationError as exc:
-        raise ToolInputError(_clean_error(exc)) from exc
+        raise ToolInputError(clean_error(exc)) from exc
     _check_labels(plot, preview['labels'])
     add = [f for f, label in zip(folders, labels) if label in added]
-    change = PlotChange(id=_new_id(), title=title or f'Add a {plot_type} plot', plot=plot,
+    change = PlotChange(id=new_id(), title=title or f'Add a {plot_type} plot', plot=plot,
                         folders=list(zip(folders, labels)), add_datasets=add,
                         labels=labels, already_loaded=len(folders) - len(add))
     change.notes = [f'adds {display_path(workspace / d, deps.roots)}' for d in add]

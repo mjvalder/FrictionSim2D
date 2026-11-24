@@ -464,3 +464,23 @@ def test_overlapping_starts_keep_starting_until_both_finish(tmp_path):
                           getuid=lambda: 1000)
     assert server.ensure_running(AgentSettings())[0]
     assert observed == [False] and not process.terminated
+
+
+def test_server_env_pins_the_throttle_and_the_host(monkeypatch):
+    from frictionsim2d.agent.ollama_server import server_env, throttle_env
+    monkeypatch.setenv('OLLAMA_HOST', 'elsewhere:1')
+    settings = AgentSettings(ollama={'base_url': 'http://127.0.0.1:11500'})
+    env = server_env(settings)
+    assert set(throttle_env(settings)) == {
+        'OLLAMA_IGPU_ENABLE', 'OLLAMA_VULKAN', 'OLLAMA_MAX_LOADED_MODELS',
+        'OLLAMA_NUM_PARALLEL', 'OLLAMA_KEEP_ALIVE', 'OLLAMA_CONTEXT_LENGTH'}
+    assert env['OLLAMA_HOST'] == '127.0.0.1:11500'  # the settings win over the shell
+    assert env.items() >= throttle_env(settings).items()
+
+
+def test_cache_dir_honours_xdg_cache_home(monkeypatch, tmp_path):
+    from frictionsim2d.agent.ollama_server import cache_dir
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path))
+    assert cache_dir() == tmp_path / 'FrictionSim2D'
+    monkeypatch.delenv('XDG_CACHE_HOME')
+    assert cache_dir() == Path.home() / '.cache' / 'FrictionSim2D'
