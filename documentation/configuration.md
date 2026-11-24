@@ -151,6 +151,7 @@ Important implementation detail:
 - Runtime expansion only creates independent simulation directories for list values in `[general]` except `force`, `pressure`, `scan_angle`, and `scan_speed`.
 - Those four are handled inside generated LAMMPS scripts.
 - AFM layer lists are handled in the AFM builder and produce `L<N>` subdirectories.
+- A sweep whose members would build into the same output directory is rejected before anything is built, and the error names the parameter: `[general] temp` values that differ only below 1 K (the directory token is `K<int(temp)>`), a `materials_list` over a section with no `{mat}` marker, and `pot_path` entries with the same type and file stem (or listed twice).
 
 ### Splitting a sweep into per-value scripts (`outer_loop`)
 
