@@ -52,7 +52,7 @@ so no ReaxFF charge information is lost.
 
 Note this module defines no builder class. It is a structure library --
 five dataclasses and twenty module functions -- consumed by the hetero
-builders (``hetero_afm.py``, ``hetero_slide.py``) and by ``components.py``.
+builders (``hetero_afm.py``, ``hetero_slide.py``) and by ``flake_slide.py``.
 It lives under ``construction/`` for that reason: it generates geometry,
 it does not set up a simulation. That was a deliberate choice when the
 file was created, to avoid growing components.py further; the directory

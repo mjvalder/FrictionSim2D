@@ -736,7 +736,7 @@ def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkey
 
     config.sheet.x = config.sheet.y = 12.0
 
-    real_create = components.create_lammps_instance  # pylint: disable=protected-access
+    real_create = components.create_lammps_instance
 
     class _MinimisedLatC:
         """The real LAMMPS instance, except the minimised lat_c is a known value."""

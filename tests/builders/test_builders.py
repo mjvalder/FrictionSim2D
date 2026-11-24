@@ -584,7 +584,7 @@ def test_tmp_path_format_and_uniqueness() -> None:
 def test_replicate_or_copy_replicates_only_above_one(tmp_path: Path) -> None:
     src = tmp_path / "src.lmp"
     src.write_text("data")
-    with patch("frictionsim2d.builders.construction.components._duplicate_lammps_data") as dup:
+    with patch("frictionsim2d.builders.components._duplicate_lammps_data") as dup:
         components._replicate_or_copy(src, tmp_path / "same.lmp", 1, 1, 1)
         dup.assert_not_called()
         assert (tmp_path / "same.lmp").read_text() == "data"

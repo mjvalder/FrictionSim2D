@@ -14,7 +14,6 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 import numpy as np
 
 from ...core.utils.tokens import is_int_token
-from ...interfaces.ase import element_mass
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +327,8 @@ def restore_masses_section(
             else:
                 continue
         kept.append(line)
+
+    from ...interfaces.ase import element_mass  # pylint: disable=import-outside-toplevel
 
     block = "Masses\n\n"
     for t in range(1, n_types + 1):

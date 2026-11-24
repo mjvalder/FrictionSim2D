@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..interfaces.lammps import create_lammps_instance
 from .matching import _max_strain, rotation_angle_between
 
 _TILT_EPS = 1e-9
@@ -85,6 +84,8 @@ def strain_monolayer_to_cell(input_data_path: str,
 
     atom_style = _detect_atom_style(input_data_path)
     needs_mass_fallback = not _has_masses_section(input_data_path)
+
+    from ..interfaces.lammps import create_lammps_instance  # pylint: disable=import-outside-toplevel
 
     lmp = create_lammps_instance()
     try:
