@@ -312,21 +312,20 @@ def test_hetero_virtual_type_is_gated_on_the_drive_method():
     """``hetero.py`` registers the Virtual type only when asked to.
 
     The plan called the registration unconditional and a latent bug; it is not.
-    Both sites take ``reserve_virtual_type``, which callers derive from
-    ``drive_method`` (``hetero_slide.py``/``hetero_afm.py``). This pins the
-    contract directly on the two registration functions so it cannot regress
+    ``reserve_virtual_type`` is derived by callers from ``drive_method``
+    (``hetero_slide.py``/``hetero_afm.py``). This pins the contract directly
+    on the registration function so it cannot regress
     into the unconditional form the placeholder mechanism assumes.
     """
     import inspect
 
     from frictionsim2d.builders.construction import hetero_stack as hetero
 
-    for func in (hetero.register_hetero_potentials,
-                 hetero.register_hetero_flake_potentials):
-        signature = inspect.signature(func)
-        assert signature.parameters['reserve_virtual_type'].default is False
-        source = inspect.getsource(func)
-        assert 'if reserve_virtual_type:\n        pm.register_virtual_atom()' in source
+    func = hetero.register_hetero_potentials
+    signature = inspect.signature(func)
+    assert signature.parameters['reserve_virtual_type'].default is False
+    source = inspect.getsource(func)
+    assert 'if reserve_virtual_type:\n        pm.register_virtual_atom()' in source
 
 
 # ---------------------------------------------------------------------------

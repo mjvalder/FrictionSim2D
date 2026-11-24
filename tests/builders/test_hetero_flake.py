@@ -6,7 +6,6 @@ The heavier tests need real ``lmp_serial`` (interface minimize + ``run 0``
 smoke) and are skipped when it is not on PATH.
 """
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -76,55 +75,6 @@ def test_corner_types_double_every_bilayer_type_and_find_vertices(tmp_path):
     assert len(distinct) >= 4
     # corner types are the even ids (2t); at least one corner atom exists (vertices found)
     assert any(t % 2 == 0 for t in distinct)
-
-
-@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
-def test_register_hetero_flake_potentials_corner_groups(tmp_path):
-    from frictionsim2d.core.config import load_settings
-    from frictionsim2d.builders.construction.hetero_stack import register_hetero_flake_potentials
-    settings = load_settings()
-    hp = register_hetero_flake_potentials(_flake_sheets(settings), settings, tmp_path)
-    # disjoint contiguous blocks
-    ids1 = hp.pm.types.ids_by_component('flake_1')
-    ids2 = hp.pm.types.ids_by_component('flake_2')
-    assert set(ids1).isdisjoint(ids2)
-    # per-material corner ids
-    c1 = hp.pm.types.ids_by_component_region('flake_1', 'corner')
-    c2 = hp.pm.types.ids_by_component_region('flake_2', 'corner')
-    assert c1 and c2
-    # combined flake_corner group = union
-    assert set(hp.flake_corner_group.split()) >= {str(i) for i in c1 + c2}
-    settings_text = hp.settings_path.read_text()
-    assert "flake_1_corner" in settings_text and "flake_2_corner" in settings_text
-    assert "flake_corner" in settings_text
-
-
-@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
-def test_hetero_flake_run0_smoke(tmp_path):
-    from frictionsim2d.core.config import load_settings, FlakeConfig
-    from frictionsim2d.builders.construction.hetero_stack import build_hetero_flake_component
-    from frictionsim2d.builders.construction.hetero_stack import register_hetero_flake_potentials
-    settings = load_settings()
-    path, _ = build_hetero_flake_component(_flake_sheets(settings), settings,
-                                           FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0), tmp_path)
-    hp = register_hetero_flake_potentials(_flake_sheets(settings), settings, tmp_path)
-    # Absolute read_data/include with cwd = run dir, mirroring
-    # test_hetero_builder._lammps_run0_energy: the settings' pair_coeff lines
-    # reference the staged potentials by the run-dir-relative prefix
-    # 'provenance/potentials/...', which only resolves when cwd is the run dir.
-    data_path = Path(path).resolve()
-    settings_path = Path(hp.settings_path).resolve()
-    script = tmp_path / "run0.lmp"
-    script.write_text(
-        "units metal\natom_style atomic\nboundary p p p\n"
-        f"read_data {data_path}\n"
-        f"include {settings_path}\n"
-        "run 0\n")
-    out = subprocess.run([LMP, "-in", str(script)], cwd=str(tmp_path),
-                         capture_output=True, text=True)
-    combined = out.stdout + out.stderr
-    assert out.returncode == 0, combined         # all pair coeffs set (no "All pair coeffs are not set")
-    assert "Lost atoms" not in combined
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
