@@ -1,62 +1,33 @@
-"""Build matched per-material supercells for heterostructure stacking.
+"""Structure library for heterostructures: matched and twisted supercells, stack assembly.
 
-Given two monolayer LAMMPS data files, :func:`build_matched_supercells`
-computes their Zur-McGill coincidence lattice **on the exact in-plane cells it
-is about to tile** (the monolayers' own orthogonalized cells, as read back from
-disk), builds each material's coincidence supercell, and strains the
-smaller-area supercell onto the larger (left unstrained), so both output
-supercells end up sharing exactly ONE in-plane periodic box and can be stacked
-into a single heterostructure cell.
+Defines no builder class. It generates geometry for the hetero builders
+(``afm/hetero.py``, ``sheetonsheet/hetero.py``, ``sheetonsheet/flake_slide.py``).
 
-Why the match is computed internally (the correctness crux)
------------------------------------------------------------
-:func:`ase.build.make_supercell` tiles a cell as ``new = matrix @ old``. A
-coincidence match ``matrix_a``/``matrix_b`` is only meaningful for the *specific*
-cell it was derived from: applying a match computed on one cell (e.g. a CIF
-primitive ``P``) to a *different* cell (e.g. ``build_monolayer``'s orthogonalized
-output ``T @ P``) produces ``matrix @ T @ P`` instead of the intended
-``matrix @ P``. The spurious factor ``matrix·T·matrix⁻¹`` is identity only when
-``matrix`` is a scalar multiple of identity; for any anisotropic or sheared
-match (the generic twisted / different-lattice case) the two built supercells
-are no longer commensurate. To guarantee ``matrix @ (tiled cell)`` is the true
-coincidence supercell, the match is always found from the very cells that are
-tiled.
+The match is computed on the cells that are tiled
+----------------------------------------------------
+``make_supercell`` tiles a cell as ``new = matrix @ old``, so a coincidence match
+is only meaningful for the exact cell it was derived from. Applying a match found
+on a CIF primitive ``P`` to ``build_monolayer``'s orthogonalized ``T @ P`` gives
+``matrix @ T @ P``, which is not commensurate for any anisotropic or sheared
+match. :func:`build_matched_supercells` therefore reads each monolayer's own cell
+from disk and matches on that.
 
-Symmetric mean-cell strain (design §8.3)
-----------------------------------------
-Both materials are strained symmetrically onto the shared
-``mean_cell = (sc_a + sc_b) / 2`` — there is no unstrained "reference" material.
-The per-material strains ``strain_a`` / ``strain_b`` are recorded separately and
-each must be ``<= strain_tol`` (``find_coincidence_lattice`` already guarantees
-this for any accepted match) or the build fails loud. This halves the worst-case
-per-material distortion versus a one-sided policy and avoids pre-stressing a
-single monolayer off its equilibrium bond length.
+Symmetric mean-cell strain
+--------------------------
+Both supercells are strained onto ``mean_cell = (sc_a + sc_b) / 2``; neither
+material is an unstrained reference. Each strain must be ``<= strain_tol``, else
+the build fails loud.
 
-Why the strain must be applied in the co-oriented frame
--------------------------------------------------------
-``find_coincidence_lattice`` measures strain between the two supercells in their
-*shared* (co-oriented) frame — the frame make_supercell produces. Writing each
-supercell independently re-canonicalizes it to a1-along-x with a *different*
-rotation per material (polar decomposition discards a per-material rotation that
-canonicalization then re-imposes), so a per-file ``change_box`` remap (which
-cannot rotate) would read the rotation mismatch as a huge spurious shear strain.
-So both supercells are strained onto ``mean_cell`` **in the co-oriented frame**
-via an affine ``set_cell(scale_atoms=True)`` remap (which, like ``change_box
-remap``, preserves fractional coordinates), and only then are *both* written
-out. Because both now carry the identical in-plane cell, ASE canonicalizes them
-by the same rotation, so their on-disk boxes coincide exactly and the relative
-A/B registry survives. Per-atom metadata (charges for ``atom_style charge``)
-round-trips through :func:`write_supercell` (``specorder`` + ``atom_style``),
-so no ReaxFF charge information is lost.
-
-
-Note this module defines no builder class. It is a structure library --
-five dataclasses and twenty module functions -- consumed by the hetero
-builders (``hetero_afm.py``, ``hetero_slide.py``) and by ``flake_slide.py``.
-It lives under ``construction/`` for that reason: it generates geometry,
-it does not set up a simulation. That was a deliberate choice when the
-file was created, to avoid growing components.py further; the directory
-now says so where a reader looks first.
+The strain is applied in the co-oriented frame
+----------------------------------------------
+Writing each supercell on its own re-canonicalizes it (a1 along x) with a
+different rotation per material, so a per-file ``change_box`` remap (which cannot
+rotate) would read that rotation as spurious shear. Both supercells are instead
+strained with an affine ``set_cell(scale_atoms=True)`` while still co-oriented,
+then written. They then share one in-plane cell and one canonicalizing rotation,
+so their on-disk boxes coincide and the relative A/B registry survives.
+Per-atom metadata (charges, masses, atom_style) round-trips through
+:func:`~frictionsim2d.builders.utils.lammps_data.write_supercell`.
 """
 from __future__ import annotations
 
@@ -103,8 +74,7 @@ class MatchedStack:
     """Two per-material coincidence supercells sharing one in-plane mean cell.
 
     Both materials are strained symmetrically onto the shared
-    ``mean_cell = (sc_a + sc_b) / 2`` (design §8.3); there is no unstrained
-    reference material.
+    ``mean_cell = (sc_a + sc_b) / 2``; there is no unstrained reference material.
 
     Attributes:
         supercell_a: Path to material A's output supercell data file.
@@ -124,8 +94,7 @@ class MatchedStack:
     strain_b: float
     mean_cell: np.ndarray
     match: MatchResult = field(default=None)  # type: ignore[assignment]
-    # D3 twist path only (None for the plain non-twist coincidence path, so that
-    # path stays byte-identical): the achieved relative twist (deg) and the moiré
+    # Twist path only (None otherwise): achieved relative twist (deg) and moiré
     # periodicity (Å). Set by :func:`build_twisted_supercells`.
     twist_angle_achieved: Optional[float] = None
     moire_period: Optional[float] = None
@@ -162,7 +131,7 @@ class HeteroPotentials:
             disjoint and together cover ``1..len(pm.types)`` with no gaps.
         type_offsets: Per-material starting type offset (0-based) = the number
             of types registered before that material = ``type_ids[i][0] - 1``.
-            Task 4 feeds this to ``read_data ... add append offset <k>`` so the
+            Fed to ``read_data ... add append offset <k>`` so the
             assembled data file's atom types line up with this PM exactly.
     """
     pm: PotentialManager
@@ -183,9 +152,9 @@ def register_sheet_block(
     ``pm`` it is given, returning the component names. This is the single source
     of truth for hetero sheet numbering: it is called by
     :func:`register_hetero_potentials` (which numbers the assembled data file)
-    AND by the D2 unified AFM PotentialManager, so the sim-PM sheet block and the
+    AND by the unified AFM PotentialManager, so the sim-PM sheet block and the
     data-file sheet block cannot diverge (with or without ``regions``). The
-    ``regions`` argument (default None; D5 finite path passes ``[None, 'edge']``)
+    ``regions`` argument (default None; the finite path passes ``[None, 'edge']``)
     is applied identically on both sides through this one call.
 
     Args:
@@ -239,65 +208,40 @@ def register_hetero_potentials(
         settings: Global simulation settings.
         workdir: Directory to write ``system.in.settings`` and the staged
             provenance potentials into (created if missing).
-        reserve_virtual_type: When True, register one extra non-interacting
-            ``virtual`` atom type (for the ``virtual_atom`` drive) AFTER the
-            per-material components but BEFORE the many-body self-interactions --
-            the SAME order the homogeneous path uses
-            (``SheetOnSheetSimulation._register_drive_atom`` runs before
-            ``add_self_interaction``). This sizes every ``pair_coeff * * sw ...``
-            element list to the full box type count (all real types + a trailing
-            NULL for the virtual type) the FIRST time, so no post-hoc
-            clearing/rebuilding of the null-maps is needed, and
-            :meth:`PotentialManager.write_file` emits the virtual type's
-            ``mass N 1.0`` + zero-LJ ``pair_coeff * N lj/cut 1e-100``. The
-            explicit ``i j`` cross-interactions are unaffected by the extra type.
-            The returned ``type_ids``/``type_offsets``/``component_names`` still
-            describe the REAL material types only (the virtual type is NOT a
-            material); only ``len(hp.pm.types)`` includes it (== real count + 1).
-            Default False leaves ALL behavior byte-identical.
-        regions: Optional per-type region split forwarded (through the shared
-            :func:`register_sheet_block`) to each material's
-            :meth:`PotentialManager.register_component`. The finite/edge path
-            passes ``[None, 'edge']`` so every material's types double into an
-            interleaved core (odd) / edge (even) pair, matching the layout
-            :func:`~frictionsim2d.builders.construction.components.apply_sheet_edge_types` writes
-            into
-            the assembled data file. Edge ids are then exposed via
-            ``pm.types.ids_by_component_region('sheet_i', 'edge')``. Default
-            ``None`` leaves the periodic registration byte-identical.
-        potentials_prefix: Path prefix the written ``pair_coeff`` lines use to
-            reach the staged potential files. The files themselves always land
-            in ``<workdir>/provenance/potentials``; this is only how the LAMMPS
-            script names them, so it must be relative to the directory LAMMPS
-            is run from. Default ``None`` keeps the run-dir-relative
-            ``provenance/potentials`` -- correct when ``workdir`` IS that
-            directory. A builder whose scripts run from a shared simulation
-            root passes its own sim-root-relative prefix.
-        interlayer_general: The run's ``[general]`` config, whose
-            ``interlayer_style`` acts between every 2D layer of the stack
-            (spec 2026-11-11 §3). ``None`` or ``lj`` is today's spine,
-            unchanged. Any other style is set before registration, so under
-            ilp/tmd each material's chalcogen sub-layers get their own types
-            -- the split :func:`build_monolayer` applies to its data file.
-        interlayer_terms: Emit the style's interlayer term. ``False`` keeps
-            the non-``lj`` type layout but the ``lj`` interactions: the
-            assembly runs (gap minimization, ``run 0``) use that, because
-            they run the ``lmp_serial`` binary, which need not carry the
-            INTERLAYER package, and they set no molecule IDs. Under ``ilp``
-            / ``kc`` with terms, the cross-material ``lj/cut`` is dropped:
-            one ILP/KC ``pair_coeff`` spans every material.
-
-    Note:
-        A builder with its own sim-root-relative prefix is
-        ``HeteroSheetOnSheetSimulation._potentials_prefix``.
+        reserve_virtual_type: Register one extra non-interacting ``virtual`` type
+            (for the ``virtual_atom`` drive) after the material components but
+            BEFORE the many-body self-interactions, the same order the
+            homogeneous path uses, so every ``pair_coeff * * sw ...`` list is
+            sized to the full box type count the first time. The virtual type is
+            not a material: ``type_ids`` / ``type_offsets`` / ``component_names``
+            exclude it; only ``len(hp.pm.types)`` counts it.
+        regions: Optional per-type region split forwarded through
+            :func:`register_sheet_block`. The finite path passes
+            ``[None, 'edge']``, doubling every type into an interleaved core
+            (odd) / edge (even) pair, the layout
+            :func:`~frictionsim2d.builders.construction.components.apply_sheet_edge_types`
+            writes. Default ``None``.
+        potentials_prefix: Prefix the ``pair_coeff`` lines use to reach the
+            staged potential files (always written to
+            ``<workdir>/provenance/potentials``); relative to the directory
+            LAMMPS runs from. Default ``None`` is the run-dir-relative
+            ``provenance/potentials``.
+        interlayer_general: The run's ``[general]`` config; its ``interlayer_style``
+            acts between every 2D layer. ``None`` or ``lj`` is the plain spine.
+            Any other style is set before registration, so under ilp/tmd each
+            material's chalcogen sub-layers get their own types, the split
+            :func:`build_monolayer` applies to its data file.
+        interlayer_terms: Emit the style's interlayer term. ``False`` keeps the
+            non-``lj`` type layout but the ``lj`` interactions, for the assembly
+            runs (``lmp_serial`` may lack the INTERLAYER package and no
+            molecule IDs are set). Under ``ilp`` / ``kc`` with terms the
+            cross-material ``lj/cut`` is dropped: one ILP/KC ``pair_coeff``
+            spans every material.
 
     Returns:
-        :class:`HeteroPotentials` exposing the configured manager, the written
-        settings path, and the per-material type blocks / offsets (derived from
-        the PM type registry, not hand-computed). ``type_ids`` /
-        ``component_names`` cover the REAL materials only; when
-        ``reserve_virtual_type`` is True, ``len(hp.pm.types)`` is one larger
-        (the reserved virtual type is excluded from ``type_ids``).
+        :class:`HeteroPotentials` with the configured manager, the written
+        settings path and the per-material type blocks / offsets, read from the
+        PM type registry.
 
     Raises:
         ValueError: If fewer than two materials are supplied (a heterostructure
@@ -312,15 +256,10 @@ def register_hetero_potentials(
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
 
-    # Capability-matrix rules across the whole hetero cell -- see
-    # docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md (v4) §3/§6.
-    # NOTE: an earlier revision of this comment claimed a DeePMD material
-    # beside an SW one was legal via NULL type maps. That was never true --
-    # pair_deepmd rejects NULL (pair_deepmd.cpp:816), measured 2026-08-10 -- so
-    # partial-cell is now rejected for BOTH frameworks. A hetero cell is also
-    # multi-component, which v4 §6 rules out for full-cell MLIP as well: the
-    # builders register one instance per component, and that is a NULL-map
-    # topology whichever framework it names.
+    # deepmd rejects NULL type maps (pair_deepmd.cpp:816), so a partial-cell MLIP
+    # is rejected. A hetero cell is multi-component: one instance per component
+    # is a NULL-map topology whichever framework it names, so full-cell MLIP is
+    # rejected as well.
     validate_mlip_cell(
         sheets[0],
         components=[(f"sheet_{i + 1}", sheet)
@@ -342,7 +281,7 @@ def register_hetero_potentials(
 
     # 1. One component per material -> disjoint, contiguous global type blocks
     #    (the PM's TypeRegistry assigns the IDs; we never hand-roll them).
-    #    Single-sourced through register_sheet_block so the unified AFM PM (D2)
+    #    Single-sourced through register_sheet_block so the unified AFM PM
     #    numbers sheet_1/sheet_2 identically to this data-file spine. When
     #    ``regions`` is given (finite/edge path, [None, 'edge']), every material's
     #    types double into an interleaved core/edge pair through that one call.
@@ -552,7 +491,7 @@ def build_matched_supercells(
     matrices are consistent with the cells that get tiled), tiles each material
     with its match matrix via :func:`ase.build.make_supercell`, and strains
     **both** supercells symmetrically onto the shared
-    ``mean_cell = (sc_a + sc_b) / 2`` (design §8.3) **in the co-oriented frame**
+    ``mean_cell = (sc_a + sc_b) / 2`` **in the co-oriented frame**
     (an affine ``set_cell(scale_atoms=True)`` remap that preserves fractional
     coordinates and per-atom metadata), so both output files share exactly one
     LAMMPS-canonical in-plane box with each material carrying at most
@@ -673,7 +612,7 @@ def build_twisted_supercells(
 ) -> MatchedStack:
     """Build two layers' commensurate twisted-moiré supercells on one ortho box.
 
-    The D3 twist analogue of :func:`build_matched_supercells`. Where the plain
+    The twist analogue of :func:`build_matched_supercells`. Where the plain
     path finds the *aligned* coincidence lattice, this finds the commensurate
     moiré **approximant nearest a user-selected twist angle**
     (:func:`~frictionsim2d.lattice.matching.find_commensurate_twist`) and emits both
@@ -707,7 +646,7 @@ def build_twisted_supercells(
         max_supercell: Max moiré supercell repeat along each axis.
 
     Returns:
-        :class:`MatchedStack` (the same dataclass D1 consumes) with both output
+        :class:`MatchedStack` with both output
         supercell paths sharing one orthorhombic box, the per-material residual
         strains, ``mean_cell`` = the emitted orthorhombic box, and the twist
         fields ``twist_angle_achieved`` / ``moire_period`` set.
@@ -853,7 +792,7 @@ class HeteroStack:
     ri_offset: np.ndarray
     interface_spacing: float
     total_types: int
-    # D3 twist path only (None otherwise): achieved relative twist (deg) + moiré
+    # Twist path only (None otherwise): achieved relative twist (deg) + moiré
     # periodicity (Å), logged into the run manifest by the slide builder.
     twist_angle_achieved: Optional[float] = None
     moire_period: Optional[float] = None
@@ -991,7 +930,7 @@ def assemble_hetero_stack(
     """Stack two matched supercells into ONE genuinely-periodic LAMMPS cell.
 
     Consumes the two per-material coincidence supercells (which already share
-    one in-plane box, Task 3) and the registered potential spine (Task 5), and
+    one in-plane box) and the registered potential spine, and
     writes a single ``hetero.data`` with:
 
     * **Cross-material registry (RI offset).** :func:`scan_registry_index` on the
@@ -1015,9 +954,9 @@ def assemble_hetero_stack(
     run-dir-relative ``provenance/potentials/...`` references resolve.
 
     Args:
-        matched: The two matched per-material supercells (Task 3).
+        matched: The two matched per-material supercells.
         sheets: Per-material sheet configs (exactly two; index 0 = supercell_a).
-        hetero_potentials: Registered potential spine (Task 5) supplying the
+        hetero_potentials: Registered potential spine supplying the
             settings path and per-material type offsets.
         hetero_stacking: ``'grouped'`` or ``'alternating'``.
         settings: Global simulation settings.
@@ -1144,7 +1083,7 @@ def assemble_hetero_stack(
             return gap_cache[key]
         if any(is_mlip(sheets[m].pot_type) for m in (bot_m, top_m)):
             # An MLIP interface cannot be minimized here: the generation machine
-            # is not assumed to have an MLIP-enabled LAMMPS (spec §3.3), and the
+            # is not assumed to have an MLIP-enabled LAMMPS, and the
             # zero surrogate that makes the *assembly* run possible would
             # "minimize" a flat landscape. lat_c is mandatory for MLIP sheets
             # precisely so it can stand in. The LARGER of the pair is used: a
@@ -1231,7 +1170,7 @@ def assemble_hetero_stack(
     # Render + run the assembly. The assembly is a pure placement (`run 0` then
     # write_data), so for an MLIP cell the zero surrogate stands in for the real
     # settings — otherwise generating inputs would need an MLIP-enabled LAMMPS
-    # (spec §3.3). The REAL settings path is still what the run scripts include.
+    # The REAL settings path is still what the run scripts include.
     if hetero_potentials.pm.has_mlip():
         include_path = hetero_potentials.pm.write_surrogate_file(
             workdir / "stack_hetero.in.settings")
@@ -1360,23 +1299,22 @@ def build_hetero_structure(
 
     This is the single entrypoint a later sim builder calls to obtain a
     self-consistent hetero stack (``hetero.data`` + ``system.in.settings``). It
-    ties the Phase-B structure-builder pieces together, in the order the pieces
-    require:
+    runs the steps in the order they require:
 
     1. **Monolayers.** Build each material's orthogonalized monolayer with the
        existing :func:`~frictionsim2d.builders.construction.components.build_monolayer` (first
        return
        value is the data-file path).
-    2. **Match (Task 3).** :func:`build_matched_supercells` finds the two
+    2. **Match.** :func:`build_matched_supercells` finds the two
        monolayers' coincidence lattice on their actual in-plane cells, tiles
-       each, and strains the smaller-area supercell onto the larger so both
-       output supercells share exactly one in-plane periodic box.
-    3. **Register potentials (Task 5).** :func:`register_hetero_potentials` is
+       each, and strains both onto their mean cell so both output supercells
+       share exactly one in-plane periodic box.
+    3. **Register potentials.** :func:`register_hetero_potentials` is
        geometry-independent, so it runs before assembly: it registers each
        material as its own :class:`PotentialManager` component (disjoint,
        contiguous atom-type blocks), writes ``system.in.settings``, and exposes
        the per-material ``type_offsets`` assembly needs.
-    4. **Assemble (Task 4).** :func:`assemble_hetero_stack` stacks the two matched
+    4. **Assemble.** :func:`assemble_hetero_stack` stacks the two matched
        supercells into one genuinely-periodic ``hetero.data`` -- applying the
        cross-material RI offset one-sided, finding the interface z-spacing by
        real minimization, and aligning atom types to the registered spine.
@@ -1416,7 +1354,7 @@ def build_hetero_structure(
 
     sheets: List[SheetConfig] = list(config.sheets)
     if twist_angle is not None and len(sheets) == 1:
-        # D3 same-material twist: a single [2D] material twisted against itself is
+        # Same-material twist: a single [2D] material twisted against itself is
         # a genuine moiré -> synthesise two identical sheet entries so the
         # (two-material) matcher/registrar/assembler run. (Same-material stacks
         # otherwise skip matching entirely; a twist re-enables it.)
@@ -1438,7 +1376,7 @@ def build_hetero_structure(
 
     # 2. Match -> two supercells sharing one shared box.
     if twist_angle is not None:
-        # D3 twist path: the nearest commensurate moiré approximant to the
+        # Twist path: the nearest commensurate moiré approximant to the
         # user-selected angle, emitted on an orthorhombic box.
         matched = build_twisted_supercells(
             mono_paths[0], mono_paths[1], workdir,
