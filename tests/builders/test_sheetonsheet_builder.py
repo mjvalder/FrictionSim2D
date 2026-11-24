@@ -567,7 +567,7 @@ def test_generate_potentials_none_gives_every_layer_pair_a_real_interlayer_lj(tm
 def test_generate_potentials_constrained_modes_ghost_out_non_adjacent_layers(
     constraint_mode, tmp_path,
 ):
-    """atom_bonds/com_spring -> add_ghost_lj(max_real_distance=1).
+    """atom_bonds/com_spring -> add_interlayer(low_interaction_pairs=non-adjacent).
 
     Adjacent layers keep their real LJ; NON-adjacent ones are zeroed to
     1e-100, because the bond/spring already couples the top pair and a second

@@ -311,7 +311,7 @@ def validate_pot_type(value: str, *, source: str) -> str:
             :data:`KNOWN_TYPES` is accepted when the installed ``lmp`` lists
             it, or with a warning when no LAMMPS binary is found.
     """
-    normalised = value.strip().lower()
+    normalised = normalize_potential_type(value)
     if normalised not in KNOWN_TYPES:
         _accept_custom_type(normalised, value, source)
     return normalised
@@ -330,22 +330,22 @@ def resolve_pot_type(entry: Union[str, dict],
         explicit = None
 
     if explicit:
-        pot_type = explicit.strip().lower()
+        pot_type = normalize_potential_type(explicit)
         if pot_type not in KNOWN_TYPES:
             _accept_custom_type(pot_type, explicit, f"{path}: explicit pot_type")
         return ResolvedPotential(path, pot_type, 'explicit')
 
     parts = Path(path).parts
     suffix = Path(path).suffix.lower()
-    mlip_dir = next((p.strip().lower() for p in parts[:-1]
-                     if p.strip().lower() in MLIP_TYPES), None)
+    mlip_dir = next((p for p in map(normalize_potential_type, parts[:-1])
+                     if p in MLIP_TYPES), None)
     if suffix in MLIP_FILE_EXTENSIONS or mlip_dir:
         raise PotentialTypeError(
             f"{path}: looks like an MLIP model; MLIPs are never inferred from a "
             f"folder or extension. State pot_type explicitly "
             f"({' or '.join(sorted(MLIP_TYPES))}).")
     for part in parts[:-1]:
-        candidate = part.strip().lower()
+        candidate = normalize_potential_type(part)
         if candidate in KNOWN_TYPES and '/' not in candidate:
             return ResolvedPotential(path, candidate, 'directory')
 
@@ -376,8 +376,8 @@ def pot_dir_token(pot_type: str, path: Union[str, Path],
     (``dispersion = d3``) -- so two runs of one model with and without D3
     never share a directory. ``dispersion`` is ignored for classical types.
     """
-    slug = pot_type.strip().lower().replace('/', '-')
-    if slug in MLIP_TYPES and (dispersion or '').strip().lower() == 'd3':
+    slug = normalize_potential_type(pot_type).replace('/', '-')
+    if slug in MLIP_TYPES and normalize_potential_type(dispersion or '') == 'd3':
         slug += MLIP_D3_SLUG_SUFFIX
     stem = Path(path).name
     for ext in sorted({*EXTENSION_MAP, *MLIP_FILE_EXTENSIONS}, key=len, reverse=True):

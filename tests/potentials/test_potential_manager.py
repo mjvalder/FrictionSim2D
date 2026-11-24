@@ -448,21 +448,6 @@ class TestLangevinComponents:
         # Should only have 2 types (Mo, S), not 6 (Mo×3, S×3)
         assert len(pm.types) == 2
 
-    def test_langevin_group_definitions(
-        self, mock_settings, si_tip_config
-    ):
-        """Langevin types should have proper group definitions (mobile, fix, thermo)."""
-        pm = PotentialManager(mock_settings, use_langevin=True)
-        pm.register_component('tip', si_tip_config)
-        
-        # Check generated group names from registered atom types
-        group_names = [atype.group_name for atype in pm.types]
-        
-        # Should have tip_t1, tip_fix_t1, tip_thermo_t1
-        assert any('tip_t' in g and '_fix' not in g and '_thermo' not in g for g in group_names)
-        assert any('_fix' in g for g in group_names)
-        assert any('_thermo' in g for g in group_names)
-
 
 # =========================================================================
 # Use Case 6: AFM System (Tip + Sheet + Substrate)
@@ -557,7 +542,7 @@ class TestSheetOnSheetSystem:
         pm = PotentialManager(mock_settings, use_langevin=False)
         pm.register_component('sheet', mos2_multilayer_config, n_layers=4)
         pm.add_self_interaction('sheet')
-        pm.add_ghost_lj('sheet', max_real_distance=1)
+        pm.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2), (0, 3), (1, 3)])
         
         # Check we have cross-interaction commands
         assert len(pm.cross_interaction_commands) > 0
@@ -750,7 +735,7 @@ class TestEdgeCases:
         pm = PotentialManager(mock_settings)
         
         with pytest.raises(ValueError, match="not registered"):
-            pm.add_ghost_lj('nonexistent')
+            pm.add_interlayer(['nonexistent'])
 
     def test_add_cross_interaction_missing_component(self, mock_settings):
         """Cross-interaction with missing component should raise error."""
@@ -1063,15 +1048,19 @@ class TestInterlayerStyles:
         assert rows[('C', 'C')] == pytest.approx(94.87 / 2)
         assert rows[('S', 'S')] == pytest.approx(175.68 / 2)
 
-    def test_lj_low_interaction_pairs_match_add_ghost_lj(
+    def test_lj_low_interaction_pairs_emit_real_then_ghost(
             self, mock_settings, mos2_multilayer_config):
-        old = PotentialManager(mock_settings, use_langevin=False)
-        old.register_component('sheet', mos2_multilayer_config, n_layers=4)
-        old.add_ghost_lj('sheet', max_real_distance=1)
-        new = PotentialManager(mock_settings, use_langevin=False)
-        new.register_component('sheet', mos2_multilayer_config, n_layers=4)
-        new.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2), (0, 3), (1, 3)])
-        assert new.cross_interaction_commands == old.cross_interaction_commands
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', mos2_multilayer_config, n_layers=4)
+        pm.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2), (0, 3), (1, 3)])
+        flags = ['1e-100' in c for c in pm.cross_interaction_commands]
+        assert any(flags) and not all(flags)
+        assert flags == sorted(flags)  # every real line precedes every ghost line
+        ghost_layers = {c.split('#')[1].split()[0].split('-')[0] + c.split('#')[1].split()[0].split('-')[1]
+                        for c, f in zip(pm.cross_interaction_commands, flags) if f}
+        assert ghost_layers == {'Mo(L1)Mo(L3)', 'Mo(L1)Mo(L4)', 'Mo(L2)Mo(L4)', 'Mo(L1)S(L3)',
+                                'Mo(L1)S(L4)', 'Mo(L2)S(L4)', 'S(L1)Mo(L3)', 'S(L1)Mo(L4)',
+                                'S(L2)Mo(L4)', 'S(L1)S(L3)', 'S(L1)S(L4)', 'S(L2)S(L4)'}
         ilp = PotentialManager(mock_settings, use_langevin=False)
         ilp.set_interlayer('ilp')
         ilp.register_component('sheet', mos2_multilayer_config, n_layers=4)
@@ -1577,7 +1566,7 @@ class TestMLIPSuppressesCrossLJ:
         pm.register_component(
             'sheet', make_component_config(tmp_path, 'deepmd', model), n_layers=3)
         pm.add_self_interaction('sheet')
-        pm.add_ghost_lj('sheet', max_real_distance=1)
+        pm.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2)])
 
         assert pm.cross_interaction_commands == []
 

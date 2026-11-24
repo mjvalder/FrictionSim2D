@@ -1,15 +1,8 @@
-"""Potential management for FrictionSim2D.
+"""Potential management for FrictionSim2D: atom-type registry and LAMMPS pair settings.
 
-This module handles the assignment and generation of interatomic potentials 
-for LAMMPS simulations.
-It supports hybrid pair styles with proper indexing, automatic mixing rules
-for cross-interactions, and layer-specific potential handling for multi-layer
-2D materials.
-
-Supported potentials include:
-    - With internal LJ: AIREBO, COMB, COMB3, ReaxFF, REBOMOS
-    - Requiring explicit LJ: Stillinger-Weber (SW), Tersoff, REBO, EDIP, MEAM,
-    EAM, BOP, Morse, SW/MOD, EXTEP, Vashishta
+Builds the ``pair_style``/``pair_coeff``/``mass`` file for single- and multi-component
+cells (hybrid indexing, LJ mixing, interlayer styles). Which potentials carry an internal LJ
+is listed in ``utils.POTENTIALS_WITH_INTERNAL_LJ`` / ``POTENTIALS_REQUIRING_LJ``.
 """
 
 from dataclasses import dataclass
@@ -33,6 +26,7 @@ from .utils import (
     REAXFF_TYPES,
     internal_pair_cutoff,
     lj_params,
+    normalize_potential_type,
 )
 from .interlayer import (
     ILP_CUTOFF,
@@ -117,6 +111,17 @@ def stage_model_file(src: Path, dest: Path,
     shutil.copy2(src, dest)
 
 
+def _element_mass(element: str) -> Optional[float]:
+    """Atomic mass of ``element`` in amu, or ``None`` (with a warning) if ASE has none."""
+    from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
+    # (deferred: ase)
+    try:
+        return float(atomic_masses[atomic_numbers[element]])
+    except (KeyError, IndexError):
+        logger.warning("Could not find mass for element '%s', using 1.0", element)
+        return None
+
+
 @dataclass
 class AtomType:
     """Metadata for a single LAMMPS atom type.
@@ -135,15 +140,6 @@ class AtomType:
     pot_label: str
     layer: Optional[int] = None
     region: Optional[str] = None
-
-    @property
-    def group_name(self) -> str:
-        """Generate LAMMPS-style group name for this type."""
-        if self.layer is not None:
-            return f"{self.component}_l{self.layer + 1}_t{self.type_id}"
-        if self.region:
-            return f"{self.component}_{self.region}_t{self.type_id}"
-        return f"{self.component}_t{self.type_id}"
 
 
 class TypeRegistry:
@@ -212,6 +208,20 @@ class TypeRegistry:
                 result.append(t.element)
         return result
 
+    def _padded_map(self, components: Sequence[str], attr: str,
+                    layer: Optional[int]) -> List[str]:
+        """One ``attr`` per type id, ``NULL`` where the type is not in ``components``/``layer``."""
+        wanted = set(components)
+        result = []
+        for tid in range(1, self._next_id):
+            atype = self._types.get(tid)
+            if atype and atype.component in wanted:
+                if layer is None or atype.layer == layer:
+                    result.append(getattr(atype, attr))
+                    continue
+            result.append("NULL")
+        return result
+
     def build_null_map(self, component: str, layer: Optional[int] = None) -> List[str]:
         """Build NULL-padded pot_label list for pair_coeff.
         
@@ -219,15 +229,7 @@ class TypeRegistry:
         Types matching the component (and optionally layer) get their pot_label,
         others get 'NULL'.
         """
-        result = []
-        for tid in range(1, self._next_id):
-            atype = self._types.get(tid)
-            if atype and atype.component == component:
-                if layer is None or atype.layer == layer:
-                    result.append(atype.pot_label)
-                    continue
-            result.append("NULL")
-        return result
+        return self._padded_map([component], 'pot_label', layer)
 
     def build_element_map(self, components: Sequence[str],
                           layer: Optional[int] = None) -> List[str]:
@@ -239,16 +241,7 @@ class TypeRegistry:
         listed components matches -- all layers and regions -- unless
         ``layer`` narrows it to one layer.
         """
-        wanted = set(components)
-        result = []
-        for tid in range(1, self._next_id):
-            atype = self._types.get(tid)
-            if atype and atype.component in wanted:
-                if layer is None or atype.layer == layer:
-                    result.append(atype.element)
-                    continue
-            result.append("NULL")
-        return result
+        return self._padded_map(components, 'element', layer)
 
     def build_full_map(self) -> List[str]:
         """Build a pot_label list covering EVERY atom type in the cell.
@@ -267,7 +260,7 @@ class TypeRegistry:
         return [atype.pot_label for atype in self]
 
     def get_element_map(self, component: str) -> Dict[str, List[int]]:
-        """Get element -> [type_ids] mapping for a component (for backward compatibility)."""
+        """Get element -> [type_ids] mapping for a component."""
         result: Dict[str, List[int]] = defaultdict(list)
         for t in self._types.values():
             if t.component == component:
@@ -419,7 +412,7 @@ class PotentialManager:
 
         self.virtual_atom_type: Optional[int] = None
 
-        # Interlayer style (spec 2026-11-11). 'lj' keeps every output unchanged.
+        # Interlayer style. 'lj' keeps every output unchanged.
         self.interlayer_style: str = 'lj'
         self._interlayer_file_name: Optional[str] = None
         self._interlayer_base_dir: Optional[Path] = None
@@ -454,20 +447,15 @@ class PotentialManager:
         return self.settings.potential.lj_cutoff
 
     @staticmethod
-    def _normalize_potential_type(value: str) -> str:
-        """Normalize potential style names to lowercase keys."""
-        return value.strip().lower()
-
-    @classmethod
-    def _pair_key(cls, el1: str, el2: str) -> Tuple[str, str]:
+    def _pair_key(el1: str, el2: str) -> Tuple[str, str]:
         """Build an order-independent key for an element pair."""
         a = normalize_element_symbol(el1)
         b = normalize_element_symbol(el2)
         sorted_pair = sorted((a, b))
         return (sorted_pair[0], sorted_pair[1])
 
-    @classmethod
-    def _parse_override_pair(cls, pair_key: str) -> Tuple[str, str]:
+    @staticmethod
+    def _parse_override_pair(pair_key: str) -> Tuple[str, str]:
         """Parse a pair key like 'Mo-S', 'Mo_S', 'Mo S', or 'Mo,S'."""
         tokens = [tok for tok in re.split(r'[^A-Za-z]+', pair_key) if tok]
         if len(tokens) != 2:
@@ -527,12 +515,10 @@ class PotentialManager:
 
     def _get_lj_params(self, el1: str, el2: str) -> Tuple[float, float]:
         """Return LJ parameters, preferring user overrides when present."""
-        norm_el1 = normalize_element_symbol(el1)
-        norm_el2 = normalize_element_symbol(el2)
-        override = self.lj_overrides.get(self._pair_key(norm_el1, norm_el2))
+        override = self.lj_overrides.get(self._pair_key(el1, el2))
         if override is not None:
             return override
-        return lj_params(norm_el1, norm_el2)
+        return lj_params(normalize_element_symbol(el1), normalize_element_symbol(el2))
 
     @staticmethod
     def _format_lj_value(value: float) -> str:
@@ -556,9 +542,6 @@ class PotentialManager:
         Returns:
             List of LAMMPS commands (pair_style, pair_coeff, mass).
         """
-        from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
-        # (deferred: ase)
-
         commands = []
         pot_type = config.pot_type.lower()
         if is_mlip(pot_type):
@@ -583,12 +566,8 @@ class PotentialManager:
         commands.append(f"pair_coeff * * {pot_path} {element_str}")
 
         for i, elem in enumerate(elements, 1):
-            try:
-                mass = atomic_masses[atomic_numbers[elem]]
-                commands.append(f"mass {i} {mass:.6f}")
-            except (KeyError, IndexError):
-                logger.warning("Could not find mass for element '%s', using 1.0", elem)
-                commands.append(f"mass {i} 1.0")
+            mass = _element_mass(elem)
+            commands.append(f"mass {i} {mass:.6f}" if mass is not None else f"mass {i} 1.0")
 
         return commands
 
@@ -617,7 +596,7 @@ class PotentialManager:
         cif_data = cifread(config.cif_path)
         elements = cif_data['elements']
 
-        pot_type = self._normalize_potential_type(config.pot_type)
+        pot_type = normalize_potential_type(config.pot_type)
         if is_mlip(pot_type):
             if self.interlayer_style != 'lj':
                 raise ValueError(
@@ -961,9 +940,9 @@ class PotentialManager:
 
         pot_type = frameworks[0]
         foreign = [
-            (name, self._normalize_potential_type(comp['config'].pot_type))
+            (name, normalize_potential_type(comp['config'].pot_type))
             for name, comp in self.components.items()
-            if self._normalize_potential_type(comp['config'].pot_type) != pot_type
+            if normalize_potential_type(comp['config'].pot_type) != pot_type
         ]
         if foreign:
             listed = ', '.join(f"{name} ({pot})" for name, pot in foreign)
@@ -1027,7 +1006,7 @@ class PotentialManager:
         comp = self.components.get(name)
         if not comp:
             return False
-        return is_mlip(self._normalize_potential_type(comp['config'].pot_type))
+        return is_mlip(normalize_potential_type(comp['config'].pot_type))
 
     def _mlip_pot_types(self) -> List[str]:
         """MLIP frameworks in use, in registration order."""
@@ -1073,7 +1052,7 @@ class PotentialManager:
         c_conf = comp['config']
         n_layers = comp['n_layers']
 
-        pot_type = self._normalize_potential_type(c_conf.pot_type)
+        pot_type = normalize_potential_type(c_conf.pot_type)
 
         if is_mlip(pot_type):
             # An MLIP is cell-scoped: record the request and emit ONE line for
@@ -1087,18 +1066,25 @@ class PotentialManager:
         self.potential_indices[pot_type] += 1
         pot_index = self.potential_indices[pot_type]
 
-        needs_index = self.potential_usage[pot_type] > 1
-        index_str = f" {pot_index}" if needs_index else ""
-
         if n_layers > 1 and self.is_sheet_lj(pot_type):
             layers_to_process = [layer] if layer is not None else range(n_layers)
             for l in layers_to_process:
                 self._add_layer_self_interaction(comp, l, pot_index)
         else:
-            atom_list = self.types.build_null_map(component_name)
-            pot_path = self._get_potential_path(c_conf.pot_path)
-            cmd = f"pair_coeff * * {pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
+            cmd = self._self_pair_coeff(component_name, c_conf, pot_type, pot_index, None)
             self.self_interaction_commands.append(f"{cmd} # {component_name}")
+
+    def _self_pair_coeff(self, name: str, c_conf: ComponentConfig, pot_type: str,
+                         pot_index: int, layer: Optional[int]) -> str:
+        """``pair_coeff * *`` line of one classical self-interaction (no comment).
+
+        The hybrid sub-style index is written only when ``pot_type`` is used by
+        more than one component; ``layer`` restricts the NULL map to that layer.
+        """
+        index_str = f" {pot_index}" if self.potential_usage[pot_type] > 1 else ""
+        atom_list = self.types.build_null_map(name, layer=layer)
+        pot_path = self._get_potential_path(c_conf.pot_path)
+        return f"pair_coeff * * {pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
 
     def _add_layer_self_interaction(self, comp: Dict, layer: int,
                                     base_pot_index: int):
@@ -1116,34 +1102,24 @@ class PotentialManager:
         """
         c_conf = comp['config']
         name = comp['name']
-        pot_type = self._normalize_potential_type(c_conf.pot_type)
+        pot_type = normalize_potential_type(c_conf.pot_type)
 
         pot_index = base_pot_index + layer
         self.potential_indices[pot_type] = pot_index
 
-        needs_index = self.potential_usage[pot_type] > 1
-        index_str = f" {pot_index}" if needs_index else ""
-
-        atom_list = self.types.build_null_map(name, layer=layer)
-        pot_path = self._get_potential_path(c_conf.pot_path)
-        cmd = f"pair_coeff * * {pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
+        cmd = self._self_pair_coeff(name, c_conf, pot_type, pot_index, layer)
         self.self_interaction_commands.append(f"{cmd} # {name} Layer {layer+1}")
 
     def add_cross_interaction(
         self,
         comp1_name: str,
         comp2_name: str,
-        interaction_type: str = "lj/cut",
-        custom_params: Optional[Dict[str, float]] = None
     ):
         """Add LJ cross-interaction between two components.
 
         Args:
             comp1_name: Name of first component.
             comp2_name: Name of second component.
-            interaction_type: Interaction style (default 'lj/cut').
-            custom_params: Optional dict with 'epsilon', 'sigma', 'cutoff'
-                overrides.
         """
         mlip1 = self._is_mlip_component(comp1_name)
         mlip2 = self._is_mlip_component(comp2_name)
@@ -1161,9 +1137,9 @@ class PotentialManager:
         if mlip1 != mlip2:
             mlip_name, other = (comp1_name, comp2_name) if mlip1 \
                 else (comp2_name, comp1_name)
-            mlip_pot = self._normalize_potential_type(
+            mlip_pot = normalize_potential_type(
                 self.components[mlip_name]['config'].pot_type)
-            other_pot = self._normalize_potential_type(
+            other_pot = normalize_potential_type(
                 self.components[other]['config'].pot_type)
             raise ValueError(
                 f"Cannot add a cross-interaction between {mlip_pot} component "
@@ -1183,21 +1159,18 @@ class PotentialManager:
 
         for el1 in elements1:
             for el2 in elements2:
-                if custom_params:
-                    epsilon = custom_params.get('epsilon', 0.0)
-                    sigma = custom_params.get('sigma', 3.0)
-                else:
-                    epsilon, sigma = self._get_lj_params(el1, el2)
+                epsilon, sigma = self._get_lj_params(el1, el2)
 
                 types1 = self.types.get_element_type_range(comp1_name, el1)
                 types2 = self.types.get_element_type_range(comp2_name, el2)
 
-                if int(types1.split('*', maxsplit=1)[0]) > int(types2.split('*', maxsplit=1)[0]):
+                if (min(self.types.ids_by_component_element(comp1_name, el1))
+                        > min(self.types.ids_by_component_element(comp2_name, el2))):
                     types1, types2 = types2, types1
 
                 eps_str = self._format_lj_value(epsilon)
                 sig_str = self._format_lj_value(sigma)
-                cmd = f"pair_coeff {types1} {types2} {interaction_type} {eps_str} {sig_str}"
+                cmd = f"pair_coeff {types1} {types2} lj/cut {eps_str} {sig_str}"
                 self.cross_interaction_commands.append(
                     f"{cmd} # {el1}({comp1_name})-{el2}({comp2_name})"
                 )
@@ -1270,75 +1243,6 @@ class PotentialManager:
                         f"{cmd} # {el1}(L{layer_i+1})-{el2}(L{layer_j+1})"
                     )
 
-    def add_ghost_lj(
-        self,
-        component_name: str,
-        max_real_distance: int = 1
-    ):
-        """Add all interlayer LJ interactions with distance-based ghost handling.
-
-        Layer pairs within max_real_distance get real LJ interactions.
-        Layer pairs beyond max_real_distance get ghost (near-zero epsilon)
-        interactions to lower computational costs with minimal effect on dynamics.
-
-        Args:
-            component_name: Name of the multi-layer component.
-            max_real_distance: Maximum layer separation for real LJ interactions.
-                - 1 (default): Only adjacent pairs (L1-L2, L2-L3, L3-L4) are
-                    real.
-                - 2: Adjacent + next-nearest (L1-L3, L2-L4) are real.
-                - n_layers or higher: All pairs are real (no ghost
-                    interactions).
-
-        Examples:
-            For a 4-layer sheet with max_real_distance=1:
-                Real LJ: L1-L2, L2-L3, L3-L4
-                Ghost:   L1-L3, L1-L4, L2-L4
-
-            For a 4-layer sheet with max_real_distance=2:
-                Real LJ: L1-L2, L2-L3, L3-L4, L1-L3, L2-L4
-                Ghost:   L1-L4
-        """
-        comp = self.components.get(component_name)
-        if not comp:
-            raise ValueError(f"Component '{component_name}' not registered.")
-        if self._is_mlip_component(component_name):
-            # As add_interlayer_interaction: one MLIP instance spans every
-            # layer, so both the real and the ghost LJ terms would double-count.
-            logger.debug(
-                "Skipping ghost/interlayer LJ for '%s': its MLIP covers every layer.",
-                component_name,
-            )
-            return
-        n_layers = comp['n_layers']
-
-        if n_layers < 2:
-            logger.warning(
-                "Component '%s' has only 1 layer, skipping interlayer interactions.", component_name
-            )
-            return
-
-        real_pairs = []
-        ghost_pairs = []
-
-        for i in range(n_layers):
-            for j in range(i + 1, n_layers):
-                distance = j - i
-                if distance <= max_real_distance:
-                    real_pairs.append((i, j))
-                else:
-                    ghost_pairs.append((i, j))
-
-        if real_pairs:
-            self.add_interlayer_interaction(
-                component_name, layer_pairs=real_pairs, low_interaction=False
-            )
-
-        if ghost_pairs:
-            self.add_interlayer_interaction(
-                component_name, layer_pairs=ghost_pairs, low_interaction=True
-            )
-
     # === Interlayer styles ===
 
     def set_interlayer(self, style: str, file: Optional[str] = None,
@@ -1370,7 +1274,7 @@ class PotentialManager:
             if splits_chalcogens(name) and comp.get('split_chalcogens', set()) != \
                     chalcogen_split_elements(style, comp['elements'], count_atomtypes(
                         comp['config'].pot_path, comp['elements'],
-                        pot_type=self._normalize_potential_type(comp['config'].pot_type))):
+                        pot_type=normalize_potential_type(comp['config'].pot_type))):
                 raise ValueError(
                     f"set_interlayer('{style}') must be called before register_component"
                     f"('{name}'): under ilp/tmd its chalcogen sub-layers need their "
@@ -1425,7 +1329,7 @@ class PotentialManager:
         - ``lj``: :meth:`add_interlayer_interaction` per component -- the same
           lines, in the same order, as calling it directly. With
           ``low_interaction_pairs`` those layer pairs get the ghost epsilon
-          after the real ones, exactly as :meth:`add_ghost_lj` emits them.
+          after the real ones.
         - ``lj_g``: the same LJ, plus the Gaussian as three or more
           ``kolmogorov/crespi/z`` instances: +g/2 over every listed sheet
           type and -g/2 within each layer.
@@ -1490,7 +1394,7 @@ class PotentialManager:
 
     def _add_lj_interlayer(self, name: str,
                            low_pairs: Optional[Sequence[Tuple[int, int]]]) -> None:
-        """Today's interlayer LJ for one component (plain or with ghost pairs)."""
+        """Interlayer LJ for one component (plain or with ghost pairs)."""
         if not low_pairs:
             self.add_interlayer_interaction(name)
             return
@@ -1517,7 +1421,7 @@ class PotentialManager:
         return g
 
     def _add_gaussian(self, components: List[str]) -> None:
-        """Record the LJ-G pair table and the KC/z instances (spec §4)."""
+        """Record the LJ-G pair table and the KC/z instances."""
         g_of: Dict[str, float] = {name: self._component_g(name) for name in components}
         owner: Dict[str, str] = {}
         el_g: Dict[str, float] = {}
@@ -1692,9 +1596,6 @@ class PotentialManager:
         Returns:
             String with mass commands, one per line.
         """
-        from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
-        # (deferred: ase)
-
         element_types: Dict[str, List[int]] = defaultdict(list)
         for atype in self.types:
             element_types[atype.element].append(atype.type_id)
@@ -1717,12 +1618,11 @@ class PotentialManager:
                 if element == 'Virtual':
                     lines.append(f"mass {type_range} 1.0 #Virtual atom")
                     continue
-                try:
-                    mass = atomic_masses[atomic_numbers[element]]
-                    lines.append(f"mass {type_range} {mass:.6f} #{element}")
-                except (KeyError, IndexError):
-                    logger.warning("Could not find mass for element '%s', using 1.0", element)
+                mass = _element_mass(element)
+                if mass is None:
                     lines.append(f"mass {type_range} 1.0 #{element} (unknown)")
+                else:
+                    lines.append(f"mass {type_range} {mass:.6f} #{element}")
 
         return "\n".join(lines)
 
@@ -1777,7 +1677,7 @@ class PotentialManager:
 
                 # Layer groups for EVERY layer count, monolayers included:
                 # the registry's comx_L1... channels reference layer_1
-                # unconditionally (spec §5 F1). A monolayer whose types carry
+                # unconditionally. A monolayer whose types carry
                 # no per-layer tag falls back to the whole sheet.
                 for layer in range(n_layers):
                     layer_types = self.types.get_layer_group_string(name, layer)
