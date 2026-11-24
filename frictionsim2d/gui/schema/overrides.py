@@ -509,6 +509,51 @@ _COMMON: Dict[str, SectionOverride] = {
 }
 
 
+#: Display metadata of the ``[quench]`` section of a quench config. The
+#: integrity thresholds are deliberately not here (CFG-19): they are a
+#: judgement about results, not a condition of the quench.
+_QUENCH_LIST_HELP = 'Empty: the settings value. A list makes one block each.'
+_QUENCH_RUN: Dict[str, SectionOverride] = {
+    'quench': SectionOverride(
+        label='Amorphous block', order=1,
+        help='What to melt-quench; one block per material and condition.',
+        detail=('Every condition left empty comes from the Quench group on the '
+                'Settings tab. A list makes one block per value; a block is '
+                'found again only under the same conditions.'),
+        fields={
+            'material': FieldOverride(
+                label='Material', order=1, required=True,
+                help='A list makes one block per material.'),
+            'potential': FieldOverride(
+                label='Potential file', order=2, editor='path',
+                help="'{mat}' is replaced by each material."),
+            'pot_type': FieldOverride(
+                label='Potential type', order=3, editor='pot_type'),
+            'cif': FieldOverride(
+                label='Structure file', order=4, editor='path',
+                help="Empty: <material>.cif next to the config."),
+            'slab': FieldOverride(
+                label='Crystal slab', unit=A, order=5, editor='xyz_dims',
+                help='Empty: the settings quench slab.'),
+            'melt_temp': FieldOverride(
+                label='Melt temperature', unit='K', order=6,
+                help=_QUENCH_LIST_HELP),
+            'quench_temp': FieldOverride(
+                label='Quench temperature', unit='K', order=7,
+                help=_QUENCH_LIST_HELP),
+            'quench_rate': FieldOverride(
+                label='Quench rate', unit='K/s', order=8,
+                help=_QUENCH_LIST_HELP),
+            'timestep': FieldOverride(
+                label='Timestep', unit='ps', order=9,
+                help=_QUENCH_LIST_HELP),
+            'melt_steps': FieldOverride(
+                label='Melt steps', order=10, help=_QUENCH_LIST_HELP),
+            'equilibrate_steps': FieldOverride(
+                label='Equilibrate steps', order=11, help=_QUENCH_LIST_HELP),
+        }),
+}
+
 #: Model name used by the settings document, so its sections get their own
 #: labels rather than falling back to raw field names.
 SETTINGS_MODEL = '__settings__'
@@ -723,6 +768,9 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
         return result
 
     family, mode = entry
+
+    if family.key == 'amorphous':
+        return dict(_QUENCH_RUN)
 
     if model != 'pes_tip':
         substrate = result.get('sub', SectionOverride())

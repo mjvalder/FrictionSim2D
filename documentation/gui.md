@@ -38,7 +38,7 @@ live under it, but you can open a config from anywhere.
 
 ## Choosing what to build
 
-Two families, each with a mode:
+Three families, each with a mode:
 
 | Family | Mode | Equivalent CLI |
 |---|---|---|
@@ -47,6 +47,10 @@ Two families, each with a mode:
 | | PES scan | `run pes-tip` |
 | Sheet on sheet | Dynamic (slide) | `run sheetonsheet` |
 | | PES scan | `run pes-sheet` |
+| Amorphous block | Melt-quench | `run quench` |
+
+The Amorphous block family makes the amorphous blocks the other two consume;
+see [Amorphous blocks](#amorphous-blocks).
 
 The mode changes which sections are offered — `[indent]` only for an indent run,
 `[pes]` only for a scan — and which run scripts the build produces. The form
@@ -115,6 +119,43 @@ loads as untouched — 0.0 is the offset's own default — so it ticks no gate
 and loses that key on the next save. This is a no-op semantically: the
 builder already treats an absent offset as 0.0, so nothing about how the
 config builds changes, only how it looks on disk.
+
+## Amorphous blocks
+
+A friction run that needs an amorphous substrate or tip uses a block from the
+library; it never makes one. **Amorphous block** is the family that does. It has
+no tip, sheet or substrate, no layer levels and no outer loop: one `[quench]`
+section, the same fields as [`run quench`](settings.md) (`material`, `potential`,
+`pot_type`, `cif`, `slab`, and the six conditions `melt_temp`, `quench_temp`,
+`quench_rate`, `timestep`, `melt_steps`, `equilibrate_steps`). A condition left
+empty comes from Settings → Quench; a list makes one block per value. The
+integrity thresholds are not offered here: they judge results, not the quench.
+
+- **Header.** It reads **N blocks → N jobs**, and a block the library already has
+  is listed in the issues panel as skipped. When every block is present,
+  Generate says so instead of writing an empty root.
+- **Render** shows the crystal slab of the first member with "about N atoms, M
+  MD steps. Nothing is melted."
+- **Generate** writes the quench root exactly as `run quench CONFIG` does, with
+  HPC scripts when ticked. Nothing runs.
+- **Run locally after generating** (this family only, unticked every time) then
+  runs each member here with serial `lmp`, hours per member, in a worker
+  process, and imports the finished blocks. **Cancel quench run** kills `lmp`
+  and imports nothing; closing the window asks first.
+- **File → Import quench results…** is `quench import ROOT`, for a root that
+  finished on the HPC.
+- **Open config…** recognises a `[quench]` config and switches family.
+
+### A missing block
+
+When Render or Generate on a friction config finds no matching block, the
+message lists what is needed, the nearest blocks and the `run quench --for`
+command, with a **Create quench job** button. It opens an Amorphous block config
+prefilled from the missing blocks (replacing the open config only after you
+confirm, if it has unsaved changes). Blocks under other conditions than the
+first are not put in it, so nothing is made that was not needed: generate and
+import this one, then generate the friction config again to be offered the
+rest. Pressing the button generates and runs nothing.
 
 ## Reading the run count
 
@@ -373,7 +414,8 @@ substituted, `materials_list` gone.
 the generated LAMMPS script specifies, and displays the result. It never
 minimises and never runs a melt-quench: if no amorphous block in the library
 matches the run's quench conditions and size, the build refuses and the message
-names the `FrictionSim2D run quench --for` command that creates the job.
+names the `FrictionSim2D run quench --for` command that creates the job, with a
+[Create quench job](#a-missing-block) button.
 
 What you see is parsed out of the build's own outputs — the assembly script for
 the cell and component placement, `system.in.settings` for component membership
@@ -457,7 +499,8 @@ generated: it names the section at fault and what to put in it, which an empty
 list of output directories does not.
 
 Like Render, this never melt-quenches: a missing amorphous block stops the
-generation with the `run quench --for` command that creates its job.
+generation with the `run quench --for` command that creates its job, and the
+[Create quench job](#a-missing-block) button.
 
 Validation (not just the Generate confirmation) also warns — without
 blocking — when an AFM-like sheet's footprint is under twice the tip

@@ -179,6 +179,11 @@ class QuenchRunConfig(BaseModel):
         return v
 
 
+class QuenchSimulationConfig(BaseModel):
+    """Root model of a quench config (``FrictionSim2D run quench``): one ``[quench]`` section."""
+    quench: QuenchRunConfig
+
+
 class OutputSettings(BaseModel):
     """Output and dump settings."""
     dump: Dict[str, bool] = Field(

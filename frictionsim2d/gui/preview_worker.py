@@ -24,8 +24,52 @@ def _emit(kind: str, **payload: Any) -> None:
     print(json.dumps({'kind': kind, **payload}), flush=True)
 
 
+def run_quench(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Preview a quench config: the crystal slab of its first member.
+
+    Nothing is melted. The member's root is written to the preview directory
+    (a crystal block and a deck, which is what Generate would write) and only
+    the block is read back.
+    """
+    # pylint: disable=import-outside-toplevel
+    from ..builders.construction.amorphous import (
+        member_rel_dir, read_data_header, write_quench_root)
+    from ..core.config import load_settings, parse_config
+    from ..core.utils.structures import cifread
+    from .controllers.quench import plan_quench, quench_steps
+    # pylint: enable=import-outside-toplevel
+
+    config_file = Path(request['config_file'])
+    _emit('progress', message='building the crystal slab')
+    settings = load_settings(settings_file=request.get('settings_file'))
+    section = parse_config(config_file).get('quench')
+    if section is None:
+        return {'ok': False, 'error': 'the config has no [quench] section'}
+    plan = plan_quench(section, settings, config_file.parent)
+    chosen = (plan.members or [member for member, _block in plan.present])
+    if not chosen:
+        return {'ok': False, 'error': 'the config describes no block'}
+    member = chosen[0]
+    root = write_quench_root([member], Path(request['output_root']), settings,
+                             root_name='preview')
+    block = root / member_rel_dir(member) / 'build' / f'{member.material}_crystal_block.lmp'
+    _box, natoms = read_data_header(block)
+    steps = quench_steps(member)
+    total = len(plan.members) + len(plan.present)
+    label = (f"Crystal slab of {member.material} [{member.key.key8}]"
+             f"{f' (1 of {total})' if total > 1 else ''}: about {natoms:,} atoms, "
+             f"{steps:,} MD steps. Nothing is melted.")
+    return {
+        'ok': True, 'crystal_block': str(block), 'material': member.material,
+        'elements': list(cifread(member.cif)['elements']), 'natoms': natoms,
+        'steps': steps, 'label': label, 'warnings': [],
+    }
+
+
 def run(request: Dict[str, Any]) -> Dict[str, Any]:
     """Generate a single-member package for preview."""
+    if request['model'] == 'quench':
+        return run_quench(request)
     from ..run.artifacts import discover_preview_target, generate_package
 
     config_file = request['config_file']

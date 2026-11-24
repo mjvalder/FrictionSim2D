@@ -1,7 +1,8 @@
 """The simulation types the GUI offers.
 
-The CLI exposes five ``run`` commands, but they are not five independent
-things: they are two builder families, each with a mode. The families differ in
+The CLI exposes six ``run`` commands, but they are not six independent
+things: five are two builder families, each with a mode, and ``run quench`` is
+the third family, which makes the amorphous blocks the others consume. The families differ in
 what they contain (a tip or a second sheet), in their directory layout (an
 ``L{n}`` level or not) and in their assembly grammar; the modes within a family
 differ only in which run scripts follow the shared build.
@@ -177,7 +178,30 @@ SHEET_ON_SHEET = SimulationFamily(
     ),
 )
 
-FAMILIES: Tuple[SimulationFamily, ...] = (AFM, SHEET_ON_SHEET)
+AMORPHOUS = SimulationFamily(
+    key='amorphous',
+    label='Amorphous block',
+    description=(
+        'A melt-quench that makes an amorphous block for the library. No tip, '
+        'sheet or substrate; nothing runs until you submit it or tick Run locally.'
+    ),
+    sections=(),
+    has_layer_levels=False,
+    outer_loop_choices=(),
+    modes=(
+        SimulationMode(
+            key='melt_quench', model='quench',
+            label='Melt-quench',
+            description='Melt a crystal slab, quench it and equilibrate.',
+            sections=('quench',),
+            has_system_phase=False,
+            supports_hetero=False,
+            outer_loop_choices=(),
+        ),
+    ),
+)
+
+FAMILIES: Tuple[SimulationFamily, ...] = (AFM, SHEET_ON_SHEET, AMORPHOUS)
 
 #: Every (family, mode) pair, keyed by CLI model name.
 MODES: Dict[str, Tuple[SimulationFamily, SimulationMode]] = {

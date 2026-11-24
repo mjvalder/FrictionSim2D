@@ -47,6 +47,11 @@ _MATERIALS_LIST_KEY = 'materials_list'
 #: Every config key this module resolves.
 _PATH_LIKE_KEYS = frozenset(PATH_KEYS) | {_MATERIALS_LIST_KEY}
 
+#: A quench config's own file keys (``[quench] potential`` / ``cif``). They have
+#: no ``_path`` suffix, so they are resolved for that section only.
+_QUENCH_SECTION = 'quench'
+_QUENCH_PATH_KEYS = frozenset({'potential', 'cif'})
+
 #: Matches a ``{mat}``, ``{mat1}``, ``{mat2}``, ... placeholder left for
 #: ``expand_config_sweeps`` to substitute later. Not anchored to a specific
 #: name -- any future per-sheet placeholder needs no change here -- and
@@ -123,7 +128,9 @@ def absolutize_staged_paths(config: Mapping[str, Any],
             continue
 
         new_values = dict(values)
-        for key in _PATH_LIKE_KEYS:
+        keys = (_PATH_LIKE_KEYS | _QUENCH_PATH_KEYS if section == _QUENCH_SECTION
+                else _PATH_LIKE_KEYS)
+        for key in keys:
             value = new_values.get(key)
             if isinstance(value, str) and value:
                 new_values[key] = _resolve_value(value, base_dir)

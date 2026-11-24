@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -42,6 +42,9 @@ from .controllers.database import DatabaseController, DatabaseRequest
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
+from .controllers.quench import QUENCH_MODEL, prefill_quench_values
+from .controllers.quench_run import QuenchRunController
+from ..core.config import parse_config
 from ..run.hpc_dispatch import hpc_generation_blocker
 from ..run.naming import AFM_LIKE_MODELS
 from .controllers.settings_document import SettingsDocument
@@ -212,6 +215,10 @@ class MainWindow(QMainWindow):
 
         self.preview = PreviewController(workspace, self)
         self.generator = GenerateController(workspace, self)
+        self.quench_run = QuenchRunController(workspace, self)
+        #: Set by `_generate` when "Run locally" was ticked, consumed by
+        #: `_on_generated`; never set by anything but that explicit tick.
+        self._run_local_requested = False
         self.database = DatabaseController(workspace, self.settings, self)
         # What was last rendered, so an edit afterwards can be flagged as
         # stale rather than leaving the viewport showing a superseded system
@@ -287,6 +294,13 @@ class MainWindow(QMainWindow):
 
         self.setStatusBar(QStatusBar(self))
         self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
+
+        self.import_quench_action = QAction('Import quench results…', self)
+        self.import_quench_action.setToolTip(
+            'Copy the finished members of a quench root into the amorphous block '
+            'library (FrictionSim2D quench import ROOT).')
+        self.import_quench_action.triggered.connect(self._import_quench_results)
+        self.menuBar().addMenu('File').addAction(self.import_quench_action)
 
     def _build_builder_tab(self) -> QWidget:
         """Everything that existed before D1, unchanged, inside one tab."""
@@ -542,6 +556,7 @@ class MainWindow(QMainWindow):
                 self.family_box.blockSignals(False)
             self._populate_modes()
         self._resync_mode_box()
+        self._sync_quench_controls()
 
     def _apply_assistant_change(self, change, as_new: bool) -> None:
         """Apply a change set from a card (ask-before-applying, or Apply as new)."""
@@ -945,6 +960,22 @@ class MainWindow(QMainWindow):
         self.hpc_box = QCheckBox('Also generate HPC scripts', self)
         row.addWidget(self.hpc_box)
 
+        # Amorphous block family only, and never ticked for you: a melt-quench
+        # is hours of serial lmp per member.
+        self.run_local_box = QCheckBox('Run locally after generating', self)
+        self.run_local_box.setToolTip(
+            'Run every member here with serial lmp (hours each) and import the '
+            'blocks into the library. Unticked: only the job decks are written; '
+            'submit them from the HPC panel or `FrictionSim2D hpc generate`.')
+        row.addWidget(self.run_local_box)
+
+        self.quench_cancel_button = QPushButton('Cancel quench run', self)
+        self.quench_cancel_button.setToolTip(
+            'Stop the local melt-quench. Nothing is imported.')
+        self.quench_cancel_button.clicked.connect(self.quench_run.cancel)
+        row.addWidget(self.quench_cancel_button)
+        self._sync_quench_controls()
+
         self.render_button = QPushButton('Render', self)
         self.render_button.setShortcut('Ctrl+R')
         self.render_button.setToolTip(
@@ -983,6 +1014,12 @@ class MainWindow(QMainWindow):
         self.generator.progress.connect(self.statusBar().showMessage)
         self.generator.finished.connect(self._on_generated)
         self.generator.failed.connect(self._on_generate_failed)
+
+        self.quench_run.started.connect(self._on_quench_run_started)
+        self.quench_run.progress.connect(self.statusBar().showMessage)
+        self.quench_run.finished.connect(self._on_quench_run_finished)
+        self.quench_run.failed.connect(self._on_quench_run_failed)
+        self.quench_run.cancelled.connect(self._on_quench_run_cancelled)
 
         self._connect_database()
 
@@ -1329,8 +1366,11 @@ class MainWindow(QMainWindow):
 
     def _refresh_counts(self) -> None:
         try:
-            summary = self.document.expansion()
+            summary = self.document.expansion(self.settings)
             text = (
+                f"{plural(summary.configs, 'block')} → "
+                f"{plural(summary.jobs, 'job')}"
+                if self.document.model == QUENCH_MODEL else
                 f"{plural(summary.configs, 'config')} → "
                 f"{plural(summary.builds, 'build')} → "
                 f"{plural(summary.jobs, 'job')}")
@@ -1339,6 +1379,13 @@ class MainWindow(QMainWindow):
             logger.debug("count failed: %s", exc)
         if text != self.counts.text():
             self.counts.setText(text)
+
+    def _expansion_dirs(self):
+        """The Generate preview. A quench document needs the settings (they hold
+        the conditions it leaves empty); the friction ones read none."""
+        if self.document.model == QUENCH_MODEL:
+            return self.document.expansion_output_dirs(self.settings)
+        return self.document.expansion_output_dirs()
 
     def _tip_footprint_issues(self) -> List[str]:
         """The tip-vs-periodic-image precheck, as issue lines.
@@ -1426,7 +1473,7 @@ class MainWindow(QMainWindow):
 
         expansion = None
         try:
-            expansion = self.document.expansion()
+            expansion = self.document.expansion(self.settings)
         except Exception as exc:  # pylint: disable=broad-except
             # The sweep cannot be counted -- a materials_list whose
             # per-material files do not resolve, or whose lines name a
@@ -1440,7 +1487,7 @@ class MainWindow(QMainWindow):
             # here it was caught into a debug log, so Render and this panel
             # showed a config that read as fine.
             logger.debug("expansion count failed: %s", exc)
-            lines.append(self.document.expansion_output_dirs().error or str(exc))
+            lines.append(self._expansion_dirs().error or str(exc))
 
         if expansion is not None:
             # Only the material-sweep notes: a materials_list that could not
@@ -1451,7 +1498,7 @@ class MainWindow(QMainWindow):
             # phase, a PES refinement script) that does not belong beside a
             # "config is valid" message.
             lines += [n for n in expansion.notes
-                     if n.startswith('[2D] materials_list')]
+                     if n.startswith(('[2D] materials_list', '[quench]'))]
 
         lines += self._tip_footprint_issues()
 
@@ -1497,10 +1544,20 @@ class MainWindow(QMainWindow):
         behaviour on offer; this puts the same Save/Discard/Cancel choice in
         front of the user that closing an editor normally would.
         """
+        if self.quench_run.running:
+            stop = QMessageBox.question(
+                self, 'Quench run in progress',
+                'A local melt-quench is still running. Closing stops it, and '
+                'nothing is imported. Close anyway?',
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if stop != QMessageBox.Yes:
+                event.ignore()
+                return
         self._remember_assistant_state()
         config_dirty = self.document.dirty
         settings_dirty = self.settings_document.dirty
         if not (config_dirty or settings_dirty):
+            self.quench_run.cancel()
             self.database.cancel()
             self._shutdown_assistant()
             event.accept()
@@ -1523,6 +1580,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if choice == QMessageBox.Discard:
+            self.quench_run.cancel()
             self.database.cancel()
             self._shutdown_assistant()
             event.accept()
@@ -1539,6 +1597,7 @@ class MainWindow(QMainWindow):
         if self.document.dirty or self.settings_document.dirty:
             event.ignore()
             return
+        self.quench_run.cancel()
         self.database.cancel()
         self._shutdown_assistant()
         event.accept()
@@ -1568,6 +1627,7 @@ class MainWindow(QMainWindow):
         # loop before repaint.
         self.config_scroll.verticalScrollBar().setValue(scroll_value)
 
+        self._sync_quench_controls()
         self._refresh_counts()
         # A mode switch swaps the document's model wholesale -- the largest
         # possible edit short of opening a different file -- so the badge
@@ -1645,6 +1705,17 @@ class MainWindow(QMainWindow):
 
         model = self.mode_box.currentData() or 'afm'
         try:
+            # A quench config is told apart by its [quench] section; the mode
+            # box would otherwise load it as, or a friction config into, the
+            # wrong family.
+            sections = parse_config(path)
+            if 'quench' in sections and not any(k.startswith('2D') for k in sections):
+                model = QUENCH_MODEL
+            elif model == QUENCH_MODEL:
+                model = 'afm'
+        except Exception:  # pylint: disable=broad-except
+            pass  # from_file reports an unreadable config below
+        try:
             self.document = ConfigDocument.from_file(path, model)
         except DocumentError as exc:
             QMessageBox.warning(self, 'Cannot open this config', str(exc))
@@ -1662,6 +1733,7 @@ class MainWindow(QMainWindow):
         self.form.clear_highlights()
         self._end_assistant_undo()
         self.form.rebuild()
+        self._resync_family_and_mode()
         self._validate()
         # Opening a different config swaps the whole document out from under
         # a render -- the largest staleness event there is -- yet it never
@@ -1753,6 +1825,9 @@ class MainWindow(QMainWindow):
             for key, value in values.items():
                 if key.endswith('_path') and isinstance(value, str):
                     out.append(Path(value))
+                elif (self.document.model == QUENCH_MODEL and key in ('potential', 'cif')
+                      and isinstance(value, str) and '{' not in value):
+                    out.append(Path(value))
         return out
 
     def _on_preview_ready(self, system) -> None:
@@ -1782,7 +1857,7 @@ class MainWindow(QMainWindow):
         self._set_render_building(False)
         self._busy('Preview failed.', False)
         self.issues.setPlainText(message)
-        QMessageBox.warning(self, 'Preview failed', message)
+        self._report_failure(self.preview.last_failure, message, 'Preview failed')
 
     def _generate(self) -> None:
         if not self._sync_settings():
@@ -1794,7 +1869,7 @@ class MainWindow(QMainWindow):
         # Asked before the counts, which come from the same expansion and so
         # would raise the very message this reports -- as a traceback out of a
         # Qt slot, where the user never sees it.
-        preview = self.document.expansion_output_dirs()
+        preview = self._expansion_dirs()
         if preview.error:
             self.issues.setPlainText(preview.error)
             QMessageBox.warning(
@@ -1804,11 +1879,28 @@ class MainWindow(QMainWindow):
             return
         dirs = preview.dirs
 
-        summary = self.document.expansion()
+        summary = self.document.expansion(self.settings)
+        quench = self.document.model == QUENCH_MODEL
+        if quench and not dirs:
+            text = ('Every block this config describes is already in the library, '
+                    'so there is no job to write.')
+            self.issues.setPlainText(text)
+            QMessageBox.information(self, 'Nothing to generate', text)
+            self.statusBar().showMessage('Nothing to generate.')
+            return
         message = (
+            f"This will write {plural(summary.jobs, 'melt-quench job')} into:"
+            f"\n{self.workspace.runs_dir}\n\nNothing runs yet."
+            if quench else
             f"This will generate {summary.configs} config(s), {summary.builds} "
             f"build(s) and {summary.jobs} job(s) into:\n{self.workspace.runs_dir}"
         )
+        run_local = quench and self.run_local_box.isChecked()
+        if run_local:
+            message += (
+                "\n\nRun locally is ticked: after writing them, each member is run "
+                "here with serial lmp (hours per member) and the blocks are "
+                "imported into the library. Cancel stops it and imports nothing.")
 
         if dirs:
             shown = dirs[:8]
@@ -1839,6 +1931,7 @@ class MainWindow(QMainWindow):
         if confirm != QMessageBox.Yes:
             return
 
+        self._run_local_requested = run_local
         self.generator.start(GenerateRequest(
             config=self.document.to_dict(),
             model=self.document.model,
@@ -1868,12 +1961,154 @@ class MainWindow(QMainWindow):
 
         if result.get('failures'):
             detail += "\n\nFailures:\n" + '\n'.join(result['failures'])
+        run_local, self._run_local_requested = self._run_local_requested, False
+        root = result.get('simulation_root')
+        if run_local and root:
+            detail += "\n\nStarting the local melt-quench now."
+        elif self.document.model == QUENCH_MODEL:
+            detail += ("\n\nNothing has been run. Submit the jobs (HPC panel, or "
+                       "`FrictionSim2D hpc generate ROOT`), then import the finished "
+                       "blocks with File > Import quench results.")
         QMessageBox.information(self, 'Generation complete', detail)
+        if run_local and root:
+            self.quench_run.start(Path(root))
 
     def _on_generate_failed(self, message: str) -> None:
+        self._run_local_requested = False
         self._busy('Generation failed.', False)
         self.issues.setPlainText(message)
-        QMessageBox.warning(self, 'Generation failed', message)
+        self._report_failure(self.generator.last_failure, message, 'Generation failed')
+
+    # ------------------------------------------------------------ quench
+
+    def _sync_quench_controls(self) -> None:
+        """Show Run locally only for the Amorphous block family, and always unticked
+        when it appears: it is never carried over from an earlier document."""
+        quench = self.document.model == QUENCH_MODEL
+        if not quench:
+            self.run_local_box.setChecked(False)
+        self.run_local_box.setVisible(quench)
+        self.quench_cancel_button.setVisible(self.quench_run.running)
+
+    def _report_failure(self, payload: dict, message: str, title: str) -> None:
+        """A failed preview or Generate: a plain warning, or, when an amorphous
+        block is missing, the message with a **Create quench job** button."""
+        if payload.get('quench_members'):
+            if self._offer_quench_job(message):
+                self._open_quench_document(payload['quench_members'])
+            return
+        QMessageBox.warning(self, title, message)
+
+    def _offer_quench_job(self, message: str) -> bool:
+        """Say what is missing and ask whether to open a quench job for it.
+
+        Only opens a document: nothing is generated or run by pressing it.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle('An amorphous block is missing')
+        box.setText('This run needs an amorphous block the library does not have.')
+        box.setInformativeText(
+            'Create quench job opens an Amorphous block config for it. Nothing '
+            'is generated or run until you press Generate there.')
+        box.setDetailedText(message)
+        create = box.addButton('Create quench job', QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Close)
+        box.exec()
+        return box.clickedButton() is create
+
+    def _confirm_replace_config(self) -> bool:
+        """Replacing an edited config with the quench job needs a yes."""
+        answer = QMessageBox.question(
+            self, 'Unsaved changes',
+            'The Builder has unsaved changes that Create quench job replaces. '
+            'Save the config first if you want to keep it. Continue?',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
+
+    def _open_quench_document(self, members: list) -> None:
+        """A new quench document prefilled from the missing blocks (never generated)."""
+        values, left_out = prefill_quench_values(members)
+        if not values:
+            return
+        self.form.commit()
+        if self.document.dirty and not self._confirm_replace_config():
+            return
+        document = ConfigDocument.blank(QUENCH_MODEL)
+        document.values['quench'] = values
+        document.dirty = True
+        document.workspace_dir = self.workspace.configs_dir
+        document.workspace_root = self.workspace.root
+        self.document = document
+        self.form.document = document
+        self.form.clear_highlights()
+        self._end_assistant_undo()
+        self.run_local_box.setChecked(False)
+        self.form.rebuild()
+        self._resync_family_and_mode()
+        self._validate()
+        if left_out:
+            self.issues.setPlainText(
+                self.issues.toPlainText() + "\n\n" +
+                f"{plural(len(left_out), 'more block')} are missing under other "
+                "conditions and are not in this config. Generate and import this one, "
+                "then Generate the friction config again to be offered the rest.")
+        self._on_config_changed()
+        self.statusBar().showMessage(
+            'Opened a quench job for the missing block. Nothing has been run.')
+
+    def _on_quench_run_started(self) -> None:
+        self._busy('Melt-quench running…', True)
+        self.quench_cancel_button.setVisible(True)
+
+    def _finish_quench_run(self, message: str) -> None:
+        self.quench_cancel_button.setVisible(False)
+        self._busy(message, False)
+
+    def _on_quench_run_finished(self, result: dict) -> None:
+        self._finish_quench_run('Melt-quench finished.' if result.get('ok')
+                                else 'Melt-quench finished with problems.')
+        self._show_quench_report(result)
+
+    def _on_quench_run_failed(self, message: str) -> None:
+        self._finish_quench_run('Melt-quench failed.')
+        self.issues.setPlainText(message)
+        QMessageBox.warning(self, 'Melt-quench failed', message)
+
+    def _on_quench_run_cancelled(self) -> None:
+        self._finish_quench_run('Melt-quench cancelled; nothing was imported.')
+
+    def _show_quench_report(self, result: dict) -> None:
+        lines = [f"Ran {plural(result.get('ran', 0), 'member')}.",
+                 f"Imported into the library: {len(result.get('imported', []))}.",
+                 f"Already there: {len(result.get('unchanged', []))}."]
+        lines += result.get('problems', [])
+        lines += result.get('warnings', [])
+        text = '\n'.join(lines)
+        self.issues.setPlainText(text)
+        (QMessageBox.information if result.get('ok') else QMessageBox.warning)(
+            self, 'Melt-quench result', text)
+
+    def _import_quench_results(self) -> None:
+        """File > Import quench results: ``quench import ROOT`` on a finished root."""
+        chosen = QFileDialog.getExistingDirectory(
+            self, 'Choose a finished quench root', str(self.workspace.runs_dir))
+        if not chosen:
+            return
+        # pylint: disable-next=import-outside-toplevel
+        from ..builders.construction.amorphous import import_quench_root
+        try:
+            report = import_quench_root(Path(chosen), source='hpc')
+        except Exception as exc:  # pylint: disable=broad-except
+            QMessageBox.critical(self, 'Could not import', str(exc))
+            return
+        problems = [f"{Path(m).name}: refused: {why}" for m, why in report.refused]
+        problems += [f"{Path(m).name}: incomplete: {why}" for m, why in report.incomplete]
+        self._show_quench_report({
+            'ok': not problems, 'ran': 0,
+            'imported': [str(p) for p in report.imported],
+            'unchanged': [str(p) for p in report.unchanged],
+            'problems': problems, 'warnings': list(report.warnings)})
 
 
 def choose_workspace(parent=None) -> Optional[Path]:

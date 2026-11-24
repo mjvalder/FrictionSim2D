@@ -22,7 +22,7 @@ from .settings_file import Identity
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['AssembledSystem', 'ComponentSlice', 'assemble']
+__all__ = ['AssembledSystem', 'ComponentSlice', 'assemble', 'assemble_data_file']
 
 #: Group id used for atoms whose component could not be determined.
 UNGROUPED = -1
@@ -94,17 +94,50 @@ class AssembledSystem:
         return result
 
 
-def _read_component(path: Path) -> Tuple[np.ndarray, np.ndarray]:
-    """Positions and type ids from a LAMMPS data file."""
+def _load(path: Path):
+    """The data collection of a LAMMPS data file, read by ovito."""
     from ovito.io import import_file  # noqa: PLC0415  (keeps import cost off module load)
 
-    data = import_file(str(path)).compute()
+    return import_file(str(path)).compute()
+
+
+def _positions_and_types(data) -> Tuple[np.ndarray, np.ndarray]:
     positions = np.asarray(data.particles['Position'], dtype=float).copy()
     if 'Particle Type' in data.particles:
         types = np.asarray(data.particles['Particle Type'], dtype=int).copy()
     else:
         types = np.ones(len(positions), dtype=int)
     return positions, types
+
+
+def _read_component(path: Path) -> Tuple[np.ndarray, np.ndarray]:
+    """Positions and type ids from a LAMMPS data file."""
+    return _positions_and_types(_load(path))
+
+
+def assemble_data_file(path: Path, name: str,
+                       elements: Optional[Sequence[str]] = None) -> AssembledSystem:
+    """One LAMMPS data file as a system: the quench family's crystal slab.
+
+    There is no assembly script to apply, so the file's own atoms and box are
+    shown as they are, as one component. ``elements`` names the types in order.
+    """
+    data = _load(path)
+    positions, types = _positions_and_types(data)
+    matrix = np.asarray(data.cell[...], dtype=float)
+    lo = matrix[:, 3]
+    hi = lo + np.diag(matrix[:, :3])
+    legend = {i + 1: str(e) for i, e in enumerate(elements or ())}
+    return AssembledSystem(
+        positions=positions, type_ids=types,
+        group_ids=np.zeros(len(positions), dtype=int),
+        cell=(float(lo[0]), float(hi[0]), float(lo[1]), float(hi[1]),
+              float(lo[2]), float(hi[2])),
+        components=[ComponentSlice(name=name, group_id=0, first=0, count=len(positions),
+                                   type_ids=sorted(int(t) for t in np.unique(types)),
+                                   source=path)],
+        legend={t: legend.get(t, str(t)) for t in {int(t) for t in np.unique(types)}},
+    )
 
 
 def _component_name(placement: Placement,
@@ -135,8 +168,9 @@ def assemble(assembly: Assembly, identity: Optional[Identity] = None) -> Assembl
 
     Returns:
         An :class:`AssembledSystem`. Components that do not resolve -- run-time
-        state files, or a component skipped because its amorphous structure was
-        not cached -- are recorded in ``warnings`` and omitted.
+        state files, or a file that is not there -- are recorded in ``warnings``
+        and omitted. (A missing amorphous block never reaches here: the build
+        raises before writing anything.)
     """
     identity = identity or Identity()
 

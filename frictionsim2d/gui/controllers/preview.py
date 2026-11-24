@@ -23,7 +23,7 @@ from PySide6.QtCore import QObject, QProcess, Signal
 from ...core.config import write_config
 from ...run.expand import expand_config_sweeps
 from .staged_paths import absolutize_staged_paths
-from ..preview.assemble import AssembledSystem, assemble
+from ..preview.assemble import AssembledSystem, assemble, assemble_data_file
 from ..preview.init_script import parse_assembly
 from ..preview.settings_file import parse_identity
 from ..workspace import Workspace
@@ -271,6 +271,10 @@ class PreviewController(QObject):
         #: sweep -- set in `start`, read back by the caller once the build
         #: settles, so the shown material is never a silent, arbitrary choice.
         self.current_label: Optional[str] = None
+        #: The failed build's result payload (``quench_command``,
+        #: ``quench_members`` after an ``AmorphousMissing``), set just before
+        #: ``failed`` is emitted; empty otherwise.
+        self.last_failure: Dict[str, Any] = {}
 
     @property
     def running(self) -> bool:
@@ -291,6 +295,7 @@ class PreviewController(QObject):
 
         config = request.single_member()
         self.current_label = request.preview_label()
+        self.last_failure = {}
 
         key = request.key()
         directory = self.workspace.preview_path(key)
@@ -411,7 +416,23 @@ class PreviewController(QObject):
             return
 
         if not result.get('ok'):
+            self.last_failure = result
             self.failed.emit(result.get('error', 'the preview build failed'))
+            return
+        self.last_failure = {}
+
+        if result.get('crystal_block'):
+            # A quench config: the crystal slab, no assembly script behind it.
+            try:
+                system = assemble_data_file(
+                    Path(result['crystal_block']), result.get('material', 'crystal'),
+                    result.get('elements'))
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.exception("Failed to read the crystal slab")
+                self.failed.emit(f"Could not read the crystal slab: {exc}")
+                return
+            self.current_label = result.get('label') or self.current_label
+            self.finished.emit(system)
             return
 
         try:

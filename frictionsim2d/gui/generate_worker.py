@@ -3,7 +3,7 @@
 Separate from the preview worker because the two differ in what they are
 allowed to do: this one runs the full sweep and may emit HPC scripts. Neither
 ever melt-quenches: a missing amorphous block comes back as an error carrying
-the ``run quench --for`` command.
+the ``run quench --for`` command, and a quench config only has its decks written.
 
 Invoked as ``python -m frictionsim2d.gui.generate_worker <request.json>``.
 """
@@ -44,6 +44,13 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
         return {'ok': False, 'created': [], 'requested': 0, 'simulation_root': None,
                 'failures': [], 'error': str(exc), **exc.as_payload()}
 
+    if request['model'] == 'quench' and not result.created and not result.failures:
+        return {'ok': False, 'created': [], 'requested': 0, 'simulation_root': None,
+                'failures': [], 'nothing_to_make': True,
+                'error': ('Every block this config describes is already in the library, '
+                          'so no job was written. Use `run quench --force` to make one '
+                          'again anyway.')}
+
     payload: Dict[str, Any] = {
         'ok': bool(result.created),
         'created': [str(p) for p in result.created],
@@ -52,6 +59,9 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
         'failures': [f.render() for f in result.failures],
     }
 
+    if request['model'] == 'quench':
+        payload['members'] = [{'material': c['material'], 'key8': c['key8']}
+                              for c in result.configs]
     if result.simulation_root and result.created:
         payload['jobs'] = count_generated_jobs(result.simulation_root)
 

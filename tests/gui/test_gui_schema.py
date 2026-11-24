@@ -31,16 +31,19 @@ from frictionsim2d.gui.schema.simulation_types import (
 
 ROOT_MODELS = [AFMSimulationConfig, SheetOnSheetSimulationConfig]
 ALL_MODELS = sorted(MODES)
+#: The five friction models; a quench has no sheet, `[general]` or `[2D-2]`.
+FRICTION_MODELS = [m for m in ALL_MODELS if m != 'quench']
 
 
 class TestSimulationTypes:
-    """Two families with modes, not five flat types."""
+    """Three families with modes, not six flat types."""
 
-    def test_two_families(self):
-        assert [f.key for f in FAMILIES] == ['afm', 'sheetonsheet']
+    def test_three_families(self):
+        assert [f.key for f in FAMILIES] == ['afm', 'sheetonsheet', 'amorphous']
 
     def test_every_cli_model_is_reachable(self):
-        assert set(MODES) == {'afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet'}
+        assert set(MODES) == {'afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet',
+                              'quench'}
 
     def test_afm_family_modes(self):
         assert [m.model for m in modes_for_family('afm')] == ['afm', 'indent', 'pes_tip']
@@ -49,16 +52,16 @@ class TestSimulationTypes:
         assert [m.model for m in modes_for_family('sheetonsheet')] == \
             ['sheetonsheet', 'pes_sheet']
 
-    def test_only_pes_tip_lacks_a_system_phase(self):
-        """It writes no system.in at all; the others share the indentation phase."""
+    def test_only_pes_tip_and_quench_lack_a_system_phase(self):
+        """The PES tip scan writes no system.in; a quench has no tip to indent."""
         without = [m for _, m in MODES.values() if not m.has_system_phase]
-        assert [m.model for m in without] == ['pes_tip']
+        assert [m.model for m in without] == ['pes_tip', 'quench']
 
     def test_only_the_afm_family_has_layer_levels(self):
         assert family_for_model('indent').has_layer_levels
         assert not family_for_model('pes_sheet').has_layer_levels
 
-    @pytest.mark.parametrize('model', ALL_MODELS)
+    @pytest.mark.parametrize('model', FRICTION_MODELS)
     def test_sections_include_the_family_basics(self, model):
         sections = sections_for(model)
         assert '2D' in sections and 'general' in sections
@@ -117,7 +120,7 @@ class TestSectionOrder:
     def test_lattice_matching_sits_beside_the_sheets(self):
         assert overrides_for('sheetonsheet')['lattice_match'].order == 2
 
-    @pytest.mark.parametrize('model', ALL_MODELS)
+    @pytest.mark.parametrize('model', FRICTION_MODELS)
     def test_no_two_sections_claim_the_same_slot(self, model):
         """`ConfigDocument.sections()` sorts on this number alone, so a
         collision leaves the order of the two colliding sections undefined.

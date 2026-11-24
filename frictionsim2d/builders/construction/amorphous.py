@@ -929,13 +929,38 @@ def member_dirs(root: PathLike) -> List[Path]:
 
 # ---------------------------------------------------------------- running locally
 
+#: The ``lmp`` child of :func:`run_lmp_serial` while it runs, so a caller that is being
+#: cancelled (the GUI's quench worker) can stop it instead of orphaning hours of MD.
+_ACTIVE_LMP: Optional[subprocess.Popen] = None
+
+
 def run_lmp_serial(deck: str, log: str, cwd: Path) -> None:
     """``lmp -in DECK -log LOG`` from ``cwd``, serially.
 
     Serial, deliberately: ``lmp`` links no MPI, so ``mpiexec -np N lmp`` runs N
     identical melt-quenches at once (N x runtime and memory for one result).
+
+    Raises:
+        subprocess.CalledProcessError: ``lmp`` exited non-zero.
+        OSError: ``lmp`` could not be started.
     """
-    subprocess.run(['lmp', '-in', deck, '-log', log], cwd=str(cwd), check=True)
+    global _ACTIVE_LMP  # pylint: disable=global-statement
+    command = ['lmp', '-in', deck, '-log', log]
+    with subprocess.Popen(command, cwd=str(cwd)) as child:
+        _ACTIVE_LMP = child
+        try:
+            code = child.wait()
+        finally:
+            _ACTIVE_LMP = None
+    if code:
+        raise subprocess.CalledProcessError(code, command)
+
+
+def stop_active_lmp() -> None:
+    """Kill the ``lmp`` that :func:`run_lmp_serial` is waiting on, if any."""
+    child = _ACTIVE_LMP
+    if child is not None and child.poll() is None:
+        child.kill()
 
 
 def run_quench_root_local(root: PathLike) -> Tuple[List[Path], List[Tuple[Path, str]]]:

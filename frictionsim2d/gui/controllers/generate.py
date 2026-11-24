@@ -1,8 +1,9 @@
 """Generating the real simulation package.
 
-Unlike the preview this is the deliverable, so it runs the full sweep, may emit
-HPC scripts, and is allowed to generate a missing amorphous structure -- that is
-a deliberate act here, rather than a side effect of clicking Render.
+Unlike the preview this is the deliverable, so it runs the full sweep and may
+emit HPC scripts. It never melt-quenches: a missing amorphous block comes back
+as a failure carrying the ``run quench --for`` command (see ``last_failure``),
+and a quench config only has its job decks written.
 
 Runs in a subprocess for the same reasons as the preview: it can be cancelled,
 and a LAMMPS abort cannot take the application down.
@@ -61,6 +62,9 @@ class GenerateController(QObject):
         self._process: Optional[QProcess] = None
         self._result_file: Optional[Path] = None
         self._cancelled = False
+        #: The failed result payload (``quench_command``/``quench_members`` after
+        #: an ``AmorphousMissing``), set just before ``failed`` is emitted.
+        self.last_failure: Dict[str, Any] = {}
 
     @property
     def running(self) -> bool:
@@ -97,6 +101,7 @@ class GenerateController(QObject):
 
         self._result_file = result_file
         self._cancelled = False
+        self.last_failure = {}
         self.started.emit()
 
         process = QProcess(self)
@@ -151,4 +156,5 @@ class GenerateController(QObject):
         if result.get('ok'):
             self.finished.emit(result)
         else:
+            self.last_failure = result
             self.failed.emit(result.get('error', 'generation failed'))

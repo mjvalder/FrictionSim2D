@@ -21,8 +21,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
+from pydantic import ValidationError
+
 from ...core.config import (
     AFMSimulationConfig,
+    QuenchSimulationConfig,
     SheetConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
@@ -43,6 +46,7 @@ from ..schema.overrides import override_for_section, overrides_for
 from ..schema.simulation_types import MODES, sections_for
 from .interlayer import interlayer_issues
 from .materials import STRUCTURE_EXTENSION
+from .quench import QUENCH_MODEL, plan_quench
 
 __all__ = ['ConfigDocument', 'DocumentError', 'ExpansionDirs',
            'hetero_support_error']
@@ -174,6 +178,8 @@ def root_model_for(model: str):
     """The pydantic root model a simulation model validates against."""
     from ...run.naming import AFM_LIKE_MODELS  # noqa: PLC0415
 
+    if model == QUENCH_MODEL:
+        return QuenchSimulationConfig
     return AFMSimulationConfig if model in AFM_LIKE_MODELS else SheetOnSheetSimulationConfig
 
 
@@ -643,6 +649,9 @@ class ConfigDocument:
         with no file for its elements, or LJ + Gaussian on a material with no
         g, lands on the field to fill in rather than as an unlocated message.
         """
+        if self.model == QUENCH_MODEL:
+            return self._validate_quench(settings)
+
         payload = self.normalised_values()
         payload['settings'] = (settings or load_settings()).model_dump()
         result = self._validate_styles(payload)
@@ -678,6 +687,31 @@ class ConfigDocument:
         self.pending_template_issues = pending
         hard.extend(self._probe_issues(payload, hard))
         return ConfigValidation(issues=hard, config=result.config)
+
+    def _validate_quench(self, settings=None) -> ConfigValidation:
+        """A quench config: the model, then what ``run quench`` would build.
+
+        Expanding the members is what checks that the potential and CIF exist
+        and that the conditions give a positive quench length, with the CLI's
+        own message, so Generate refuses exactly what ``run quench`` refuses.
+        """
+        self.pending_template_issues = []
+        payload = self.normalised_values()
+        result = validate_config(payload, root_model_for(self.model),
+                                 base_dir=self.base_dir, skip_preflight=True)
+        if not result.ok:
+            return result
+        try:
+            plan_quench(payload['quench'], settings or load_settings(), self.base_dir)
+        except (ValueError, OSError) as exc:
+            text = str(exc)
+            key = ('potential' if 'potential' in text else
+                   'cif' if 'CIF' in text else
+                   'quench_rate' if 'quench_rate' in text else
+                   'slab' if 'slab' in text else None)
+            result.issues.append(ConfigIssue(
+                message=text, section='quench', key=key, kind='error'))
+        return result
 
     def _validate_styles(self, payload: Dict[str, Any]) -> ConfigValidation:
         """`_validate_payload`, once per style of an `interlayer_style` sweep.
@@ -1107,12 +1141,35 @@ class ConfigDocument:
             return (None, None, None)
         return (Path(cif).parent, Path(pot).parent, Path(pot).suffix)
 
-    def expansion(self) -> ExpansionSummary:
-        """How many configs, builds and jobs this would generate."""
+    def _quench_plan(self, settings=None):
+        """`plan_quench` of this document's ``[quench]`` section.
+
+        Raises:
+            ValueError: the section is incomplete or invalid. The message is
+                short; `validate` reports the field-by-field detail.
+        """
+        try:
+            return plan_quench(self.normalised_values().get('quench', {}),
+                               settings or load_settings(), self.base_dir)
+        except ValidationError as exc:
+            raise ValueError('the [quench] section is incomplete (see the messages '
+                             'above)') from exc
+
+    def expansion(self, settings=None) -> ExpansionSummary:
+        """How many configs, builds and jobs this would generate.
+
+        For a quench document ``settings`` matters: the conditions left empty
+        come from it, and they decide which blocks the library already has.
+        """
+        if self.model == QUENCH_MODEL:
+            plan = self._quench_plan(settings)
+            count = len(plan.members)
+            return ExpansionSummary(configs=count, builds=count, jobs=count,
+                                    notes=plan.notes())
         return count_expansion(self.normalised_values(), self.model,
                                base_dir=self.base_dir)
 
-    def expansion_output_dirs(self) -> ExpansionDirs:
+    def expansion_output_dirs(self, settings=None) -> ExpansionDirs:
         """Output directory each expanded config would build into.
 
         Uses the same expansion `expansion()` counts, mapped through the
@@ -1136,6 +1193,14 @@ class ConfigDocument:
         unexpected -- still without taking the window down, because this runs
         on the GUI thread.
         """
+        if self.model == QUENCH_MODEL:
+            try:
+                plan = self._quench_plan(settings)
+            except (ValueError, OSError, KeyError) as exc:
+                return ExpansionDirs([], str(exc))
+            # pylint: disable-next=import-outside-toplevel
+            from ...builders.construction.amorphous import member_rel_dir
+            return ExpansionDirs([member_rel_dir(m) for m in plan.members])
         try:
             expanded = expand_config_sweeps(
                 self.normalised_values(), self.base_dir, model=self.model)
@@ -1160,6 +1225,8 @@ class ConfigDocument:
 
     def unsupported_lists(self) -> List[Tuple[str, str]]:
         """Fields holding a list that cannot be swept."""
+        if self.model == QUENCH_MODEL:
+            return []  # every [quench] condition is a product axis
         return [
             (section, key)
             for section, values in self.values.items()
