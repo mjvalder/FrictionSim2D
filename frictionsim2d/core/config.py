@@ -1105,6 +1105,34 @@ def _check_mlip_interlayer_choice(config: Any) -> None:
         "and dispersion = d3 for the vdW term (documentation/mlip.md).")
 
 
+def _check_sheet_sections_agree(config: Any) -> None:
+    """Require every sheet section of a hetero or flake cell to agree on its D3 settings.
+
+    ``dispersion`` and ``allow_unbound`` are properties of the whole cell, but the
+    builders read them from the first sheet only, so a disagreeing section would
+    be silently ignored (or wrongly refused).
+
+    Raises:
+        ValueError: Naming the sections that disagree.
+    """
+    sheets = list(getattr(config, 'sheets', None) or [])
+    flake_sheets = list(getattr(config, 'flake_sheets', None) or [])
+    if len(sheets) < 2 and not flake_sheets:
+        return
+    if len(sheets) >= 2:
+        labelled = [(f"[2D-{i}]", sh) for i, sh in enumerate(sheets, 1)]
+    else:
+        labelled = [("[2D]", config.sheet)]
+    labelled += [(f"[Flake-{i}]", sh) for i, sh in enumerate(flake_sheets, 1)]
+    for field in ('dispersion', 'allow_unbound'):
+        values = {label: getattr(sh, field) for label, sh in labelled}
+        if len(set(values.values())) > 1:
+            listed = ', '.join(f"{label} {field} = {value}" for label, value in values.items())
+            raise ValueError(
+                f"{field} is a property of the whole cell, so every sheet section "
+                f"must set it identically; got {listed}. See documentation/mlip.md.")
+
+
 class _InterlayerChecked(BaseModel):
     """Mixin: reject interlayer settings that cannot produce a valid run."""
 
@@ -1115,6 +1143,12 @@ class _InterlayerChecked(BaseModel):
         _check_mlip_interlayer_choice(self)
         base_dir = info.context.get('base_dir') if isinstance(info.context, dict) else None
         check_interlayer_choice(self, base_dir)
+        return self
+
+    @model_validator(mode='after')
+    def _check_sheet_sections_agree(self):
+        """Refuse hetero/flake sheet sections that disagree on dispersion or allow_unbound."""
+        _check_sheet_sections_agree(self)
         return self
 
 

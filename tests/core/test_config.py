@@ -1249,3 +1249,50 @@ def test_empty_amorph_reads_as_crystalline_on_tip_and_substrate(tmp_path):
     common = dict(mat='Si', pot_type='sw', pot_path=str(pot), cif_path=str(cif), amorph=None)
     assert TipConfig(**common, r=10.0).amorph == 'c'
     assert SubstrateConfig(**common, thickness=10.0).amorph == 'c'
+
+
+class TestSheetSectionsAgreeOnDispersion:
+    """dispersion / allow_unbound are cell properties, read from the first sheet only."""
+
+    @staticmethod
+    def _sheet(tmp_path, **over):
+        model = tmp_path / 'dpa.pth'
+        model.write_bytes(b'\x00')
+        base = dict(mat='h-MoS2', pot_type='deepmd', pot_path=str(model),
+                    cif_path=str(Path(__file__).resolve().parents[2]
+                                 / 'examples' / 'materials' / 'h-MoS2.cif'),
+                    x=30.0, y=30.0, layers=[1], lat_c=6.112)
+        base.update(over)
+        return base
+
+    def _config(self, tmp_path, sections):
+        from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
+        return SheetOnSheetSimulationConfig(**{
+            'general': {'temp': 300.0, 'pressure': 1.0},
+            **sections, 'settings': load_settings().model_dump()})
+
+    def test_hetero_sections_disagreeing_on_dispersion_name_both(self, tmp_path):
+        with pytest.raises(ValidationError, match=r'\[2D-1\] dispersion = d3.*\[2D-2\] dispersion = none'):
+            self._config(tmp_path, {
+                '2D-1': self._sheet(tmp_path, dispersion='d3'),
+                '2D-2': self._sheet(tmp_path, dispersion='none')})
+
+    def test_hetero_sections_disagreeing_on_allow_unbound(self, tmp_path):
+        with pytest.raises(ValidationError, match=r'allow_unbound.*\[2D-2\] allow_unbound = True'):
+            self._config(tmp_path, {
+                '2D-1': self._sheet(tmp_path),
+                '2D-2': self._sheet(tmp_path, allow_unbound=True)})
+
+    def test_flake_section_must_agree_with_the_sheet(self, tmp_path):
+        with pytest.raises(ValidationError, match=r'\[2D\] dispersion = d3.*\[Flake-1\] dispersion = none'):
+            self._config(tmp_path, {
+                '2D': self._sheet(tmp_path, dispersion='d3'),
+                'Flake': {'shape': 'hexagon', 'edge_length': 5.0},
+                'Flake-1': self._sheet(tmp_path, dispersion='none'),
+                'Flake-2': self._sheet(tmp_path, dispersion='none')})
+
+    def test_agreeing_sections_are_accepted(self, tmp_path):
+        cfg = self._config(tmp_path, {
+            '2D-1': self._sheet(tmp_path, dispersion='d3'),
+            '2D-2': self._sheet(tmp_path, dispersion='d3')})
+        assert len(cfg.sheets) == 2
