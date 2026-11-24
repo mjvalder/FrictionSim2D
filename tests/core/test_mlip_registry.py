@@ -478,3 +478,10 @@ def test_register_hetero_potentials_emits_the_d3_overlay(tmp_path):
 
     assert 'pair_style hybrid/overlay deepmd' in _text('d3')
     assert 'dispersion/d3' not in _text('none')
+
+
+def test_coeff_line_non_hybrid_drops_the_style_token():
+    assert get_mlip("mace").coeff_line("", "m.json", ["Mo", "S"], hybrid=False) == \
+        "pair_coeff * * m.json Mo S"
+    assert get_mlip("deepmd").coeff_line(" 2", "m.pth", ["Mo", "S"], hybrid=False) == \
+        "pair_coeff * * Mo S"

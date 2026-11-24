@@ -200,22 +200,8 @@ def render_deck(
         spec = get_mlip(fw)
         style = spec.style_token(model_path)
         if d3 is None:
-            # NON-HYBRID form. `MLIPSpec.coeff_line` emits the *hybrid* form,
-            # which names the sub-style ("pair_coeff * * deepmd Mo S ...").
-            # Outside `pair_style hybrid` that leading token is not a sub-style
-            # selector, so BOTH frameworks must drop it:
-            #   deepmd -- pair_deepmd reads it as an element and dies with
-            #     "element deepmd not found in the model" (pair_deepmd.cpp:860);
-            #   symmetrix/mace -- it is read as the model filename and the
-            #     pair_style is rejected (measured 2026-08-24).
-            # What survives differs only because deepmd carries its model path
-            # in the pair_style line and symmetrix carries it in pair_coeff.
             lines.append(f"pair_style {style}")
-            if spec.model_in_style_line:      # deepmd: model already in style
-                lines.append(f"pair_coeff * * {' '.join(elements)}")
-            else:                             # symmetrix: model path, no token
-                lines.append(
-                    f"pair_coeff * * {model_path} {' '.join(elements)}")
+            lines.append(spec.coeff_line("", model_path, list(elements), hybrid=False))
         else:
             lines.append(f"pair_style hybrid/overlay {style} {d3_style_token(d3)}")
             lines.append(spec.coeff_line("", model_path, list(elements)))

@@ -17,7 +17,7 @@ import shutil
 
 from ..core.config import ComponentConfig, GlobalSettings
 from ..core.mlip import (MLIP_MODEL_EXTENSIONS, d3_coeff_line, d3_style_token,
-                         get_mlip, is_mlip, mlip_by_style, model_elements)
+                         get_mlip, is_mlip, model_elements)
 from ..core.utils.structures import cifread, count_atomtypes
 from ..core.utils.tokens import normalize_element_symbol
 from .utils import (
@@ -909,7 +909,7 @@ class PotentialManager:
         atom_list[v_idx] = get_mlip(pot_type).virtual_atom_element
         return atom_list
 
-    def _mlip_self_interaction_lines(self) -> List[str]:
+    def _mlip_self_interaction_lines(self, hybrid: bool = True) -> List[str]:
         """Materialise the single ``pair_coeff`` line an MLIP cell needs.
 
         Deferred to write time deliberately: the full type map has to span
@@ -963,7 +963,7 @@ class PotentialManager:
         # full-cell MLIP is never a numbered hybrid sub-style.
         index_str = f" {self.potential_indices[pot_type]}" \
             if self.potential_usage[pot_type] > 1 else ""
-        cmd = get_mlip(pot_type).coeff_line(index_str, pot_path, atom_list)
+        cmd = get_mlip(pot_type).coeff_line(index_str, pot_path, atom_list, hybrid=hybrid)
         return [f"{cmd} # {', '.join(self._mlip_components[pot_type])}"]
 
     def _check_model_covers(self, pot_type: str, atom_list: List[str]) -> None:
@@ -997,9 +997,15 @@ class PotentialManager:
             f"{' '.join(sorted(set(atom_list)))}`. See the v6 spec §4."
         )
 
-    def _all_self_interaction_lines(self) -> List[str]:
-        """Every self-interaction line, MLIP ones materialised at write time."""
-        return self._mlip_self_interaction_lines() + self.self_interaction_commands
+    def _all_self_interaction_lines(self, hybrid: bool = True) -> List[str]:
+        """Every self-interaction line, MLIP ones materialised at write time.
+
+        Classical lines are always stored in their hybrid form; outside
+        ``pair_style hybrid`` the style name and index are dropped here.
+        """
+        classical = (self.self_interaction_commands if hybrid else
+                     [self._strip_hybrid_prefix(cmd) for cmd in self.self_interaction_commands])
+        return self._mlip_self_interaction_lines(hybrid) + classical
 
     def _is_mlip_component(self, name: str) -> bool:
         """True if ``name`` is a registered component using an MLIP."""
@@ -1644,6 +1650,11 @@ class PotentialManager:
             String with group commands, one per line.
         """
         lines = []
+
+        def add_group(group: str, ids) -> None:
+            if ids:
+                lines.append(f"group {group} type {' '.join(map(str, ids))}")
+
         has_langevin = False
         langevin_thermo_groups = []
         for comp in self.components.values():
@@ -1654,9 +1665,7 @@ class PotentialManager:
             all_types = self.types.ids_by_component(name)
 
             if name == 'sheet':
-                if all_types:
-                    types_str = ' '.join(map(str, all_types))
-                    lines.append(f"group 2D_all type {types_str}")
+                add_group("2D_all", all_types)
 
                 core_types = [
                     atype.type_id for atype in self.types
@@ -1667,13 +1676,8 @@ class PotentialManager:
                     if atype.component == name and atype.region == 'edge'
                 ]
 
-                if core_types:
-                    types_str = ' '.join(map(str, core_types))
-                    lines.append(f"group 2D_core type {types_str}")
-
-                if edge_types:
-                    types_str = ' '.join(map(str, edge_types))
-                    lines.append(f"group 2D_edge type {types_str}")
+                add_group("2D_core", core_types)
+                add_group("2D_edge", edge_types)
 
                 # Layer groups for EVERY layer count, monolayers included:
                 # the registry's comx_L1... channels reference layer_1
@@ -1703,23 +1707,14 @@ class PotentialManager:
                         elif atype.region == 'thermo':
                             thermo_types.append(atype.type_id)
 
-                if all_types:
-                    types_str = ' '.join(map(str, sorted(all_types)))
-                    lines.append(f"group {name}_all type {types_str}")
-
-                if fix_types:
-                    types_str = ' '.join(map(str, sorted(fix_types)))
-                    lines.append(f"group {name}_fix type {types_str}")
-
+                add_group(f"{name}_all", sorted(all_types))
+                add_group(f"{name}_fix", sorted(fix_types))
+                add_group(f"{name}_thermo", sorted(thermo_types))
                 if thermo_types:
-                    types_str = ' '.join(map(str, sorted(thermo_types)))
-                    lines.append(f"group {name}_thermo type {types_str}")
                     langevin_thermo_groups.append(f"{name}_thermo")
 
             else:
-                if all_types:
-                    types_str = ' '.join(map(str, all_types))
-                    lines.append(f"group {name}_all type {types_str}")
+                add_group(f"{name}_all", all_types)
 
         if has_langevin and langevin_thermo_groups:
             lines.append(f"group mobile union {' '.join(langevin_thermo_groups)}")
@@ -1752,48 +1747,40 @@ class PotentialManager:
 
         return cmd
 
-    @staticmethod
-    def _strip_non_hybrid_prefix(cmd: str) -> str:
-        """Rewrite a self-interaction pair_coeff for a non-hybrid pair_style.
+    def _pair_style_parts(self, has_lj: bool) -> List[str]:
+        """The ``pair_style`` sub-style tokens, in emission order.
 
-        Classical lines go through :meth:`_strip_hybrid_prefix` (drop the style
-        name and index, keep the potential file). MLIP lines must NOT, because
-        that routine locates the potential file as "the first token from index
-        3 containing ``/`` or ``.``" -- a heuristic both frameworks defeat, in
-        opposite directions:
-
-        * ``pair_coeff * * symmetrix/mace model.json Mo S`` -- the STYLE token
-          contains a ``/``, so the heuristic stops on it and returns the line
-          untouched, leaving the style token in place.
-        * ``pair_coeff * * deepmd Mo S`` -- no token matches at all (the model
-          path lives in the pair_style line), so it again returns the line
-          untouched, leaving ``deepmd`` in place.
-
-        Either way the style token survives into a non-hybrid deck, which is
-        exactly what must not happen. Dropping ``tokens[3]`` unconditionally is
-        correct for both, and both forms are the ones the Milestone-0 decks
-        use:
-
-        * deepmd -- model path is in the ``pair_style`` line, so the non-hybrid
-          coeff line is a bare type map: ``pair_coeff * * Mo S`` (see
-          ``scripts/milestone0/m0_4_virtual_exclude.in``, deepmd variant).
-        * mace (symmetrix) -- the model path is in the coeff line and the
-          style token is DROPPED: ``pair_coeff * * model.json Mo S``. Keeping
-          it (``pair_coeff * * symmetrix/mace model.json ...``) makes LAMMPS
-          read ``symmetrix/mace`` as the model filename and fail. Verified
-          2026-08-24 on an h-MoS2 trilayer.
+        ReaxFF always carries ``NULL`` plus its keywords. MLIPs take their
+        argument string from the registry (deepmd carries the model path here;
+        symmetrix/mace carries neither -- its model path goes in the pair_coeff
+        line and it takes no style keywords).
         """
-        parts = cmd.split('#', 1)
-        main = parts[0].strip()
-        comment = f" # {parts[1].strip()}" if len(parts) > 1 else ""
+        style_parts = []
+        for pot_type, count in self.potential_usage.items():
+            for _ in range(count):
+                if pot_type.lower() in REAXFF_TYPES:
+                    safezone = self.settings.potential.reaxff_safezone
+                    mincap = self.settings.potential.reaxff_mincap
+                    style_parts.append(
+                        f"{pot_type} NULL safezone {safezone} mincap {mincap}"
+                    )
+                elif is_mlip(pot_type):
+                    style_parts.append(
+                        get_mlip(pot_type).style_token(
+                            self._mlip_model_paths.get(pot_type, '')
+                        )
+                    )
+                else:
+                    style_parts.append(pot_type)
 
-        tokens = main.split()
-        if len(tokens) > 3 and mlip_by_style(tokens[3]) is not None:
-            # Drop the sub-style selector token; whatever follows (a model
-            # path for symmetrix/mace, nothing for deepmd) is already correct.
-            return f"{' '.join(tokens[:3] + tokens[4:])}{comment}"
+        # D3 sits next to the potential it overlays, before the LJ sub-style.
+        if self.d3_enabled:
+            style_parts.append(d3_style_token(self.settings))
 
-        return PotentialManager._strip_hybrid_prefix(cmd)
+        if has_lj:
+            style_parts.append(f"lj/cut {self.settings.potential.lj_cutoff}")
+        style_parts.extend(self._interlayer_style_parts())
+        return style_parts
 
     def write_file(self, output_path: Path):
         """Write the complete potential settings file.
@@ -1801,10 +1788,6 @@ class PotentialManager:
         Args:
             output_path: Path for the output file (e.g., system.in.settings).
         """
-        lj_cutoff = self.settings.potential.lj_cutoff
-        # Materialise MLIP lines BEFORE opening the file: a non-uniform cell
-        # raises here (v6 §4), and it must not leave a half-written deck behind.
-        self_interaction_lines = self._all_self_interaction_lines()
         # An MLIP's `pair_coeff * *` already spans EVERY type including the
         # virtual drive atom: no NULL type map is possible for an MLIP, so
         # _mlip_atom_list fills the virtual slot with the framework's
@@ -1827,36 +1810,10 @@ class PotentialManager:
         use_hybrid = ((not self._is_single_potential())
                       or virtual_needs_lj
                       or overlay)
-
-        # Build pair_style parts; ReaxFF needs NULL + keywords when in hybrid,
-        # and MLIPs get their argument string from the registry (deepmd carries
-        # the model path here; symmetrix/mace carries neither -- its model path
-        # goes in the pair_coeff line and it takes no style keywords).
-        style_parts = []
-        for pot_type, count in self.potential_usage.items():
-            for _ in range(count):
-                if use_hybrid and pot_type.lower() in REAXFF_TYPES:
-                    safezone = self.settings.potential.reaxff_safezone
-                    mincap = self.settings.potential.reaxff_mincap
-                    style_parts.append(
-                        f"{pot_type} NULL safezone {safezone} mincap {mincap}"
-                    )
-                elif is_mlip(pot_type):
-                    style_parts.append(
-                        get_mlip(pot_type).style_token(
-                            self._mlip_model_paths.get(pot_type, '')
-                        )
-                    )
-                else:
-                    style_parts.append(pot_type)
-
-        # D3 sits next to the potential it overlays, before the LJ sub-style.
-        if self.d3_enabled:
-            style_parts.append(d3_style_token(self.settings))
-
-        if has_lj:
-            style_parts.append(f"lj/cut {lj_cutoff}")
-        style_parts.extend(self._interlayer_style_parts())
+        # Materialise MLIP lines BEFORE opening the file: a non-uniform cell
+        # raises here, and it must not leave a half-written deck behind.
+        self_interaction_lines = self._all_self_interaction_lines(use_hybrid)
+        style_parts = self._pair_style_parts(has_lj)
 
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1881,25 +1838,12 @@ class PotentialManager:
                 hybrid_style = 'hybrid/overlay' if overlay else 'hybrid'
                 f.write(f"pair_style {hybrid_style} {' '.join(style_parts)}\n")
             elif style_parts:
-                pot = style_parts[0]
-                if pot.lower() in REAXFF_TYPES:
-                    safezone = self.settings.potential.reaxff_safezone
-                    mincap = self.settings.potential.reaxff_mincap
-                    f.write(
-                        f"pair_style {pot} NULL"
-                        f" safezone {safezone}"
-                        f" mincap {mincap}\n"
-                    )
-                else:
-                    f.write(f"pair_style {pot}\n")
+                f.write(f"pair_style {style_parts[0]}\n")
 
             if self_interaction_lines:
                 f.write("# Self-interactions (intra-component)\n")
                 for cmd in self_interaction_lines:
-                    if use_hybrid:
-                        f.write(f"{cmd}\n")
-                    else:
-                        f.write(f"{self._strip_non_hybrid_prefix(cmd)}\n")
+                    f.write(f"{cmd}\n")
                 f.write("\n")
 
             if self.d3_enabled:

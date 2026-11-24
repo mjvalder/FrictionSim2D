@@ -87,21 +87,32 @@ class MLIPSpec:
         return self.style_token_name
 
     def coeff_line(self, index_str: str, model_path: str,
-                   atom_list: Sequence[str]) -> str:
+                   atom_list: Sequence[str], hybrid: bool = True) -> str:
         """Return a full ``pair_coeff`` line for this framework.
+
+        Inside ``pair_style hybrid`` the line names the sub-style. Outside it
+        that token is not a selector (deepmd would read it as an element,
+        symmetrix as the model filename), so ``hybrid=False`` drops it; what
+        remains differs only because deepmd carries its model path in the
+        pair_style line and symmetrix carries it here.
 
         Args:
             index_str: hybrid sub-style instance suffix, **already carrying its
                 leading space** (e.g. ``" 2"``), or ``""`` for a single
                 instance. Ignored by MACE, which is full-cell only and
-                therefore never multiply instantiated.
+                therefore never multiply instantiated, and when not ``hybrid``.
             model_path: staged path to the model file.
             atom_list: one entry per LAMMPS atom type -- an element symbol, or
                 ``NULL`` for types this instance must ignore (DeePMD only).
+            hybrid: ``False`` for a lone (non-hybrid) pair_style.
         """
         atoms = ' '.join(atom_list)
         if self.model_in_style_line:
+            if not hybrid:
+                return f"pair_coeff * * {atoms}"
             return f"pair_coeff * * {self.style_token_name}{index_str} {atoms}"
+        if not hybrid:
+            return f"pair_coeff * * {model_path} {atoms}"
         return f"pair_coeff * * {self.style_token_name} {model_path} {atoms}"
 
 

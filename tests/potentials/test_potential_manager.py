@@ -1729,7 +1729,19 @@ class TestNonHybridPathForBothFrameworks:
         assert 'hybrid' not in style[0]
         assert model in coeff[0], (
             'MACE model path must survive the non-hybrid rewrite')
-        assert coeff[0].endswith('Mo S Si # sheet, tip')
+        assert coeff[0] == f'pair_coeff * * {model} Mo S Si # sheet, tip'
+        assert 'symmetrix/mace' not in coeff[0]
+
+    def test_mace_lone_sheet_without_d3_golden(self, mock_settings, tmp_path):
+        """A lone non-hybrid MACE sheet: the style token is dropped from the coeff line."""
+        model = _fake_model(tmp_path, 'm.json')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'mace', model), n_layers=3)
+        pm.add_self_interaction('sheet')
+        lines = write_and_read(pm, tmp_path).splitlines()
+        assert 'pair_style symmetrix/mace' in lines
+        assert f'pair_coeff * * {model} Mo Mo Mo S S S # sheet' in lines
 
 
 @pytest.mark.parametrize("pot_type,fname", [("mace", "m.json"), ("deepmd", "m.pth")])
