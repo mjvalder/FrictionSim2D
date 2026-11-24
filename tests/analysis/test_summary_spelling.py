@@ -44,3 +44,17 @@ def test_summary_identity_spells_the_same_columns():
     assert got['id'] == got['material'] == 'h_MoS2+t_WS2+flake_h_C'
     assert got['size'] == '12.5x30y' and got['layer'] == 1
     assert got['pressure'] == 0.5 and got['force'] != got['force']
+
+
+def test_summary_csv_rows_are_unchanged():
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+    out = PlotCommonMixin._dataset_to_summary_rows('lab', _RECORDS)  # pylint: disable=protected-access
+
+    assert pd.DataFrame(out).to_csv(index=False) == (
+        'materials,size_x,size_y,load_kind,load,layers,angle,speed,pot_token,dataset_label,'
+        'file_key,size,id,material,potential,layer,status,force,pressure,flake_material\n'
+        'h_MoS2,100.0,100.0,force,5.0,2.0,0.0,2.0,sw,lab,100x100y,100x100y,h_MoS2,h_MoS2,sw,'
+        '2.0,complete,5.0,,\n'
+        'h_MoS2+t-WS2,12.5,30.0,pressure,0.5,1.0,,,,lab,12.5x30y,12.5x30y,'
+        'h_MoS2+t_WS2+flake_h_C,h_MoS2+t_WS2+flake_h_C,,1.0,complete,,0.5,h-C\n'
+        'h_MoS2,,,force,1.5,,,,,lab,unknownx,unknownx,h_MoS2,h_MoS2,,,complete,1.5,,\n')

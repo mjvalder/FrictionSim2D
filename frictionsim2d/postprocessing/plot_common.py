@@ -372,30 +372,22 @@ class PlotCommonMixin(PlotterMixinBase):
         silent no-op. Without the columns `_resolve_lf_axis` warns and falls
         back, which is the honest answer.
         """
-        def fmt(value) -> str:
-            value = float(value)
-            return str(int(value)) if value.is_integer() else f'{value:g}'
+        from ..analysis.periods import summary_spelling  # pylint: disable=import-outside-toplevel
 
         out = []
         for record in rows:
-            # `ReadRun.material`'s spelling: the stack, the flake, underscored.
-            materials = '+'.join(record.get('materials') or ())
-            material = (f"{materials}+flake-{record['flake_material']}"
-                        if record.get('flake_material') else materials)
-            material = material.replace('-', '_')
-            sx, sy = record.get('size_x'), record.get('size_y')
-            size = (f'{fmt(sx)}x{fmt(sy)}y' if sx is not None and sy is not None
-                    else 'unknownx')
-            kind = record.get('load_kind')
+            spelled = summary_spelling(
+                record.get('materials'), record.get('flake_material'),
+                record.get('size_x'), record.get('size_y'),
+                record.get('load_kind'), record.get('load'))
+            size = spelled['size']
             row = dict(record)
             row.update({
                 'dataset_label': label, 'file_key': size, 'size': size,
-                'id': material, 'material': material,
-                'materials': materials, 'potential': record.get('pot_token'),
+                'id': spelled['id'], 'material': spelled['material'],
+                'materials': spelled['materials'], 'potential': record.get('pot_token'),
                 'layer': record.get('layers'), 'status': 'complete',
-                'force': record.get('load') if kind == 'force' else float('nan'),
-                'pressure': (record.get('load') if kind == 'pressure'
-                             else float('nan')),
+                'force': spelled['force'], 'pressure': spelled['pressure'],
             })
             for src, dst in SUMMARY_COLUMN_ALIASES.items():
                 if src in record:

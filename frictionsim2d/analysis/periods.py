@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 __all__ = ['GEOMETRY', 'NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'WINDOW', 'PeriodDepends',
            'PeriodParams', 'PeriodSummary', 'TaxlibParams', 'WindowParams', 'dominant_period',
            'geometry_depends', 'json_before', 'parse_loads', 'period_map', 'run_periods',
-           'settle_skip', 'whole_periods', 'window_rows']
+           'settle_skip', 'summary_spelling', 'whole_periods', 'window_rows']
 
 #: 1 eV/A in nN, per family: taxlib/constants.py:3 (AFM) and the sheet
 #: converter's EV_PER_A_TO_NN (:37). They differ in the 8th figure; each is kept.
@@ -201,28 +201,38 @@ def _fmt(value: Any) -> str:
     return str(int(value)) if value.is_integer() else f'{value:g}'
 
 
-def summary_identity(row: Any) -> Dict[str, Any]:
-    """The identity columns of a summary row, spelled as
-    ``PlotCommonMixin._dataset_to_summary_rows`` spells them
-    (plot_common.py:313-333): ``id``/``material`` underscored, ``size`` as
-    ``100x100y``, ``force`` or ``pressure`` by ``load_kind``, ``layer``."""
-    materials = getattr(row, 'materials', None)
-    materials = '+'.join(material_names(materials))
-    flake = getattr(row, 'flake_material', None)
-    material = f'{materials}+flake-{flake}' if isinstance(flake, str) and flake else materials
+def summary_spelling(materials: Any, flake: Any, size_x: Any, size_y: Any, kind: Any,
+                     load: Any) -> Dict[str, Any]:
+    """How a summary row spells its identity: ``materials`` joined by ``+``,
+    ``id``/``material`` underscored (with the flake), ``size`` as ``100x100y``
+    (``unknownx`` without both sides), and ``force`` or ``pressure`` by
+    ``load_kind`` (the other NaN). Shared by :func:`summary_identity` and
+    ``PlotCommonMixin._dataset_to_summary_rows``."""
+    joined = '+'.join(material_names(materials))
+    material = f'{joined}+flake-{flake}' if isinstance(flake, str) and flake else joined
     material = material.replace('-', '_')
-    sx, sy = getattr(row, 'size_x', None), getattr(row, 'size_y', None)
-    size = (f'{_fmt(sx)}x{_fmt(sy)}y' if sx is not None and sy is not None
-            and not (pd.isna(sx) or pd.isna(sy)) else 'unknownx')
+    size = (f'{_fmt(size_x)}x{_fmt(size_y)}y' if size_x is not None and size_y is not None
+            and not (pd.isna(size_x) or pd.isna(size_y)) else 'unknownx')
+    return {'materials': joined, 'id': material, 'material': material, 'size': size,
+            'force': load if kind == 'force' else float('nan'),
+            'pressure': load if kind == 'pressure' else float('nan')}
+
+
+def summary_identity(row: Any) -> Dict[str, Any]:
+    """The identity columns of a summary row, spelled by :func:`summary_spelling`,
+    with the run, point, ``layer``, ``load``, ``load_kind``, ``angle`` and ``speed``."""
     kind = getattr(row, 'load_kind', None)
     load = float(row.load)
+    spelled = summary_spelling(getattr(row, 'materials', None),
+                               getattr(row, 'flake_material', None),
+                               getattr(row, 'size_x', None), getattr(row, 'size_y', None),
+                               kind, load)
     layers = getattr(row, 'layers', None)
     return {'run_uuid': getattr(row, 'run_uuid', None), 'point_uuid': row.point_uuid,
-            'id': material, 'material': material, 'size': size,
+            'id': spelled['id'], 'material': spelled['material'], 'size': spelled['size'],
             'layer': None if layers is None or pd.isna(layers) else int(layers),
             'load': load, 'load_kind': kind,
-            'force': load if kind == 'force' else float('nan'),
-            'pressure': load if kind == 'pressure' else float('nan'),
+            'force': spelled['force'], 'pressure': spelled['pressure'],
             'angle': float(row.angle), 'speed': float(row.speed)}
 
 
