@@ -23,7 +23,7 @@ from frictionsim2d.postprocessing.plot_tables import load_table  # noqa: E402
 from tests.analysis.test_store import no_profile_switch, probe, store  # noqa: E402,F401
 
 
-def test_table_source_resolves_an_analysis(store, probe):  # noqa: F811
+def test_table_source_resolves_an_analysis(store, probe, tmp_path):  # noqa: F811
     table = pd.DataFrame({'material': ['A', 'B'], 'eligible': [True, False],
                           'value': [0.1 + 0.2, 1.0 / 3.0]})
     store_result(probe, 'paper', {}, table, dropped=[])
