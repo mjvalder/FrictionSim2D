@@ -546,6 +546,35 @@ def detect_inplane_repeat(
     return (lx / nx, ly / ny), (nx, ny)
 
 
+def _strain_onto_and_write(
+    atoms: Atoms,
+    target_2x2: np.ndarray,
+    out_path: Path,
+    mono: Dict[str, object],
+) -> np.ndarray:
+    """Affinely set the in-plane cell of ``atoms`` to ``target_2x2`` and write it.
+
+    ``set_cell(scale_atoms=True)`` preserves fractional coordinates; the cell's
+    z extent is kept. Metadata (atom_style, type count, masses) comes from
+    ``mono``. Returns the written in-plane cell, read back from disk.
+    """
+    lz = np.array(atoms.cell)[2, 2]
+    atoms.set_cell(
+        np.array([
+            [target_2x2[0, 0], target_2x2[0, 1], 0.0],
+            [target_2x2[1, 0], target_2x2[1, 1], 0.0],
+            [0.0, 0.0, lz],
+        ]),
+        scale_atoms=True,
+    )
+    return write_supercell(
+        atoms, out_path,
+        atom_style=str(mono["atom_style"]),
+        n_types=int(mono["n_types"]),
+        masses=mono["masses"],  # type: ignore[arg-type]
+    )
+
+
 def build_matched_supercells(
     mono_a_path: PathLike,
     mono_b_path: PathLike,
@@ -654,22 +683,8 @@ def build_matched_supercells(
     mean_cell: Optional[np.ndarray] = None
     for label in ("a", "b"):
         at = sc_atoms[label]
-        lz = np.array(at.cell)[2, 2]
-        at.set_cell(
-            np.array([
-                [mean_co[0, 0], mean_co[0, 1], 0.0],
-                [mean_co[1, 0], mean_co[1, 1], 0.0],
-                [0.0, 0.0, lz],
-            ]),
-            scale_atoms=True,
-        )
         out_path = workdir / f"{label}_supercell.lmp"
-        written_cell = write_supercell(
-            at, out_path,
-            atom_style=str(mono[label]["atom_style"]),
-            n_types=int(mono[label]["n_types"]),
-            masses=mono[label]["masses"],  # type: ignore[arg-type]
-        )
+        written_cell = _strain_onto_and_write(at, mean_co, out_path, mono[label])
         # Both materials write the identical in-plane cell -> identical canonical
         # on-disk box; capture it once as the shared mean cell.
         mean_cell = written_cell if mean_cell is None else mean_cell
@@ -803,22 +818,8 @@ def build_twisted_supercells(
                 f"{strain_tol:.4%} (achieved twist {achieved:.3f} deg). Widen "
                 f"twist_strain_tol or pick a cleaner angle."
             )
-        lz = np.array(at.cell)[2, 2]
-        at.set_cell(
-            np.array([
-                [ortho[0, 0], ortho[0, 1], 0.0],
-                [ortho[1, 0], ortho[1, 1], 0.0],
-                [0.0, 0.0, lz],
-            ]),
-            scale_atoms=True,
-        )
         out_path = workdir / f"{lbl}_twist_supercell.lmp"
-        write_supercell(
-            at, out_path,
-            atom_style=str(mono["atom_style"]),
-            n_types=int(mono["n_types"]),
-            masses=mono["masses"],  # type: ignore[arg-type]
-        )
+        _strain_onto_and_write(at, ortho, out_path, mono)
         outputs[lbl] = out_path
 
     return MatchedStack(
@@ -942,14 +943,6 @@ def box_region_cmd(lx: float, ly: float, xy: float, zlo: float, zhi: float) -> s
             f"{zlo:.6f} {zhi:.6f} {xy:.6f} 0.0 0.0"
         )
     return f"region box block 0.0 {lx:.6f} 0.0 {ly:.6f} {zlo:.6f} {zhi:.6f}"
-
-
-def _read_layer_geometry(path: Path) -> Tuple[np.ndarray, np.ndarray, float, float]:
-    """Return (in-plane Cartesian xy, 2x2 cell, z-min, z-max) of a supercell."""
-    at = read_lammps_data(path)
-    pos = at.positions
-    cell2 = at.cell[:2, :2]
-    return pos[:, :2], cell2, float(pos[:, 2].min()), float(pos[:, 2].max())
 
 
 def _minimize_interface_gap(
@@ -1124,9 +1117,10 @@ def assemble_hetero_stack(
     z_ext: Dict[int, Tuple[float, float]] = {}
     cell2: Optional[np.ndarray] = None
     for m, path in enumerate(mat_paths):
-        cart_xy, this_cell2, zmn, zmx = _read_layer_geometry(path)
-        carts[m] = cart_xy
-        z_ext[m] = (zmn, zmx)
+        layer = read_lammps_data(path)
+        this_cell2 = layer.cell[:2, :2]
+        carts[m] = layer.positions[:, :2]
+        z_ext[m] = (float(layer.positions[:, 2].min()), float(layer.positions[:, 2].max()))
         if cell2 is None:
             cell2 = this_cell2
         elif not np.allclose(this_cell2, cell2, atol=1e-4):
