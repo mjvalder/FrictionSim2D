@@ -415,7 +415,7 @@ of [integrity.md](integrity.md#quarantine-and-rulings). The point id is
 ```bash
 FrictionSim2D aiida rule 260421-afm                                  # the set's own file
 FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/260421.yaml  # another file
-FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/ --withdraw
+FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/             # a directory
 ```
 
 - Every `aiida import` also applies the set's own file, after the integrity
@@ -493,8 +493,7 @@ reads:
 - A file that parses replaces its entries. A point it no longer rules loses
   that file's ruling: removing an entry is how a file withdraws a ruling, for
   the own file and any other alike. The report prints
-  `ruling retracted by its file: <point> (<file>)`. `--withdraw` is kept for
-  compatibility and changes nothing.
+  `ruling retracted by its file: <point> (<file>)`.
 - A malformed entry is skipped with a warning. The file's other entries still
   count, but nothing of that file is withdrawn on that pass
   (`WARNING no ruling of <file> withdrawn: it has entries that cannot be read`).

@@ -280,6 +280,9 @@ Options:
   else `localhost`)
 - `--profile TEXT`
 - `--settings-file PATH`
+- `--integrity KEY=VALUE` — override one integrity threshold of the settings
+  (repeatable; `margins.RULE=VALUE` sets a margin, `none` turns a threshold off),
+  e.g. `--integrity hole_bonds=2.5`
 - `--dry-run` — print what would be ingested; create nothing
 
 The report counts decks created, skipped, superseded and already imported
@@ -295,14 +298,12 @@ Apply a rulings file to a set: a `pass`/`fail` ruling per quarantined point,
 or — with `override: true` and a note — per any point:
 
 ```bash
-FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--withdraw-pending PATH] [--profile TEXT]
+FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw-pending PATH] [--profile TEXT]
 ```
 
 - `--rulings PATH` — the file, or its directory (default:
   `integrity_rulings.yaml` in the root the set was imported from). A path that
   does not exist is an error; nothing is read.
-- `--withdraw` — kept for compatibility; changes nothing. Every pass follows
-  each file: a point a file no longer rules loses that file's ruling.
 - `--withdraw-pending PATH` — delete every ruling of that file (or
   `DIR/integrity_rulings.yaml`) from the set's ruling ledger. The file need
   not exist; use it when the file is gone for good.
@@ -333,8 +334,11 @@ Re-check a set under the current integrity settings, after editing the
 change):
 
 ```bash
-FrictionSim2D aiida recheck LABEL [--settings-file PATH] [--profile TEXT]
+FrictionSim2D aiida recheck LABEL [--settings-file PATH] [--integrity KEY=VALUE] [--profile TEXT]
 ```
+
+`--integrity KEY=VALUE` (repeatable) overrides single thresholds of the settings, as for
+`aiida import`; an override that changes a threshold re-checks the points like an edit does.
 
 - Re-checks every live point whose live verdict was checked with another
   `integrity.version`, or with other integrity settings (any threshold edited

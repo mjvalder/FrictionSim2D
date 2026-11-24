@@ -666,6 +666,30 @@ _store_settings_file_option = click.option(
                        '(~/.config/FrictionSim2D/settings.yaml).')
 
 
+def _integrity_option(func):
+    """Repeatable ``--integrity KEY=VALUE`` (``margins.RULE=VALUE`` for a margin)."""
+    return click.option(
+        '--integrity', 'integrity', multiple=True, metavar='KEY=VALUE',
+        help='Override one integrity threshold of the settings, e.g. '
+             '--integrity hole_bonds=2 --integrity margins.hole=0.1 (none turns '
+             'a threshold off). Repeatable.')(func)
+
+
+def _parse_integrity(pairs) -> Optional[dict]:
+    """The ``--integrity`` pairs as overrides, validated; None when none given."""
+    from .core.config import (  # noqa: PLC0415
+        IntegritySettings, integrity_overrides, merged_integrity)
+
+    if not pairs:
+        return None
+    try:
+        overrides = integrity_overrides(pairs)
+        merged_integrity(IntegritySettings().model_dump(mode='json'), overrides)
+    except ValueError as exc:       # pydantic's ValidationError is one
+        raise click.BadParameter(str(exc), param_hint='--integrity') from exc
+    return overrides
+
+
 def _store_profile(profile: Optional[str], settings_file: Optional[Path]) -> Optional[str]:
     """``profile``, else ``aiida.profile`` of an explicit ``settings_file``
     (``None`` leaves it to ``load_aiida_profile``: the per-user settings)."""
@@ -685,11 +709,12 @@ def _store_profile(profile: Optional[str], settings_file: Optional[Path]) -> Opt
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
 @_store_settings_file_option
+@_integrity_option
 @click.option('--dry-run', is_flag=True,
               help='Print what would be imported; create nothing.')
 def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disable=too-many-arguments
                  machine: Optional[str], profile: Optional[str],
-                 settings_file: Optional[Path], dry_run: bool):
+                 settings_file: Optional[Path], integrity: tuple, dry_run: bool):
     """Import a simulation tree into AiiDA: one CalcJob per LAMMPS deck.
 
     SIMULATION_FOLDER is the ``simulation_XXXXXXXX`` directory produced by one
@@ -701,13 +726,16 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
 
     Example:
         FrictionSim2D aiida import ./simulation_20260421_173546 -l 260421-afm --machine archer2
+        FrictionSim2D aiida import ./simulation_20260421_173546 --integrity ejected_atoms=3
     """
     from .aiida.ingest import SetRootMismatch, import_root  # noqa: PLC0415
 
+    overrides = _parse_integrity(integrity)
     try:
         report = import_root(simulation_folder, label=label, machine=machine,
                              profile=_store_profile(profile, settings_file),
-                             dry_run=dry_run, settings_file=settings_file)
+                             dry_run=dry_run, settings_file=settings_file,
+                             integrity=overrides)
     except SetRootMismatch as exc:
         _raise_abort(f"❌ {exc}", exc)
     except Exception as exc:  # pylint: disable=broad-except
@@ -728,9 +756,6 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
               type=click.Path(exists=True, path_type=Path), default=None,
               help='Rulings file, or its directory (default: integrity_rulings.yaml '
                    'in the root the set was imported from).')
-@click.option('--withdraw', is_flag=True,
-              help='Kept for compatibility; changes nothing. Every pass follows each '
-                   'file: a point a file no longer rules loses that file\'s ruling.')
 @click.option('--withdraw-pending', 'withdraw_pending',
               type=click.Path(path_type=Path), default=None,
               help='Drop every ruling of this rulings file (or directory) from the '
@@ -739,8 +764,7 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
 def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-many-arguments
-               withdraw: bool, withdraw_pending: Optional[Path],
-               profile: Optional[str]):
+               withdraw_pending: Optional[Path], profile: Optional[str]):
     """Apply a rulings file to the set LABEL: a pass or fail ruling per
     quarantined point (or, with ``override: true`` and a note, per any point).
 
@@ -758,7 +782,7 @@ def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-
     from .aiida.steps import apply_rulings  # noqa: PLC0415
 
     try:
-        report = apply_rulings(label, rulings_path, withdraw=True if withdraw else None,
+        report = apply_rulings(label, rulings_path,
                                withdraw_pending=withdraw_pending, profile=profile)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Rulings failed")
@@ -771,7 +795,9 @@ def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
 @_store_settings_file_option
-def aiida_recheck(label: str, profile: Optional[str], settings_file: Optional[Path]):
+@_integrity_option
+def aiida_recheck(label: str, profile: Optional[str], settings_file: Optional[Path],
+                  integrity: tuple):
     """Re-check the set LABEL under the current integrity settings.
 
     Every live point whose verdict was checked with another integrity
@@ -782,11 +808,13 @@ def aiida_recheck(label: str, profile: Optional[str], settings_file: Optional[Pa
 
     Example:
         FrictionSim2D aiida recheck 260421-afm --settings-file ./settings.yaml
+        FrictionSim2D aiida recheck 260421-afm --integrity hole_bonds=2.5
     """
     from .aiida.steps import recheck_set  # noqa: PLC0415
 
+    overrides = _parse_integrity(integrity)
     try:
-        report = recheck_set(label, settings_file=settings_file,
+        report = recheck_set(label, settings_file=settings_file, integrity=overrides,
                              profile=_store_profile(profile, settings_file))
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Recheck failed")
@@ -1015,13 +1043,20 @@ def aiida_rebuild(set_label: str, output_dir: Path, hpc_scripts: bool,
     """
     from .aiida.export import rebuild_set  # noqa: PLC0415
 
+    failures: list = []
     try:
         created, root = rebuild_set(set_label, output_dir, profile=profile,
-                                    generate_hpc=hpc_scripts)
+                                    generate_hpc=hpc_scripts, failures=failures)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Rebuild failed")
         _raise_abort(f"❌ Rebuild failed: {exc}", exc)
 
+    if failures:
+        click.echo(f"❌ Rebuilt {len(created)} run(s) → {Path(root).absolute()}; "
+                   f"{len(failures)} failed:", err=True)
+        for line in failures:
+            click.echo(f"  {line}", err=True)
+        raise SystemExit(1)
     click.echo(f"✅ Rebuilt {len(created)} run(s) → {Path(root).absolute()}")
 
 

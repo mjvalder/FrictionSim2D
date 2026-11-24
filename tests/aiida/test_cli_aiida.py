@@ -94,8 +94,9 @@ def test_rule_prints_the_overrides_and_the_withdrawn(store, tmp_path):
     assert 'withdrawn 1' in gone.output and f'withdrawn: {pid}' in gone.output
     assert f'ruling retracted by its file: {pid}' in gone.output
     assert 'override ' not in gone.output
-    again = _run('rule', 'camp', '--rulings', str(rulings), '--withdraw')
-    assert again.exit_code == 0 and 'withdrawn 0' in again.output   # a no-op flag
+    again = _run('rule', 'camp', '--rulings', str(rulings))
+    assert again.exit_code == 0 and 'withdrawn 0' in again.output
+    assert _run('rule', 'camp', '--withdraw').exit_code != 0        # the no-op flag is gone
 
 
 def test_rule_on_an_unknown_set_fails_cleanly(store):

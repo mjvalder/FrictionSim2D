@@ -34,9 +34,10 @@ def test_import_passes_label_and_dry_run(tmp_path, monkeypatch):
     monkeypatch.setattr(
         'frictionsim2d.aiida.ingest.import_root',
         lambda root, label=None, machine=None, profile=None, dry_run=False,
-        settings_file=None:
+        settings_file=None, integrity=None:
             seen.update(root=Path(root), label=label, machine=machine, profile=profile,
-                        dry_run=dry_run, settings_file=settings_file) or _Report())
+                        dry_run=dry_run, settings_file=settings_file,
+                        integrity=integrity) or _Report())
 
     result = CliRunner().invoke(cli, [
         'aiida', 'import', str(tmp_path), '--label', '260910-afm',
@@ -44,8 +45,56 @@ def test_import_passes_label_and_dry_run(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert seen == {'root': tmp_path, 'label': '260910-afm', 'machine': 'archer2',
-                    'profile': 'friction2d', 'dry_run': True, 'settings_file': None}
+                    'profile': 'friction2d', 'dry_run': True, 'settings_file': None,
+                    'integrity': None}
     assert 'results created: 4' in result.output
+
+
+def test_import_passes_integrity_overrides_through(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('frictionsim2d.aiida.ingest.import_root',
+                        lambda root, **kwargs: seen.update(kwargs) or _Report())
+
+    result = CliRunner().invoke(cli, [
+        'aiida', 'import', str(tmp_path), '--integrity', 'hole_bonds=2.5',
+        '--integrity', 'margins.hole=0.1', '--integrity', 'ejected_atoms=none'])
+
+    assert result.exit_code == 0, result.output
+    assert seen['integrity'] == {'hole_bonds': 2.5, 'ejected_atoms': None,
+                                 'margins': {'hole': 0.1}}
+
+
+@pytest.mark.parametrize('command', ['import', 'recheck'])
+@pytest.mark.parametrize('pair', ['nonsense=1', 'hole_bonds', 'isolated_atoms=many'])
+def test_a_bad_integrity_override_is_a_usage_error(tmp_path, monkeypatch, command, pair):
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
+    target = str(tmp_path) if command == 'import' else 'camp'
+
+    result = CliRunner().invoke(cli, ['aiida', command, target, '--integrity', pair])
+
+    assert result.exit_code == 2 and '--integrity' in result.output
+
+
+def test_recheck_passes_integrity_overrides_through(monkeypatch):
+    seen = {}
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
+
+    class _Recheck:
+        failures = []
+
+        @staticmethod
+        def render():
+            return 'rechecked'
+
+    monkeypatch.setattr(
+        'frictionsim2d.aiida.steps.recheck_set',
+        lambda label, **kwargs: seen.update(label=label, **kwargs) or _Recheck())
+
+    result = CliRunner().invoke(cli, ['aiida', 'recheck', 'camp', '--integrity', 'hole_bonds=3'])
+
+    assert result.exit_code == 0, result.output
+    assert seen['label'] == 'camp' and seen['integrity'] == {'hole_bonds': 3}
 
 
 def test_import_exits_non_zero_on_a_failure(tmp_path, monkeypatch):
@@ -138,7 +187,7 @@ def test_rebuild_calls_rebuild_set(tmp_path, monkeypatch):
     monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
         'frictionsim2d.aiida.export.rebuild_set',
-        lambda label, dest, profile=None, generate_hpc=False:
+        lambda label, dest, profile=None, generate_hpc=False, failures=None:
             seen.update(label=label, dest=Path(dest), hpc=generate_hpc)
             or ([Path(dest) / 'run'], Path(dest)))
 
@@ -147,6 +196,22 @@ def test_rebuild_calls_rebuild_set(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert seen == {'label': '260910-afm', 'dest': tmp_path, 'hpc': True}
+
+
+def test_rebuild_exits_nonzero_and_names_the_failed_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
+
+    def _rebuild(_label, dest, *, failures=None, **_kwargs):
+        failures.append('afm/Si/100x_100y/K300/L1: amorphous block missing')
+        return [], Path(dest)
+
+    monkeypatch.setattr('frictionsim2d.aiida.export.rebuild_set', _rebuild)
+
+    result = CliRunner().invoke(cli, ['aiida', 'rebuild', '260910-afm', '-o', str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert 'afm/Si/100x_100y/K300/L1: amorphous block missing' in result.output
+    assert 'Rebuilt 0 run(s)' in result.output and '1 failed' in result.output
 
 
 def test_rebuild_reports_an_unknown_label_cleanly(tmp_path, monkeypatch):
