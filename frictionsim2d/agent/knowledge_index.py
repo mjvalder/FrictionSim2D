@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from .settings import data_dir
 
 CORPUS_NAME = 'passages.jsonl'
 #: BM25 parameters (the usual defaults).
@@ -26,8 +27,7 @@ _STOP = frozenset(
 
 def knowledge_dir() -> Path:
     """``$XDG_DATA_HOME/FrictionSim2D/knowledge`` (``~/.local/share/...`` by default)."""
-    base = os.environ.get('XDG_DATA_HOME') or str(Path.home() / '.local' / 'share')
-    return Path(base) / 'FrictionSim2D' / 'knowledge'
+    return data_dir() / 'knowledge'
 
 
 def tokens(text: str) -> List[str]:

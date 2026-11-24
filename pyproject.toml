@@ -59,6 +59,8 @@ agent = [
   # anthropic 2.x made BetaMessageParam a Union; pydantic-ai 2.57 instantiates it
   # ("TypeError: Cannot instantiate typing.Union" on the first Claude turn).
   "anthropic>=1.12.1,<2; python_version >= '3.11'",
+  # `FrictionSim2D fetch model`: the bundle download when `ollama pull hf.co/...` is not enough.
+  "huggingface_hub>=0.20",
 ]
 dev = [
   "pytest>=7.0",

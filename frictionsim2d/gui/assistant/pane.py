@@ -22,14 +22,14 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBox
                                QPlainTextEdit, QPushButton, QScrollArea, QTextBrowser,
                                QVBoxLayout, QWidget)
 
-from ...agent.bundles import catalogue
+from ...agent.bundles import PUBLISHED, PUBLISHED_SCHEMAS, fits_published, published_tag
 from ...agent.changes import FsChangeSet
-from ...agent.ollama_install import install_finetune
+from ...agent.fetch import FetchError, fetch_model
 from ...agent.plot_changes import PlotChange
 from ...agent.ollama_server import is_local, ollama_start_command
 from ...agent.providers import model_installed, ollama_binary, ollama_models
 from ...agent.settings import (ANTHROPIC_MODELS, OPENAI_MODELS, AgentSettings, api_key,
-                               fallback_ollama_model, save_agent_settings, store_api_key)
+                               save_agent_settings, store_api_key)
 from .cards import ChangeCard, FsCard, PlotCard
 from .worker import AgentWorker
 
@@ -107,7 +107,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     _start_turn = Signal(str, object, object, int)
     #: A pool task finished: (kind, ok, message, installed models).
     _ollama_result = Signal(str, bool, str, object)
-    #: One output line of a running fine-tune install.
+    #: One output line of a running fine-tune download.
     _install_progress = Signal(str)
 
     def __init__(self, session, deps_factory: Callable[[], object],
@@ -117,8 +117,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                  confirm_consent: Optional[Callable[[], bool]] = None,
                  store_key=store_api_key,
                  start_command_fn=ollama_start_command,
-                 ollama_server, models_fn=ollama_models,
-                 catalogue_fn=catalogue, install_fn=install_finetune,
+                 ollama_server, models_fn=ollama_models, fetch_fn=fetch_model,
                  schema_hash_fn=_app_schema_hash) -> None:
         super().__init__(parent)
         self.session = session
@@ -129,11 +128,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._start_command_fn = start_command_fn
         self._server = ollama_server  # an OllamaServer (the window's) or a test fake
         self._models_fn = models_fn
-        self._finetunes = catalogue_fn()  # Ollama name -> FineTune
-        self._install_fn = install_fn
+        self._fetch_fn = fetch_fn
         self._schema_hash_fn = schema_hash_fn
         self._installing = False
-        self._schema_checked = set()  # fine-tunes whose tool schema was checked this session
+        self._schema_fits = {}  # fine-tune tag -> whether it fits this app's tools
         self._ollama_ready = False
         self._ollama_starting = False
         self._ollama_checking = False
@@ -236,8 +234,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.check_button.clicked.connect(self._check_ollama)
         self.details_button = QPushButton('Details', self)
         self.details_button.setCheckable(True)
-        self.install_button = QPushButton('Install', self)
-        self.install_button.setToolTip('Add this FrictionSim2D fine-tune to Ollama')
+        self.install_button = QPushButton('Download', self)
+        self.install_button.setToolTip('Download this FrictionSim2D fine-tune into Ollama')
         self.install_button.clicked.connect(self._install)
         self.install_button.hide()
         status.addWidget(self.cloud_badge)
@@ -420,69 +418,60 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                              f'Ollama at {self.settings.ollama.base_url} is unreachable')
             return
         self._installed = list(installed)
-        # A bundle whose weights are still syncing counts: it is installable soon.
-        installable = [t.name for t in self._finetunes.values()
-                       if t.installable or t.bundle is not None]
-        note = fallback_ollama_model(self.settings, self._installed, installable)
-        if note:
-            self._save()
-            self.session.switch(self.settings)
-            self.note(note)
         self._fill_models(self._installed)
         self._update_ollama_ready()
 
     def _update_ollama_ready(self) -> None:
         model = self.settings.ollama.model
-        tune = self._finetunes.get(model)
-        self._check_schema(tune)
+        tag = published_tag(model)
+        fits = self._check_schema(tag)
         self._ollama_ready = model_installed(model, self._installed)
-        offer = (not self._ollama_ready and tune is not None and tune.installable
-                 and is_local(self.settings))
+        offer = not self._ollama_ready and tag is not None and is_local(self.settings)
+        older = ('' if fits else ' It was trained on an older tool schema, so its '
+                 'answers may be less reliable until it is retrained.')
         self.install_button.setVisible(offer)
         self.install_button.setEnabled(not self._installing)
+        self.install_button.setToolTip('Download this FrictionSim2D fine-tune into Ollama'
+                                       + older)
         if self._ollama_ready:
             self._ollama_problem = ''
             self._set_status(f'Ollama ready ({model})')
         elif offer:
-            source = tune.bundle if tune.bundle is not None else tune.registry
-            self._ollama_problem = (f'{model} is a FrictionSim2D fine-tune; Install adds it '
-                                    f'to Ollama (from {source}).')
-            self._set_status(f'{model} is not installed')
-        elif tune is not None and tune.bundle is not None and is_local(self.settings):
-            self._ollama_problem = (f'{tune.bundle}/model.gguf is not here yet (still '
-                                    'syncing?); Install appears once it is. Check again.')
-            self._set_status(f'{model} is not installed — see Details')
+            self._ollama_problem = (f'{model} is a FrictionSim2D fine-tune; Download fetches '
+                                    f'it from huggingface.co/{PUBLISHED[tag]}.' + older)
+            self._set_status(f'{model} is not installed — Download fetches it')
         else:
             self._ollama_problem = (f'Fetch the model once with: '
                                     f'{ollama_binary()} pull {model}')
             self._set_status(f'Ollama is running but has no model {model} — see Details')
 
-    def _check_schema(self, tune) -> None:
-        """Once per fine-tune: log (not tell the user) when it was neither trained nor
-        benchmarked on this app's tools. Shipped bundles are held to that by
-        tests/agent/test_shipped_bundles.py; this catches a hand-made one."""
-        if tune is None or tune.name in self._schema_checked:
-            return
-        try:
-            current = self._schema_hash_fn()
-        except ImportError:  # no pydantic-ai: the assistant cannot run anyway
-            return
-        self._schema_checked.add(tune.name)
-        if not tune.fits(current):
-            logger.warning('%s was trained for tool schema %s, not this app\'s %s',
-                           tune.name, tune.schema_hash, current)
+    def _check_schema(self, tag: Optional[str]) -> bool:
+        """Whether the fine-tune ``tag`` was trained or benchmarked on this app's
+        tools (True for any other model); a mismatch is logged once per tag."""
+        if tag is None:
+            return True
+        if tag not in self._schema_fits:
+            try:
+                current = self._schema_hash_fn()
+            except ImportError:  # no pydantic-ai: the assistant cannot run anyway
+                return True
+            self._schema_fits[tag] = fits_published(tag, current)
+            if not self._schema_fits[tag]:
+                logger.warning('%s was trained for tool schemas %s, not this app\'s %s',
+                               tag, ', '.join(PUBLISHED_SCHEMAS.get(tag, ())), current)
+        return self._schema_fits[tag]
 
     def _install(self) -> None:
-        """Install the selected fine-tune on a pool thread (the user's click only)."""
-        tune = self._finetunes.get(self.settings.ollama.model)
-        if tune is None or self._installing:
+        """Download the selected fine-tune on a pool thread (the user's click only)."""
+        tag = published_tag(self.settings.ollama.model)
+        if tag is None or self._installing:
             return
         self._installing = True
         self.install_button.setEnabled(False)
         self.model_box.setEnabled(False)
-        self._set_status(f'Installing {tune.name}…')
+        self._set_status(f'Downloading {self.settings.ollama.model}…')
         server, settings, models_fn = self._server, self.settings, self._models_fn
-        install, signal = self._install_fn, self._install_progress
+        fetch, signal = self._fetch_fn, self._install_progress
 
         def progress(line: str) -> None:
             try:
@@ -494,13 +483,16 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             ok, message = server.ensure_running(settings)
             if not ok:
                 return False, message, None
-            ok, message = install(settings, tune, progress)
-            return ok, message, models_fn(settings)
+            try:
+                name = fetch(tag, progress, settings=settings)
+            except FetchError as exc:
+                return False, str(exc), models_fn(settings)
+            return True, f'Installed {name}', models_fn(settings)
         self._run_ollama_task('install', work)
 
     def _on_install_progress(self, line: str) -> None:
         if self._installing and self.settings.provider == 'ollama':
-            self.status_label.setText(f'Installing {self.settings.ollama.model}: {line}')
+            self.status_label.setText(f'Downloading {self.settings.ollama.model}: {line}')
 
     def _on_installed(self, ok: bool, message: str, installed) -> None:
         self._installing = False
@@ -516,7 +508,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self._installed = list(installed)
         self._ollama_ready = False
         self._ollama_problem = message
-        self._set_status('Install failed — see Details')
+        self._set_status('Download failed — see Details')
 
     def _ensure_ollama(self, pending_text: Optional[str] = None) -> None:
         """Start Ollama (if needed) on a pool thread; ``pending_text`` is sent after."""

@@ -39,18 +39,15 @@ files) always wait for you to click Apply.**
   asked). The model box offers `gpt-5.5` (default), `gpt-5.4-mini` and
   `gpt-5.4-nano`; any other name can be typed. Consent is asked once, as for
   the other cloud providers.
-- **Ollama (local).** Fully offline. The default model is the fine-tune
-  `fs2d-assistant:qwen3.5-4b` (Qwen3.5-4B trained on this app's tools; a few
-  seconds per short reply on a Radeon 780M). It is not in the Ollama library:
-  the status line offers **Install** (below). When it can be neither found
-  nor installed, the Assistant uses the stock `qwen3.5:4b` instead (fetch it
-  with `ollama pull qwen3.5:4b`). The Assistant turns thinking off and sets
-  temperature 0 itself. An `agent.yaml` from before the fine-tune that names
-  `fs2d-qwen3-4b` or `qwen3:4b` is moved to the new default once, with a note
-  in the chat; choose either again afterwards and it stays.
+- **Ollama (local).** Fully offline once the model is downloaded. The default
+  model is the fine-tune `fs2d-assistant:qwen3.5-4b` (Qwen3.5-4B trained on
+  this app's tools; a few seconds per short reply on a Radeon 780M). When the
+  selected fine-tune is not installed, the status line offers **Download**
+  (below); there is no silent fallback to a stock model. The Assistant turns
+  thinking off and sets temperature 0 itself.
 
   Needs Ollama 0.40.7 or newer (older ones do not know the `qwen3.5`
-  renderer, and Install fails with `unknown renderer`). The Assistant uses the
+  renderer, and Download fails with `unknown renderer`). The Assistant uses the
   `ollama` on `PATH`, else `~/.local/ollama/bin/ollama`. To keep it inside a
   conda env, `conda remove ollama` (conda-forge stops at 0.34) and unpack the
   release tarball into the env: `tar -I zstd -xf ollama-linux-amd64.tar.zst
@@ -59,39 +56,39 @@ files) always wait for you to click Apply.**
 
 ### Fine-tuned models
 
-A fine-tune ships as a bundle in `assistant_models/<tag>/`:
-`model.gguf` (the weights, gitignored), a `Modelfile` whose `FROM
-./model.gguf` is relative, and `manifest.json` (base model, the tool-schema
-hash it was trained for, the weights' sha256). Three ship: `qwen3.5-2b`, `qwen3.5-4b`
-(the default) and `qwen3.5-9b`, Qwen3.5 fine-tunes given the same prompt as the
-hosted models, reference text included. Every bundle there is offered by name. When the selected
-one is missing, the status line reads `fs2d-assistant:<tag> is not installed`
-with an **Install** button: it checks the weights against the manifest (a
-bundle still syncing is refused) and runs `ollama create` with the status
-line showing progress. By hand, the same is
+Three Qwen3.5 fine-tunes are published on Hugging Face, given the same prompt
+as the hosted models, reference text included:
 
-    ollama create fs2d-assistant:qwen3.5-4b -f assistant_models/qwen3.5-4b/Modelfile
+| tag | Hugging Face repo |
+|---|---|
+| `qwen3.5-2b` | `mjvalder/fs2d-assistant-qwen3.5-2b` |
+| `qwen3.5-4b` (default) | `mjvalder/fs2d-assistant-qwen3.5-4b` |
+| `qwen3.5-9b` | `mjvalder/fs2d-assistant-qwen3.5-9b` |
 
-If its tool-schema hash is not this app's (the tools changed since
-it was trained), the chat says so once: results may degrade, and retraining
-is the fix. Install is offered only for a local server.
+Each is installed into Ollama as `fs2d-assistant:<tag>`, by the pane's
+**Download** button or by `FrictionSim2D fetch model <tag>` (`--remove` takes
+it out again). Either way, with Ollama running:
+
+1. `ollama pull hf.co/<repo>`, `ollama cp` to `fs2d-assistant:<tag>`, then
+   `ollama show --modelfile` must still say `RENDERER qwen3.5`, `PARSER
+   qwen3.5`, `temperature 0` and `num_ctx 16384` (a plain pull builds the
+   chat template from the GGUF and may lose them).
+2. Otherwise the bundle (`model.gguf`, `Modelfile`, `manifest.json`) is
+   downloaded into `~/.local/share/FrictionSim2D/models/<tag>/` (honours
+   `XDG_DATA_HOME`; needs `huggingface_hub`, part of the `agent` extra), the
+   weights are checked against the manifest's sha256 and size (a mismatch
+   deletes the download and installs nothing), and `ollama create` runs
+   from its Modelfile. A verified bundle already there is not downloaded again.
+
+Download is offered only for a local server. If the model was trained on an
+older tool set than this app's (its tool-schema hash differs), Details and
+the button's tooltip say so before you download: answers may be less
+reliable until it is retrained.
 
 Training data, training and export live in a separate repository
-(`FrictionSim2D-agent-training`); its `export.py` writes the bundles here.
-The knowledge corpus is built there too (`corpus.py`) and installed to
+(`FrictionSim2D-agent-training`), which uploads the bundles to Hugging Face.
+The knowledge corpus is built there too and installed to
 `~/.local/share/FrictionSim2D/knowledge`.
-
-Syncthing: `assistant_models/` stays synced, so a new bundle arrives on its
-own; a `.stignore` at the repo root (never synced, gitignored) can exclude
-`tests/agent/evals/.results`.
-
-Not done yet, for later: publishing a bundle so a machine without the repo can
-`ollama pull` it. That is `ollama push <namespace>/fs2d-assistant:<tag>` from
-an ollama.com account, then an entry in `PUBLISHED` in `frictionsim2d/agent/bundles.py`
-(the GUI then pulls it), plus a Hugging Face or Zenodo mirror of the GGUF and
-manifest for a citable DOI. A plain `ollama pull hf.co/...` is not enough:
-Ollama would build the chat template from the GGUF, not the bundle's
-Modelfile, which is a known training/serving mismatch.
 
 ### Ollama starts and stops itself
 
@@ -122,11 +119,13 @@ One line under the provider and model pickers: `Ollama ready (fs2d-assistant:qwe
 `Starting Ollama…`, `Ollama not running — starts on your next message`, or
 why it could not start. **Check again** re-asks Ollama (it never starts it).
 **Details** unfolds the start command, a **Copy start command** button, the
-log path and, when the model is missing, the `ollama pull` line. Gemini shows
+log path and, when the model is missing, the `ollama pull` line (or, for a
+fine-tune, where Download fetches it from). Gemini shows
 one line too (`Gemini: key set`).
 
 The model box is editable: for Ollama it lists the installed models (from
-`/api/tags`); for Gemini it shows the configured model. Type any other name
+`/api/tags`); for Claude and OpenAI it offers their model lists; for Gemini it shows the
+configured model. Type any other name
 to use it.
 
 ### agent.yaml

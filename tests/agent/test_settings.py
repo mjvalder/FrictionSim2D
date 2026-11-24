@@ -1,5 +1,6 @@
 """Agent settings (agent.yaml) and the Gemini key file (agent.secrets)."""
 import stat
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -119,56 +120,20 @@ def test_idle_minutes_and_step_cap_round_trip_and_validate(tmp_path):
         load_agent_settings(path)
 
 
-def _legacy(tmp_path, model):
+def test_an_old_agent_yaml_keeps_its_model(tmp_path):
+    """No stock fallback and no name migration: the pane offers Download instead."""
     path = tmp_path / 'agent.yaml'
-    path.write_text(f'provider: ollama\nollama:\n  model: {model}\n')
-    return load_agent_settings(path)
+    path.write_text('provider: ollama\nsettings_version: 1\nollama:\n  model: fs2d-qwen3-4b\n'
+                    '  max_threads: 8\n')
+    assert load_agent_settings(path).ollama.model == 'fs2d-qwen3-4b'
 
 
-@pytest.mark.parametrize('legacy', ['fs2d-qwen3-4b', 'qwen3:4b'])
-def test_legacy_maps_to_default_when_installable(tmp_path, legacy):
-    from frictionsim2d.agent.settings import fallback_ollama_model
-    s = _legacy(tmp_path, legacy)
-    assert s.ollama.model == legacy  # kept until we know what is installed
-    note = fallback_ollama_model(s, [legacy, 'qwen3:8b'], ['fs2d-assistant:qwen3.5-4b'])
-    assert s.ollama.model == 'fs2d-assistant:qwen3.5-4b'
-    assert legacy in note and 'fs2d-assistant:qwen3.5-4b' in note
-
-
-def test_legacy_maps_to_stock_when_default_unavailable(tmp_path):
-    from frictionsim2d.agent.settings import fallback_ollama_model
-    s = _legacy(tmp_path, 'fs2d-qwen3-4b')
-    note = fallback_ollama_model(s, ['fs2d-qwen3-4b:latest'], [])
-    assert s.ollama.model == 'qwen3.5:4b' and 'qwen3.5:4b' in note
-
-
-def test_default_falls_back_to_stock_only_when_unavailable():
-    from frictionsim2d.agent.settings import fallback_ollama_model
-    s = AgentSettings()
-    assert fallback_ollama_model(s, [], ['fs2d-assistant:qwen3.5-4b']) is None
-    assert fallback_ollama_model(s, ['fs2d-assistant:qwen3.5-4b'], []) is None
-    assert s.ollama.model == 'fs2d-assistant:qwen3.5-4b'
-    assert fallback_ollama_model(s, ['qwen3.5:4b'], []) is not None
-    assert s.ollama.model == 'qwen3.5:4b'
-
-
-def test_migration_runs_once_so_a_later_choice_sticks(tmp_path):
-    from frictionsim2d.agent.settings import fallback_ollama_model
-    s = _legacy(tmp_path, 'qwen3:4b')
-    fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:qwen3.5-4b'])
-    save_agent_settings(s, tmp_path / 'agent.yaml')
-    s = load_agent_settings(tmp_path / 'agent.yaml')
-    s.ollama.model = 'qwen3:4b'  # chosen again, on purpose
-    save_agent_settings(s, tmp_path / 'agent.yaml')
-    s = load_agent_settings(tmp_path / 'agent.yaml')
-    assert fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:qwen3.5-4b']) is None
-    assert s.ollama.model == 'qwen3:4b'
-
-
-def test_user_choice_untouched(tmp_path):
-    from frictionsim2d.agent.settings import fallback_ollama_model
-    s = _legacy(tmp_path, 'mistral:7b')
-    assert fallback_ollama_model(s, ['qwen3:4b'], []) is None and s.ollama.model == 'mistral:7b'
+def test_data_dir_honours_xdg(monkeypatch, tmp_path):
+    from frictionsim2d.agent.settings import data_dir
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    assert data_dir() == tmp_path / 'FrictionSim2D'
+    monkeypatch.delenv('XDG_DATA_HOME')
+    assert data_dir() == Path.home() / '.local' / 'share' / 'FrictionSim2D'
 
 
 @pytest.mark.parametrize('key', ['abc\ndef', 'abc\rdef', 'abc\r\ngemini=evil'])
@@ -193,13 +158,3 @@ def test_new_config_dir_is_owner_only(tmp_path):
     path = tmp_path / 'cfg' / 'FrictionSim2D' / 'agent.secrets'
     store_api_key('k', 'gemini', path)
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
-
-
-@pytest.mark.parametrize('size', ['2b', '4b', '9b'])
-@pytest.mark.parametrize('v', ['', '-v3'])
-def test_a_fine_tunes_first_name_is_renamed(tmp_path, size, v):
-    from frictionsim2d.agent.settings import fallback_ollama_model
-    s = _legacy(tmp_path, f'fs2d-assistant:q35-{size}{v}')
-    new = f'fs2d-assistant:qwen3.5-{size}'
-    note = fallback_ollama_model(s, [new], [])
-    assert s.ollama.model == new and 'now called' in note

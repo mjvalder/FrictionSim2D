@@ -121,14 +121,13 @@ def _settings(**kwargs):
 
 def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None,
           server=None, models_fn=lambda s: None, save_settings=lambda *a, **k: None,
-          catalogue_fn=dict, schema_hash_fn=lambda: 'b8b78921bc6dd497', **kwargs):
+          schema_hash_fn=lambda: 'b8b78921bc6dd497', **kwargs):
     s = settings or _settings()
     s.gemini.consent_given = consent
     pane = AssistantPane(session or FakeSession(events), lambda: object(), s,
                          save_settings=save_settings, ask_key=ask_key,
                          confirm_consent=lambda: True, ollama_server=server or FakeServer(),
-                         models_fn=models_fn, catalogue_fn=catalogue_fn,
-                         schema_hash_fn=schema_hash_fn, **kwargs)
+                         models_fn=models_fn, schema_hash_fn=schema_hash_fn, **kwargs)
     _PANES.append(pane)
     if s.provider == 'ollama':
         assert _run_until(pane.ollama_checked)  # the status check runs off the GUI thread
@@ -681,16 +680,22 @@ def test_typed_model_name_is_kept(qt_app, env):
     assert s.gemini.model == 'gemini-9-pro'
 
 
-def test_legacy_model_falls_back_with_a_note(qt_app, env):
+def test_missing_default_finetune_is_kept_and_offered_for_download(qt_app, env):
     saved = []
-    s = AgentSettings(provider='ollama', settings_version=1)  # an agent.yaml from before
-    s.ollama.model = 'fs2d-qwen3-4b'
-    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3.5:4b', 'fs2d-qwen3-4b:latest'],
+    s = AgentSettings(provider='ollama')  # the default: fs2d-assistant:qwen3.5-4b
+    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3.5:4b'],
                  save_settings=lambda settings: saved.append(settings.ollama.model))
-    assert s.ollama.model == 'qwen3.5:4b' and saved == ['qwen3.5:4b']
-    assert pane.model_box.currentText() == 'qwen3.5:4b'
-    assert 'fs2d-qwen3-4b replaced by qwen3.5:4b' in pane.chat.toPlainText()
-    assert pane.status_label.text() == 'Ollama ready (qwen3.5:4b)'
+    assert s.ollama.model == 'fs2d-assistant:qwen3.5-4b' and saved == []  # no stock fallback
+    assert not pane.install_button.isHidden() and pane.install_button.text() == 'Download'
+    assert pane.chat.toPlainText() == ''
+
+
+def test_old_experiment_names_are_left_alone(qt_app, env):
+    s = AgentSettings(provider='ollama')
+    s.ollama.model = 'fs2d-assistant:q35-4b'
+    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3.5:4b'])
+    assert s.ollama.model == 'fs2d-assistant:q35-4b'
+    assert pane.install_button.isHidden() and 'pull fs2d-assistant:q35-4b' in pane.details_label.text()
 
 
 def test_missing_model_is_named_and_details_say_how_to_pull(qt_app, env):
@@ -884,75 +889,70 @@ def test_openai_offers_its_model_list(qt_app, env):
 
 # ---------------------------------------------------------------- fine-tunes
 
-def _tune(tmp_path, schema_hash='b8b78921bc6dd497'):
-    from frictionsim2d.agent.bundles import FineTune
-    bundle = tmp_path / 'models' / 'qwen3.5-4b'
-    bundle.mkdir(parents=True)
-    (bundle / 'model.gguf').write_bytes(b'w')
-    return FineTune(tag='qwen3.5-4b', base='unsloth/Qwen3.5-4B', schema_hash=schema_hash,
-                    knowledge_hash='k', bundle=bundle)
-
-
-def _tune_pane(tmp_path, *, tune=None, install=None, models=None, settings=None, **kwargs):
-    """Ollama pane whose selected model is the fine-tune, not yet installed."""
-    tune = tune or _tune(tmp_path)
-    state = {'models': ['qwen3.5:4b'] if models is None else models}
+def _tune_pane(*, fetch=None, models=None, settings=None, **kwargs):
+    """Ollama pane whose selected model is the 4B fine-tune, not yet installed."""
+    from frictionsim2d.agent.fetch import FetchError
+    state = {'models': ['qwen3.5:4b'] if models is None else models, 'tags': []}
     s = settings or AgentSettings(provider='ollama')
 
-    def fake_install(settings_, tune_, progress):
-        progress('copying file 50%')
-        ok, message = install(settings_, tune_) if install else (True, f'Installed {tune_.name}')
-        if ok:
-            state['models'] = state['models'] + [tune_.name]
-        return ok, message
+    def fake_fetch(tag, progress, settings=None):
+        state['tags'].append(tag)
+        progress('pulling manifest 50%')
+        error = fetch(tag) if fetch else None
+        if error:
+            raise FetchError(error)
+        state['models'] = state['models'] + [f'fs2d-assistant:{tag}']
+        return f'fs2d-assistant:{tag}'
     pane = _pane([], settings=s, models_fn=lambda _s: state['models'],
-                 catalogue_fn=lambda: {tune.name: tune}, install_fn=fake_install, **kwargs)
+                 fetch_fn=fake_fetch, **kwargs)
     return pane, state
 
 
-def test_missing_finetune_offers_install(qt_app, env, tmp_path):
-    pane, _ = _tune_pane(tmp_path)
+def test_missing_finetune_offers_download(qt_app, env):
+    pane, _ = _tune_pane()
     assert pane.settings.ollama.model == 'fs2d-assistant:qwen3.5-4b'
-    assert pane.status_label.text() == 'fs2d-assistant:qwen3.5-4b is not installed'
+    assert pane.status_label.text() == ('fs2d-assistant:qwen3.5-4b is not installed — '
+                                        'Download fetches it')
     assert not pane.install_button.isHidden() and pane.install_button.isEnabled()
+    assert 'huggingface.co/mjvalder/fs2d-assistant-qwen3.5-4b' in pane.details_label.text()
 
 
-def test_unknown_model_offers_no_install(qt_app, env):
+def test_unknown_model_offers_no_download(qt_app, env):
     pane = _pane([], settings=_settings(provider='ollama'), models_fn=lambda s: ['qwen3:8b'])
     assert pane.install_button.isHidden()
     assert 'see Details' in pane.status_label.text() and 'pull qwen3:4b' in pane.details_label.text()
 
 
-def test_install_success_is_ready(qt_app, env, tmp_path):
+def test_download_success_is_ready(qt_app, env):
     saved = []
-    pane, _ = _tune_pane(tmp_path, save_settings=lambda s: saved.append(s.ollama.model_copy()))
+    pane, state = _tune_pane(save_settings=lambda s: saved.append(s.ollama.model_copy()))
     pane.install_button.click()
-    assert pane.status_label.text().startswith('Installing fs2d-assistant:qwen3.5-4b')
+    assert pane.status_label.text().startswith('Downloading fs2d-assistant:qwen3.5-4b')
     assert _run_until(pane.ollama_checked) == [(True,)]
+    assert state['tags'] == ['qwen3.5-4b']
     assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:qwen3.5-4b)'
     assert pane.install_button.isHidden() and pane.model_box.isEnabled()
 
 
-def test_install_failure_keeps_settings(qt_app, env, tmp_path):
-    pane, _ = _tune_pane(tmp_path, install=lambda s, t: (False, 'Error: unknown renderer "qwen3.5"'))
+def test_download_failure_keeps_settings(qt_app, env):
+    pane, _ = _tune_pane(fetch=lambda tag: 'Error: unknown renderer "qwen3.5"')
     before = pane.settings.model_dump()
     pane.install_button.click()
     assert _run_until(pane.ollama_checked) == [(False,)]
-    assert pane.status_label.text() == 'Install failed — see Details'
+    assert pane.status_label.text() == 'Download failed — see Details'
     assert 'unknown renderer' in pane.details_label.text()
     assert pane.settings.model_dump() == before
     assert pane.install_button.isEnabled() and pane.model_box.isEnabled()
 
 
-def test_install_button_disabled_while_running(qt_app, env, tmp_path):
+def test_download_button_disabled_while_running(qt_app, env):
     import threading
     gate, calls = threading.Event(), []
 
-    def install(settings_, tune_):
+    def fetch(tag):
         calls.append(1)
         gate.wait(5)
-        return True, 'Installed'
-    pane, _ = _tune_pane(tmp_path, install=install)
+    pane, _ = _tune_pane(fetch=fetch)
     pane.install_button.click()
     assert not pane.install_button.isEnabled() and not pane.model_box.isEnabled()
     pane._install()  # pylint: disable=protected-access  # a second click that got through
@@ -961,14 +961,14 @@ def test_install_button_disabled_while_running(qt_app, env, tmp_path):
     assert calls == [1]
 
 
-def test_install_result_after_provider_switch_changes_nothing(qt_app, env, tmp_path):
+def test_download_result_after_provider_switch_changes_nothing(qt_app, env):
     import threading
     gate = threading.Event()
 
-    def install(settings_, tune_):
+    def fetch(tag):
         gate.wait(5)
-        return False, 'Error: boom'
-    pane, _ = _tune_pane(tmp_path, install=install)
+        return 'Error: boom'
+    pane, _ = _tune_pane(fetch=fetch)
     pane.install_button.click()
     pane.provider_box.setCurrentIndex(pane.provider_box.findData('gemini'))
     gate.set()
@@ -977,36 +977,36 @@ def test_install_result_after_provider_switch_changes_nothing(qt_app, env, tmp_p
     assert pane.install_button.isHidden() and pane.model_box.isEnabled()
 
 
-def test_remote_base_url_no_install(qt_app, env, tmp_path):
+def test_remote_base_url_no_download(qt_app, env):
     s = AgentSettings(provider='ollama')
     s.ollama.base_url = 'http://gpu-box:11434'
-    pane, _ = _tune_pane(tmp_path, settings=s)
+    pane, _ = _tune_pane(settings=s)
     assert pane.install_button.isHidden()
     assert 'pull fs2d-assistant:qwen3.5-4b' in pane.details_label.text()
 
 
-def test_schema_mismatch_is_logged_once_not_told(qt_app, env, tmp_path, caplog):
+def test_older_schema_is_said_before_download_and_logged_once(qt_app, env, caplog):
     with caplog.at_level('WARNING', logger='frictionsim2d.gui.assistant.pane'):
-        pane, _ = _tune_pane(tmp_path, tune=_tune(tmp_path, schema_hash='aaaa'),
-                             models=['qwen3.5:4b', 'fs2d-assistant:qwen3.5-4b'],
-                             schema_hash_fn=lambda: 'bbbb')
-        before = pane.chat.toPlainText()
+        pane, _ = _tune_pane(schema_hash_fn=lambda: 'bbbb')
+        assert 'older tool schema' in pane.details_label.text()
+        assert 'older tool schema' in pane.install_button.toolTip()
         pane.model_box.setCurrentText('qwen3.5:4b')
         pane._on_model_chosen()  # pylint: disable=protected-access
         pane.model_box.setCurrentText('fs2d-assistant:qwen3.5-4b')
         pane._on_model_chosen()  # pylint: disable=protected-access
-    assert sum('tool schema aaaa' in r.message for r in caplog.records) == 1
-    assert 'schema' not in pane.chat.toPlainText() and 'schema' not in before
+    assert sum('tool schemas' in r.message for r in caplog.records) == 1
+    assert 'schema' not in pane.chat.toPlainText()
 
 
-def test_schema_match_no_log(qt_app, env, tmp_path, caplog):
+def test_schema_match_no_log(qt_app, env, caplog):
     with caplog.at_level('WARNING', logger='frictionsim2d.gui.assistant.pane'):
-        pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:qwen3.5-4b'])
+        pane, _ = _tune_pane(models=['fs2d-assistant:qwen3.5-4b'])
     assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:qwen3.5-4b)'
     assert not any('tool schema' in r.message for r in caplog.records)
+    assert 'older' not in pane.install_button.toolTip()
 
 
-def test_idle_timer_never_stops_ollama_during_an_install(qt_app, env, tmp_path):
+def test_idle_timer_never_stops_ollama_during_a_download(qt_app, env):
     import threading
     gate, checks = threading.Event(), []
 
@@ -1015,21 +1015,9 @@ def test_idle_timer_never_stops_ollama_during_an_install(qt_app, env, tmp_path):
             checks.append(1)
             return True
 
-    def install(settings_, tune_):
-        gate.wait(5)
-        return True, 'Installed'
-    pane, _ = _tune_pane(tmp_path, install=install, server=CountingServer())
+    pane, _ = _tune_pane(fetch=lambda tag: gate.wait(5) and None, server=CountingServer())
     pane.install_button.click()
     pane.idle_timer.timeout.emit()
     gate.set()
     assert _run_until(pane.ollama_checked) == [(True,)]
     assert checks == []
-
-
-def test_bundle_still_syncing_keeps_the_default(qt_app, env, tmp_path):
-    tune = _tune(tmp_path)
-    (tune.bundle / 'model.gguf').unlink()  # Syncthing has not renamed it into place yet
-    pane, _ = _tune_pane(tmp_path, tune=tune)
-    assert pane.settings.ollama.model == 'fs2d-assistant:qwen3.5-4b'
-    assert pane.install_button.isHidden()
-    assert 'still syncing' in pane.details_label.text()

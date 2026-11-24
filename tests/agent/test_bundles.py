@@ -1,98 +1,85 @@
-"""The portable model bundle: format, catalogue, integrity check."""
+"""The published fine-tunes and the bundle format: manifest, integrity check."""
 import json
 import logging
 
 from frictionsim2d.agent import bundles
-from frictionsim2d.agent.bundles import (FineTune, catalogue, sha256_file, verify,
-                               write_bundle)
+from frictionsim2d.agent.bundles import (PUBLISHED, FineTune, fits_published, model_name,
+                                         published_tag, read_manifest, sha256_file, verify)
 
 MANIFEST = {'tag': 'qwen3.5-4b', 'base': 'unsloth/Qwen3.5-4B', 'schema_hash': 'b8b7',
             'knowledge_hash': 'ea92'}
 
 
-def _bundle(tmp_path, data=b'weights'):
-    gguf = tmp_path / 'w.gguf'
-    gguf.write_bytes(data)
-    return write_bundle(tmp_path / 'models' / 'qwen3.5-4b', gguf=gguf,
-                        template='RENDERER qwen3.5\nPARSER qwen3.5', manifest=MANIFEST)
+def write_bundle(folder, data=b'weights', **manifest):
+    """A bundle as the Hugging Face repos hold it."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'model.gguf').write_bytes(data)
+    (folder / 'Modelfile').write_text('FROM ./model.gguf\nRENDERER qwen3.5\nPARSER qwen3.5\n'
+                                      'PARAMETER temperature 0\nPARAMETER num_ctx 16384\n')
+    fields = {**MANIFEST, 'sha256': sha256_file(folder / 'model.gguf'), 'size': len(data),
+              **manifest}
+    (folder / 'manifest.json').write_text(json.dumps(fields))
+    return folder
 
 
-def test_write_bundle_relative_from_and_sha(tmp_path):
-    dest = _bundle(tmp_path)
-    text = (dest / 'Modelfile').read_text()
-    assert text.splitlines()[0] == 'FROM ./model.gguf'
-    assert 'RENDERER qwen3.5' in text and 'PARAMETER temperature 0' in text
-    assert 'PARAMETER num_ctx 16384' in text
-    manifest = json.loads((dest / 'manifest.json').read_text())
-    assert manifest['sha256'] == sha256_file(dest / 'model.gguf') and manifest['size'] == 7
-    assert sorted(p.name for p in dest.iterdir()) == ['Modelfile', 'manifest.json', 'model.gguf']
+def test_published_repos_are_the_three_qwen35_fine_tunes():
+    assert PUBLISHED == {'qwen3.5-2b': 'mjvalder/fs2d-assistant-qwen3.5-2b',
+                         'qwen3.5-4b': 'mjvalder/fs2d-assistant-qwen3.5-4b',
+                         'qwen3.5-9b': 'mjvalder/fs2d-assistant-qwen3.5-9b'}
 
 
-def test_catalogue_reads_bundles(tmp_path):
-    _bundle(tmp_path)
-    found = catalogue(tmp_path / 'models')
-    tune = found['fs2d-assistant:qwen3.5-4b']
-    assert tune.installable
-    assert tune.bundle == tmp_path / 'models' / 'qwen3.5-4b' and tune.schema_hash == 'b8b7'
+def test_names_and_tags():
+    assert model_name('qwen3.5-4b') == 'fs2d-assistant:qwen3.5-4b'
+    assert published_tag('fs2d-assistant:qwen3.5-9b') == 'qwen3.5-9b'
+    assert published_tag('fs2d-assistant:q35-4b') is None
+    assert published_tag('qwen3.5:4b') is None
 
 
-def test_catalogue_skips_bad_manifest(tmp_path, caplog):
-    _bundle(tmp_path)
-    (tmp_path / 'models' / 'broken').mkdir()
-    (tmp_path / 'models' / 'broken' / 'manifest.json').write_text('{')
-    (tmp_path / 'models' / 'partial').mkdir()
-    partial = {k: v for k, v in MANIFEST.items() if k != 'schema_hash'}
-    (tmp_path / 'models' / 'partial' / 'manifest.json').write_text(
-        json.dumps({**partial, 'tag': 'partial'}))
+def test_published_schemas_say_what_each_model_fits():
+    assert fits_published('qwen3.5-4b', '58d9a9a68b61b3d2')
+    assert fits_published('qwen3.5-4b', 'b8b78921bc6dd497')
+    assert not fits_published('qwen3.5-2b', 'b8b78921bc6dd497')
+    assert not fits_published('nope', '58d9a9a68b61b3d2')
+
+
+def test_models_dir_is_under_xdg_data_home(monkeypatch, tmp_path):
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    assert bundles.MODELS_DIR == bundles.models_dir() == tmp_path / 'FrictionSim2D' / 'models'
+
+
+def test_read_manifest(tmp_path):
+    tune = read_manifest(write_bundle(tmp_path / 'qwen3.5-4b', verified_schemas=['58d9']))
+    assert (tune.tag, tune.schema_hash, tune.size) == ('qwen3.5-4b', 'b8b7', 7)
+    assert tune.verified_schemas == ('58d9',) and tune.bundle == tmp_path / 'qwen3.5-4b'
+    assert tune.name == 'fs2d-assistant:qwen3.5-4b'
+
+
+def test_bad_manifest_is_skipped_with_a_warning(tmp_path, caplog):
+    (tmp_path / 'broken').mkdir()
+    (tmp_path / 'broken' / 'manifest.json').write_text('{')
+    (tmp_path / 'partial').mkdir()
+    (tmp_path / 'partial' / 'manifest.json').write_text(json.dumps({'tag': 'x', 'base': 'b'}))
     with caplog.at_level(logging.WARNING):
-        found = catalogue(tmp_path / 'models')
-    assert list(found) == ['fs2d-assistant:qwen3.5-4b']
+        assert read_manifest(tmp_path / 'broken') is None
+        assert read_manifest(tmp_path / 'partial') is None
     assert 'broken' in caplog.text and 'partial' in caplog.text
 
 
-def test_catalogue_of_missing_dir_is_empty(tmp_path):
-    assert catalogue(tmp_path / 'nowhere') == {}
-
-
-def test_bundle_without_gguf_not_installable(tmp_path):
-    dest = _bundle(tmp_path)
-    (dest / 'model.gguf').unlink()
-    assert not catalogue(tmp_path / 'models')['fs2d-assistant:qwen3.5-4b'].installable
-
-
 def test_verify_detects_partial_gguf(tmp_path):
-    dest = _bundle(tmp_path)
-    tune = catalogue(tmp_path / 'models')['fs2d-assistant:qwen3.5-4b']
+    folder = write_bundle(tmp_path / 'qwen3.5-4b')
+    tune = read_manifest(folder)
     assert verify(tune) is None
-    (dest / 'model.gguf').write_bytes(b'weig')
+    (folder / 'model.gguf').write_bytes(b'weig')
+    assert 'does not match' in verify(tune)
+    (folder / 'model.gguf').write_bytes(b'WEIGHTS')  # same size, other bytes
     assert 'does not match' in verify(tune)
 
 
-def test_published_entry_installable_without_bundle(monkeypatch, tmp_path):
-    tune = FineTune(tag='x', base='b', schema_hash='s', knowledge_hash='k',
-                    registry='ns/fs2d-assistant:x')
-    monkeypatch.setattr(bundles, 'PUBLISHED', {'x': tune})
-    found = catalogue(tmp_path / 'models')
-    assert found['fs2d-assistant:x'].installable and found['fs2d-assistant:x'].bundle is None
-
-
-def test_local_bundle_keeps_published_registry(monkeypatch, tmp_path):
-    _bundle(tmp_path)
-    tune = FineTune(tag='qwen3.5-4b', base='b', schema_hash='s', knowledge_hash='k',
-                    registry='ns/fs2d-assistant:qwen3.5-4b')
-    monkeypatch.setattr(bundles, 'PUBLISHED', {'qwen3.5-4b': tune})
-    found = catalogue(tmp_path / 'models')['fs2d-assistant:qwen3.5-4b']
-    assert found.registry == 'ns/fs2d-assistant:qwen3.5-4b' and found.bundle is not None
-
-
-def test_verified_schemas_count_as_a_fit(tmp_path):
-    from frictionsim2d.agent.bundles import FineTune
-    tune = FineTune(tag='t', base='b', schema_hash='old', knowledge_hash='k',
-                    verified_schemas=('new',))
+def test_verified_schemas_count_as_a_fit():
+    tune = FineTune(tag='t', base='b', schema_hash='old', verified_schemas=('new',))
     assert tune.fits('old') and tune.fits('new') and not tune.fits('other')
 
 
 def test_bundles_use_the_one_sha256_file():
     from frictionsim2d.data import provenance
-    from frictionsim2d.agent import bundles
     assert bundles.sha256_file is provenance.sha256_file
