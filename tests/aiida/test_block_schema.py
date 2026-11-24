@@ -92,6 +92,17 @@ def test_cross_check_uses_the_one_exact_constant(family):
                          drive_k=50.0 / 16.02))
 
 
+@pytest.mark.parametrize('family', ['afm', 'sheetonsheet'])
+@pytest.mark.parametrize('spring', [50.0, 801.0])
+def test_cross_check_accepts_a_drive_k_built_with_the_codata2010_factor(family, spring):
+    """Stored runs converted N/m with 16.02176565 before the constant moved."""
+    check_units(_run(family=family, driving_spring=spring, drive_method='smd',
+                     drive_k=spring / 16.02176565))
+    with pytest.raises(UnitMismatch):
+        check_units(_run(family=family, driving_spring=spring, drive_method='smd',
+                         drive_k=spring / 16.03))
+
+
 def test_cross_check_reads_elided_defaults_and_fallbacks():
     # Both fields elided: virtual_atom and 50 N/m are the defaults.
     check_units(_run(drive_k=50.0 / NM_TO_EV_A2))

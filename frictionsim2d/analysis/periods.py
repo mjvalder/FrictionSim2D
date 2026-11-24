@@ -26,6 +26,7 @@ import pandas as pd
 from pydantic import BaseModel, field_validator
 
 from ..core.observables import EV_A_TO_NN
+from ..data.models import NM_TO_EV_A2
 from .base import Analysis, register
 from .source import material_names
 
@@ -38,7 +39,7 @@ __all__ = ['GEOMETRY', 'NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'WINDOW', 'Peri
 
 #: 1 N/m in eV/A^2 (ingest_v2): a run without a recorded
 #: ``drive_k`` takes its ``driving_spring`` through it.
-N_PER_M_TO_EV_PER_A2 = 0.06241509
+N_PER_M_TO_EV_PER_A2 = 1 / NM_TO_EV_A2
 #: The transient is capped at this fraction of the window.
 SETTLE_CAP = 0.5
 #: The drop reason of a run at a nonzero angle.

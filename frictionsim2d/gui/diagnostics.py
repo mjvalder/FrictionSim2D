@@ -78,12 +78,12 @@ def _display(report: Report) -> None:
 
 
 def _external_tools(report: Report) -> None:
-    path = shutil.which("lmp")
-    report.add("lmp on PATH", path is not None, path or "not found")
+    lmp = shutil.which("lmp")
+    report.add("lmp on PATH", lmp is not None, lmp or "not found")
     # atomsk is optional: reported, never a failure.
-    path = shutil.which("atomsk")
-    report.add("atomsk on PATH (optional)", True, path or "not found")
-    if shutil.which("lmp") is None:
+    atomsk = shutil.which("atomsk")
+    report.add("atomsk on PATH (optional)", True, atomsk or "not found")
+    if lmp is None:
         report.notes.append(
             "lmp not found -- the active conda environment is probably not 'aiida'."
         )

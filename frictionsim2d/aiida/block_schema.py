@@ -704,6 +704,10 @@ SPRING_METHODS = frozenset({'smd', 'virtual_atom'})
 #: accepts it for legacy AFM-family records only (:func:`_legacy_afm_spring`).
 LEGACY_AFM_SPRING_FACTOR = 16.02
 
+#: The CODATA-2010 N/m -> eV/A^2 factor (16.02176565) that builds used before the
+#: constant moved to CODATA 2018; stored ``drive_k`` of those runs is still valid.
+_CODATA2010_SPRING_FACTOR = 16.02176565
+
 #: The provenance schema of the first builds with the exact AFM factor.
 _EXACT_SPRING_SCHEMA = '2.2.0'
 
@@ -742,7 +746,7 @@ def check_units(blocks: RunBlocks, *, record: Optional[Mapping[str, Any]] = None
     N/m (or converted twice) fails the import. Runs without a spring, or
     without a recorded ``drive_k``, pass. ``record`` is the run's
     ``provenance.json``: a legacy AFM-family record may also match
-    :data:`LEGACY_AFM_SPRING_FACTOR`; every other run uses only NM_TO_EV_A2.
+    :data:`LEGACY_AFM_SPRING_FACTOR`; every run also matches the CODATA-2010 factor of older builds.
     """
     defaults = defaults_for(blocks.family)
     fields = (blocks.blocks.get(_DRIVE) or {}).get('fields') or {}
@@ -752,7 +756,7 @@ def check_units(blocks: RunBlocks, *, record: Optional[Mapping[str, Any]] = None
     if method not in SPRING_METHODS or drive_k is None:
         return
     spring = fields.get('general.driving_spring', defaults.get('general.driving_spring'))
-    factors = [NM_TO_EV_A2]
+    factors = [NM_TO_EV_A2, _CODATA2010_SPRING_FACTOR]
     if _legacy_afm_spring(blocks.family, record):
         factors.append(LEGACY_AFM_SPRING_FACTOR)
     candidates = [(spring or _spring_fallback(blocks.family)) / f for f in factors]
