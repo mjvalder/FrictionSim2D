@@ -89,15 +89,15 @@ class MLIPSpec:
         """Return a full ``pair_coeff`` line for this framework.
 
         Inside ``pair_style hybrid`` the line names the sub-style. Outside it
-        that token is not a selector, so ``hybrid=False`` drops it:
+        that token is not a selector, so ``hybrid=False`` drops it. Keeping it
+        fails for both frameworks:
 
-        * MACE: kept, LAMMPS reads ``symmetrix/mace`` as the model filename
-          and rejects the pair_style (measured 2026-08-24).
-        * DeePMD: kept, pair_deepmd reads it as an element ("element deepmd
-          not found in the model", pair_deepmd.cpp:860).
+        * MACE: LAMMPS would read ``symmetrix/mace`` as the model filename and
+          reject the pair_style (measured 2026-08-24).
+        * DeePMD: pair_deepmd would read ``deepmd`` as an element ("element
+          deepmd not found in the model", pair_deepmd.cpp:860).
 
-        What
-        remains differs only because deepmd carries its model path in the
+        What remains differs only because deepmd carries its model path in the
         pair_style line and symmetrix carries it here.
 
         Args:
