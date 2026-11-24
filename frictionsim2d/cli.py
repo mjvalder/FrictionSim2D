@@ -40,7 +40,13 @@ def _ensure_hpc_settings(hpc_settings) -> None:
 
 
 def _run_simulation(model: str, config_file: str, output_dir: str,
-                    generate_hpc: bool, settings_file: Optional[Path] = None):
+                    generate_hpc: bool, settings_file: Optional[Path] = None,
+                    **extra) -> Optional[Path]:
+    """Run ``run_simulations`` for a ``run`` subcommand; return the simulation root.
+
+    ``extra`` goes to ``run_simulations`` as is (``quench_for``, ``force``).
+    """
+    from .builders.construction.amorphous import AmorphousMissing
     try:
         created_simulations, simulation_root, configs_to_run, _ = run_simulations(
             config_file=config_file,
@@ -49,7 +55,13 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
             output_root=Path(output_dir),
             ensure_hpc_settings=_ensure_hpc_settings,
             generate_hpc=generate_hpc,
+            **extra,
         )
+    except AmorphousMissing as exc:
+        # Not a crash and not a config error: the message names the block that
+        # is missing and the `run quench --for` line that creates its job.
+        click.echo(str(exc), err=True)
+        raise SystemExit(1) from exc
     except (ValueError, FileNotFoundError) as exc:
         # A rejected config is a user error, not a crash: expansion refusals
         # (`run/expand.py`), the runtime sweep-ordering check, and pydantic's
@@ -65,6 +77,10 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
         click.echo(f"❌ {exc}", err=True)
         raise click.Abort() from exc
 
+    if simulation_root is None:
+        click.echo("✅ all amorphous blocks present: nothing to quench.")
+        return None
+
     click.echo(f"📋 Found {len(configs_to_run)} simulation configurations")
 
     click.echo(
@@ -76,6 +92,7 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
         # A build that failed (logged above) must fail the command, or a
         # script chaining `run` and `hpc generate` carries on as if it worked.
         raise SystemExit(1)
+    return simulation_root
 
 # =============================================================================
 # MAIN CLI GROUP
@@ -226,6 +243,72 @@ def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
         'indent', config_file, output_dir, generate_hpc,
         settings_file=settings_file
     )
+
+
+@run_group.command('quench')
+@click.argument('config_file', required=False, type=click.Path(exists=True))
+@click.option('--for', 'for_config', type=click.Path(exists=True, dir_okay=False),
+              default=None,
+              help='A friction config: make one member per amorphous block it is missing.')
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help='Path to a settings.yaml file for this run only.')
+@click.option('--output-dir', '-o', default='simulation_output',
+              help='Output directory for generated files')
+@click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
+              help='Generate HPC scripts for the simulation root')
+@click.option('--local', 'run_local', is_flag=True,
+              help='Then run every member here with serial lmp (hours) and import the blocks.')
+@click.option('--force', is_flag=True,
+              help='Quench members a library block already satisfies.')
+def run_quench(config_file: Optional[str], for_config: Optional[str],  # pylint: disable=too-many-arguments
+               settings_file: Optional[Path], output_dir: str, generate_hpc: bool,
+               run_local: bool, force: bool):
+    """Generate melt-quench jobs that make amorphous blocks.
+
+    CONFIG has a [quench] section (see examples/quench_config.ini); with
+    --for, the members are the blocks a friction config is missing. Only
+    decks are written: run them on the HPC (`hpc generate`, or --hpc-scripts)
+    and `FrictionSim2D quench import ROOT`, or add --local to run and import
+    them here.
+
+    Examples:
+        FrictionSim2D run quench examples/quench_config.ini -o ./quench
+        FrictionSim2D run quench --for examples/afm_config.ini -o ./quench --hpc-scripts
+    """
+    if bool(config_file) == bool(for_config):
+        raise click.UsageError('give either CONFIG (a [quench] config) or --for FRICTION_CONFIG')
+    root = _run_simulation('quench', config_file or for_config, output_dir, generate_hpc,
+                           settings_file=settings_file, quench_for=bool(for_config),
+                           force=force)
+    if root is None:
+        return
+    if run_local:
+        from .builders.construction.amorphous import run_quench_root_local
+        click.echo("⏳ Running the melt-quench members serially (this takes hours)...")
+        run_quench_root_local(root)
+        _report_quench_import(root, replace=False, source='local')
+    else:
+        click.echo(f"\n📝 Next: run it (FrictionSim2D hpc generate {root} --scheduler pbs), "
+                   f"then FrictionSim2D quench import {root}")
+
+
+def _report_quench_import(root: Path, replace: bool, source: str) -> None:
+    """Import a quench root, echo the outcome, exit 1 on anything left out."""
+    from .builders.construction.amorphous import import_quench_root
+    report = import_quench_root(root, replace=replace, source=source)
+    for path in report.imported:
+        click.echo(f"✅ imported {path}")
+    for path in report.unchanged:
+        click.echo(f"= already in the library: {path}")
+    for message in report.warnings:
+        click.echo(f"⚠️  {message}")
+    for member, reason in report.refused:
+        click.echo(f"❌ refused {member}: {reason}", err=True)
+    for member, reason in report.incomplete:
+        click.echo(f"❌ incomplete {member}: {reason}", err=True)
+    if report.refused or report.incomplete:
+        raise SystemExit(1)
 
 
 def _raise_abort(message: str, exc: Exception) -> NoReturn:
@@ -586,6 +669,71 @@ def hpc_enrich_provenance(sim_dir: Path, log_path: Optional[Path],
         click.echo(f"{outcome} {rel}: {detail}")
     click.echo(f"{tally['enriched']} enriched, {tally['unchanged']} unchanged, "
                f"{tally['skipped']} skipped.")
+
+
+# =============================================================================
+# QUENCH COMMANDS (the amorphous block library)
+# =============================================================================
+
+@cli.group('quench')
+def quench_group():
+    """The amorphous block library: import finished quench runs, list blocks.
+
+    Blocks are made with `FrictionSim2D run quench`.
+    """
+
+
+@quench_group.command('import')
+@click.argument('root', type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option('--replace', is_flag=True,
+              help='Replace a same-key library block even if the new one is not larger.')
+def quench_import(root: Path, replace: bool):
+    """Copy every finished member of a quench ROOT into the user library.
+
+    Incomplete members are listed and the command exits 1; a member is never
+    half-imported. Writes only under $XDG_DATA_HOME/FrictionSim2D/amorphous.
+
+    Example:
+        FrictionSim2D quench import ./quench/quench_20261124_101500
+    """
+    _report_quench_import(root, replace=replace, source='hpc')
+
+
+@quench_group.command('list')
+@click.argument('material', required=False)
+@click.option('--json', 'as_json', is_flag=True, help='Print JSON rows instead of a table.')
+def quench_list(material: Optional[str], as_json: bool):
+    """List the amorphous blocks of every library root (read-only).
+
+    Example:
+        FrictionSim2D quench list Si
+    """
+    import json as _json
+    from .builders.construction.amorphous import CONDITION_FIELDS, scan_blocks
+    rows = []
+    for block in scan_blocks(material):
+        rows.append({
+            'file': block.path.name, 'root': block.root, 'path': str(block.path),
+            'key8': block.key.key8 if block.key else None,
+            'unkeyed': block.unkeyed_reason,
+            'box': list(block.box) if block.box else None,
+            'natoms': block.meta.get('natoms'),
+            **{name: getattr(block.key, name) if block.key else block.meta.get(name)
+               for name in CONDITION_FIELDS},
+        })
+    if as_json:
+        click.echo(_json.dumps(rows, indent=2))
+        return
+    if not rows:
+        click.echo("No amorphous blocks found.")
+        return
+    for row in rows:
+        box = 'x'.join(f'{v:.1f}' for v in row['box']) + ' A' if row['box'] else 'no box'
+        key = row['key8'] or f"unkeyed ({row['unkeyed']})"
+        conditions = ', '.join(f"{name}={row[name]}" for name in CONDITION_FIELDS
+                               if row[name] is not None)
+        click.echo(f"{row['file']}  {row['root']}  {key}  {box}  "
+                   f"natoms={row['natoms']}  {conditions}")
 
 
 # =============================================================================
