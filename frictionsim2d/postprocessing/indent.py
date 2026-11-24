@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ..core.utils.tokens import material_id
-from ..data.models import EV_A_TO_NN
+from ..core.observables import EV_A_TO_NN
 from ..run.tree import discover_runs
 
 logger = logging.getLogger(__name__)

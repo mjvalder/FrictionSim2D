@@ -1324,12 +1324,13 @@ def test_integrity_overrides_parse_scalars_and_margins():
     from frictionsim2d.core.config import integrity_overrides
 
     assert integrity_overrides(['hole_bonds=2', 'ejected_atoms=none', 'collapse=false',
-                                'margins.hole=0.1', 'margins.gap=0.2']) == {
+                                'margins.hole=0.1', 'margins.gap_rise=0.2']) == {
         'hole_bonds': 2, 'ejected_atoms': None, 'collapse': False,
-        'margins': {'hole': 0.1, 'gap': 0.2}}
+        'margins': {'hole': 0.1, 'gap_rise': 0.2}}
 
 
-@pytest.mark.parametrize('pair', ['hole_bonds', '=3', 'bogus=1', 'margins=1', 'margins.=1'])
+@pytest.mark.parametrize('pair', ['hole_bonds', '=3', 'bogus=1', 'margins=1', 'margins.=1',
+                                  'margins.nonsense=0.1'])
 def test_integrity_overrides_reject_a_bad_key(pair):
     from frictionsim2d.core.config import integrity_overrides
 
@@ -1350,3 +1351,10 @@ def test_merged_integrity_overrides_one_threshold_and_revalidates():
     assert merged_integrity(base, None) == base
     with pytest.raises(ValidationError):
         merged_integrity(base, {'isolated_atoms': 'many'})
+
+
+def test_margin_keys_match_the_integrity_rules():
+    from frictionsim2d.core import config
+    from frictionsim2d.postprocessing.integrity import MARGIN_KEYS
+
+    assert config._MARGIN_KEYS == MARGIN_KEYS  # pylint: disable=protected-access

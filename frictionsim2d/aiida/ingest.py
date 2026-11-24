@@ -865,8 +865,9 @@ def _dry_rulings(state: _Import, root: Path) -> None:
 def _integrity_pass(state: _Import) -> None:
     """A verdict for every live point of the set that has none, then the
     set's rulings (:mod:`frictionsim2d.aiida.steps`)."""
-    # `steps` reads this module's labels; looked up at call time so the two
-    # do not form an import cycle (as `calcjob` does with `load_points`).
+    # `steps` imports aiida at module level and this module must stay importable
+    # without it, so it is looked up at call time (which also avoids the import
+    # cycle, as `calcjob` does with `load_points`).
     steps = import_module(f'{__package__}.steps')
     check_group, rule_group = steps.check_group, steps.rule_group
 

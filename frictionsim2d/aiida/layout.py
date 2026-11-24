@@ -24,9 +24,10 @@ if TYPE_CHECKING:  # pragma: no cover
     from .ingest import LoadPoint
 
 __all__ = ['ANALYSIS_GROUP_PREFIX', 'CONFLICT', 'DATASET_PREFIX', 'GROUP_PREFIX',
-           'LOAD_TOL', 'RETRIEVE_LIST', 'SET_GROUP_FILTER', 'TIER_KEYS', 'Deck', 'content_hash',
-           'build_dir', 'deck_log', 'discover_decks', 'group_label', 'is_conflict', 'is_superseded',
-           'plain_files', 'points_for', 'reads_build']
+           'LOAD_TOL', 'RETRIEVE_LIST', 'SET_GROUP_FILTER', 'TIER_KEYS', 'Deck',
+           'build_dir', 'content_hash', 'deck_log', 'discover_decks', 'group_label',
+           'is_conflict', 'is_set_label', 'is_superseded', 'plain_files', 'points_for',
+           'reads_build']
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +46,15 @@ GROUP_PREFIX = 'friction2d/'
 DATASET_PREFIX = 'friction2d/datasets/'
 ANALYSIS_GROUP_PREFIX = 'friction2d/analyses/'
 
-#: QueryBuilder filter on Group labels: the set Groups, not datasets or analyses.
-SET_GROUP_FILTER = {'and': [{'label': {'like': f'{GROUP_PREFIX}%'}},
-                            {'label': {'!like': f'{DATASET_PREFIX}%'}},
-                            {'label': {'!like': f'{ANALYSIS_GROUP_PREFIX}%'}}]}
+#: QueryBuilder filter on Group labels that narrows to ``friction2d/...``; :func:`is_set_label`
+#: then drops datasets and analyses (case-sensitively).
+SET_GROUP_FILTER = {'label': {'like': f'{GROUP_PREFIX}%'}}
+
+
+def is_set_label(label: str) -> bool:
+    """Whether a Group label names a set, not a dataset or an analysis."""
+    return label.startswith(GROUP_PREFIX) and not label.startswith(
+        (DATASET_PREFIX, ANALYSIS_GROUP_PREFIX))
 
 
 def group_label(label: str) -> str:

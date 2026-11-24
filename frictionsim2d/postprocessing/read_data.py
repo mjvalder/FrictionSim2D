@@ -506,8 +506,8 @@ def resolve_n_layers(locator, config: Optional[dict] = None) -> int:
     its peratom `v_pe_sum_L3/L4`, `v_sigma_*_L3/L4` would stay un-renamed.
 
     The count IS on disk. `ProvenanceRecord.layer_type_map` is keyed
-    `layer_1 ... layer_n` (written by the sheet and AFM builders), and `discover_runs` already opens that
-    file to read `family`. It is `{}` for hetero and flake, whose layers are
+    `layer_1 ... layer_n` (written by the sheet and AFM builders), and `discover_runs` already
+    opens that file to read `family`. It is `{}` for hetero and flake, whose layers are
     z-band regions rather than atom-type groups; those read the count off the
     run's `config` (`_config_sheet_layers`), and only without one log and fall
     back to 2, which is what they have always assumed.

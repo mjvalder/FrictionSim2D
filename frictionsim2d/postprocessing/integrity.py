@@ -287,6 +287,9 @@ _RULES = (
 )
 _BOOLEAN_RULES = ('non_finite', 'frozen')
 
+#: What a ``margins`` key may name: a rule or its measure key.
+MARGIN_KEYS = frozenset(name for rule, key, _a, _u in _RULES for name in (rule, key))
+
 MULTI_SPEED_DETAIL = 'snapshot rules skipped: multi-speed run'
 NO_SNAPSHOT_DETAIL = 'snapshot rules not applicable: run writes no end snapshot'
 #: The descriptive (non-rule-name) entries ``check_files`` puts in ``not_applicable``.

@@ -12,15 +12,13 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from ..core.observables import PES_FAMILIES, SLIDE_FAMILIES, channel_by_role
+# Re-exported: the builders and read_data import it from here.
+from ..core.observables import EV_A_TO_NN  # noqa: F401  # pylint: disable=unused-import
 
 
 # ---------------------------------------------------------------------------
 # Physical unit conversion constants (LAMMPS metal units)
 # ---------------------------------------------------------------------------
-
-#: eV/Å → nanoNewton (force conversion).  1 eV = 1.602176565e-19 J,
-#: 1 Å = 1e-10 m  ⇒  1 eV/Å = 1.602176565 nN.
-EV_A_TO_NN: float = 1.602176565
 
 #: eV/Å³ → GigaPascal (pressure conversion).  = EV_A_TO_NN × 100.
 EV_A3_TO_GPA: float = 160.2176565
@@ -310,7 +308,7 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
 
     retract = frames_by_tier.get('retract')
     if family == 'indent' and retract is not None and len(retract):
-        from ..postprocessing.indent import retract_features  # pylint: disable=import-outside-toplevel
+        from ..postprocessing.indent import retract_features  # pylint: disable=import-outside-toplevel,cyclic-import
         summary.extras.update(
             {k: _finite(v) for k, v in retract_features(retract).items()})
 

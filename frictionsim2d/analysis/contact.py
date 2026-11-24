@@ -1,8 +1,8 @@
 """Tip-sheet contact at the loaded state (before sliding) and at the end of the slide.
 
 Method as in ML_taxonomy's ``s40_contact_loaded.py``, whose parsing and
-contact rule are ``s36_contact_endstates.py``'s. One row per run and state: ``load`` reads ``load_<F>N.data``
-(after loading, before sliding), ``final`` the point's end snapshot
+contact rule are ``s36_contact_endstates.py``'s. One row per run and state: ``load`` reads
+``load_<F>N.data`` (after loading, before sliding), ``final`` the point's end snapshot
 (``final_f<F>N_a0.data`` at 0 degrees).
 
 Per snapshot:

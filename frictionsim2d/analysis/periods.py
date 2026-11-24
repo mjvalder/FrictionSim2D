@@ -247,8 +247,8 @@ class PeriodParams(BaseModel):
     stored dataset (a test's) computes `sheet_geometry` from itself.
     Each material takes its row of layer :data:`GEOMETRY_LAYER`, else layer
     1, else its highest (a sheet stack's). ``lattice``: material -> A, the
-    fallback for a material with no geometry row (the database ``lat_a``). A run whose material has neither is dropped
-    (:data:`NO_PERIOD`): it has no whole periods.
+    fallback for a material with no geometry row (the database ``lat_a``). A run whose
+    material has neither is dropped (:data:`NO_PERIOD`): it has no whole periods.
     """
 
     period_x: Optional[Dict[str, float]] = None

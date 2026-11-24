@@ -37,7 +37,8 @@ from aiida.engine import calcfunction
 
 from .. import __version__ as CODE_VERSION
 from .layout import (
-    ANALYSIS_GROUP_PREFIX, DATASET_PREFIX, GROUP_PREFIX, SET_GROUP_FILTER, is_superseded,
+    ANALYSIS_GROUP_PREFIX, DATASET_PREFIX, GROUP_PREFIX, SET_GROUP_FILTER, is_set_label,
+    is_superseded,
 )
 from .rulings import Policy, select
 from .store import resolve_set, set_calcjobs
@@ -1834,7 +1835,8 @@ def delete_dataset(name: str, *, profile: Optional[str] = None) -> DatasetDeleti
 
 def _set_groups() -> List[Any]:
     """Every ``friction2d/<label>`` set Group (dataset and analysis Groups excluded)."""
-    return orm.QueryBuilder().append(orm.Group, filters=SET_GROUP_FILTER).all(flat=True)
+    groups = orm.QueryBuilder().append(orm.Group, filters=SET_GROUP_FILTER).all(flat=True)
+    return [g for g in groups if is_set_label(g.label)]
 
 
 def _held_elsewhere(group) -> Set[int]:

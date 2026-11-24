@@ -264,6 +264,13 @@ class IntegritySettings(BaseModel):
     model_config = {'validate_by_name': True}
 
 
+#: What a ``margins`` key may name: a rule or its measure key
+#: (``postprocessing.integrity.MARGIN_KEYS`` is derived from the rules and pinned equal by a test).
+_MARGIN_KEYS = frozenset({
+    'non_finite', 'frozen', 'hole', 'isolated_atoms', 'isolated', 'ejected_atoms', 'ejected',
+    'sheet_heating', 'T_sigma', 'gap_rise', 'collapse', 'gap_min_any'})
+
+
 def _integrity_fields() -> set:
     return set(IntegritySettings.model_fields)
 
@@ -286,6 +293,9 @@ def integrity_overrides(pairs: Sequence[str]) -> Dict[str, Any]:
         value = None if text.strip().lower() == 'none' else yaml.safe_load(text)
         head, dot, rule = key.partition('.')
         if head == 'margins' and dot and rule:
+            if rule not in _MARGIN_KEYS:
+                raise ValueError(f'unknown integrity rule {rule!r} in {key!r}; known: '
+                                 f'{", ".join(sorted(_MARGIN_KEYS))}')
             out.setdefault('margins', {})[rule] = value
         elif key != 'margins' and key in _integrity_fields():
             out[key] = value

@@ -181,3 +181,14 @@ def test_lattice_imports_nothing_from_builders_at_module_level():
 def test_importing_data_provenance_does_not_load_numpy():
     """``data/__init__.py`` stays empty: provenance needs no numpy."""
     assert not _loaded_after_importing("frictionsim2d.data.provenance", "numpy")
+
+
+def test_aiida_export_and_layout_import_without_aiida_core():
+    """export.py defers every aiida import; layout is aiida-free."""
+    import subprocess
+    import sys
+    code = ("import sys; sys.modules['aiida'] = None; "
+            "import frictionsim2d.aiida.export, frictionsim2d.aiida.layout")
+    done = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                          check=False)
+    assert done.returncode == 0, done.stderr

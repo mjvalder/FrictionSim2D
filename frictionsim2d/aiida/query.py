@@ -40,7 +40,9 @@ from ..core.compare import canonical_text, refill
 from .block_schema import BLOCK_KINDS, FIELD_MAP, REALIZATION_FIELDS, unindexed
 from .blocks import NAME_SEP, block_kind
 from .compare import block_name, schema_tables
-from .layout import DATASET_PREFIX, GROUP_PREFIX, SET_GROUP_FILTER, is_superseded
+from .layout import (
+    DATASET_PREFIX, GROUP_PREFIX, SET_GROUP_FILTER, is_set_label, is_superseded,
+)
 from .rulings import Policy
 
 try:
@@ -136,7 +138,8 @@ def _set_group_rows() -> List[Tuple[str, str, int, Dict[str, Any]]]:
     """``(label, uuid, pk, extras)`` of every ``friction2d/<label>`` set Group."""
     qb = orm.QueryBuilder().append(
         orm.Group, filters=SET_GROUP_FILTER, project=['label', 'uuid', 'id', 'extras'])
-    return [(label, uuid, pk, extras or {}) for label, uuid, pk, extras in qb.all()]
+    return [(label, uuid, pk, extras or {}) for label, uuid, pk, extras in qb.all()
+            if is_set_label(label)]
 
 
 def _labels_of_calcs() -> Dict[str, List[str]]:
@@ -146,7 +149,8 @@ def _labels_of_calcs() -> Dict[str, List[str]]:
     qb.append(orm.CalcJobNode, with_group='g', project='uuid')
     out: Dict[str, Set[str]] = {}
     for label, uuid in qb.all():
-        out.setdefault(str(uuid), set()).add(label[len(GROUP_PREFIX):])
+        if is_set_label(label):
+            out.setdefault(str(uuid), set()).add(label[len(GROUP_PREFIX):])
     return {uuid: sorted(labels) for uuid, labels in out.items()}
 
 

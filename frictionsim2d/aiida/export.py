@@ -48,7 +48,6 @@ from ..run.artifacts import generate_package
 from ..run.naming import AFM_LIKE_MODELS
 from ..run.tree import provenance_dir_for
 from .layout import ANALYSIS_GROUP_PREFIX, DATASET_PREFIX, is_superseded
-from .store import resolve_set, set_calcjobs
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +98,18 @@ def _load_profile(profile: Optional[str]) -> None:
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
     load_aiida_profile(profile)
+
+
+def resolve_set(label: str):
+    """The Group ``friction2d/<label>`` (``LookupError`` when there is none)."""
+    from .store import resolve_set as _resolve  # pylint: disable=import-outside-toplevel
+    return _resolve(label)
+
+
+def set_calcjobs(group) -> List[Any]:
+    """Every CalcJob of ``group``, in pk order."""
+    from .store import set_calcjobs as _calcjobs  # pylint: disable=import-outside-toplevel
+    return _calcjobs(group)
 
 
 def _live_calcjobs(group) -> List[Any]:
