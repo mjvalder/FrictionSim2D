@@ -36,7 +36,7 @@ from .periods import json_before, material_key, summary_identity
 __all__ = ['KIND_BY_FAMILY', 'NO_GRID', 'PesLandscape', 'PesLandscapeParams', 'pt_eta']
 
 #: The drop reason of a run with no usable grid (no window tier, no
-#: ``energy_eV``, or fewer than 4 points: ``pes_scan.extract_all`` :178).
+#: ``energy_eV``, or fewer than 4 points: ``pes_scan.extract_all``).
 NO_GRID = 'no_pes_grid'
 #: The fewest grid points ``pes_scan.extract_all`` reduces.
 MIN_GRID_POINTS = 4

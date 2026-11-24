@@ -93,8 +93,7 @@ class CofRanking(PeriodDepends, Analysis):
 
     def compute(self, source, params) -> pd.DataFrame:
         """One row per material of the dataset at ``layer`` and ``angle``:
-        the ranked ones by ``cof``, then the excluded ones by name
-."""
+        the ranked ones by ``cof``, then the excluded ones by name."""
         loads = tuple(float(f) for f in params.loads)
         scope = source.all_rows
         scope = scope[(scope['layers'] == params.layer)

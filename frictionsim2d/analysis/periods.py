@@ -51,7 +51,7 @@ NO_PERIOD = 'no_lattice_period'
 #: The drop reason of a run with no drive step (no speed or timestep).
 NO_DRIVE_STEP = 'no_drive_step'
 #: The layer whose ``period_x_top`` sets ``a_x``: the published tables read
-#: the v2 AFM bilayers' .
+#: the v2 AFM bilayers'.
 #: A material without one takes its monolayer's, then its own stack's.
 GEOMETRY_LAYER = 2
 #: Fewer raw samples than this give no FFT period.
@@ -118,8 +118,7 @@ def _forces(family: str, window: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, 
 
 
 def _mean(values: np.ndarray, family: str) -> float:
-    """The sheet converter's ``nanmean``; a plain mean for AFM
-."""
+    """The sheet converter's ``nanmean``; a plain mean for AFM."""
     return float(np.nanmean(values) if family == 'sheetonsheet' else values.mean())
 
 

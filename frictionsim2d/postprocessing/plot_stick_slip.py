@@ -12,7 +12,6 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib import ticker
-from scipy.signal import find_peaks
 
 from .plot_mixin_base import PlotterMixinBase
 from .plot_style import StickSlipPSD
@@ -152,6 +151,7 @@ class PlotStickSlipMixin(PlotterMixinBase):
         Returns a :class:`StickSlipPSD` dataclass, or ``None`` when the
         computation cannot proceed.
         """
+        from scipy.signal import find_peaks  # pylint: disable=import-outside-toplevel
         dt = float(np.median(np.diff(t)))
         if dt <= 0:
             logger.error("Non-positive time step detected.")
@@ -239,6 +239,7 @@ class PlotStickSlipMixin(PlotterMixinBase):
 
     def _generate_stick_slip_analysis_plot(self, plot_config: dict) -> None:
         """Run stick-slip diagnostics and export displacement/PSD plots."""
+        from scipy.signal import find_peaks  # pylint: disable=import-outside-toplevel
         run_data = self._load_stick_slip_run(plot_config)
         if run_data is None:
             return

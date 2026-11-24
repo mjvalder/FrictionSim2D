@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 class SchemaError(ValueError):
-    """Results file layout does not match any known schema (spec §1.1).
+    """Results file layout does not match any known schema.
 
     Raised instead of silently mis-aligning: a header-less file whose column
     count differs from the LEGACY_2026 positional list is corrupt or from an
@@ -499,15 +499,14 @@ def resolve_n_layers(locator, config: Optional[dict] = None) -> int:
 
     `RunTokens.layers` is the `L{n}` path level, and `output_dir_for` emits one
     only for the AFM-like models -- the AFM builders append it
-    (`frictionsim2d/builders/afm/base.py:182`), the sheet-like ones never do. So for
+    (`AFMSimulation` builders), the sheet-like ones never do. So for
     `sheetonsheet`, `hetero`, `flake` and `pes_sheet` the token is `None`, and
     defaulting it to 2 is exactly the defect P3 exists to fix, missed in the
     families that need it most: a `layers=[4]` sheet run's `v_comz_L3`/`L4` and
     its peratom `v_pe_sum_L3/L4`, `v_sigma_*_L3/L4` would stay un-renamed.
 
     The count IS on disk. `ProvenanceRecord.layer_type_map` is keyed
-    `layer_1 ... layer_n` (`frictionsim2d/builders/sheetonsheet/base.py:62-83`,
-    `frictionsim2d/builders/afm/base.py:961-969`), and `discover_runs` already opens that
+    `layer_1 ... layer_n` (written by the sheet and AFM builders), and `discover_runs` already opens that
     file to read `family`. It is `{}` for hetero and flake, whose layers are
     z-band regions rather than atom-type groups; those read the count off the
     run's `config` (`_config_sheet_layers`), and only without one log and fall

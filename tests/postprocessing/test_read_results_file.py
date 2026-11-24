@@ -93,6 +93,8 @@ def test_unknown_family_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match='unknown family'):
         read_results_file(path, 'poke')
+
+
 def test_raw_tier_is_picked_from_the_filename_prefix(tmp_path):
     path = tmp_path / 'raw_f30_a0_s2_layer2.txt'
     path.write_text(

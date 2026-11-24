@@ -1,4 +1,4 @@
-"""Versioned slip-event analyser over the 100 fs raw trace (spec §5 F4).
+"""Versioned slip-event analyser over the 100 fs raw trace.
 
 The slip-event definition is deliberately post-hoc and versioned: an
 in-LAMMPS aggregate would freeze it at simulation time, whereas the raw trace

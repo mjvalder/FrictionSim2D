@@ -39,7 +39,7 @@ def add_plot_derived_columns(df: pd.DataFrame, time_step_fs: float) -> pd.DataFr
     # react_x/react_y and drive_fx/drive_fy for retained files, but older
     # files parsed before that declaration -- or read through a path that
     # skips the rename -- still carry the native names. Both are accepted,
-    # mirroring DataReader._branch_column / _lateral_columns.
+    # mirroring `read_data.branch_column` / `lateral_columns`.
     if 'react_x' in df.columns and 'react_y' in df.columns:
         df['lf_sx_sy'] = np.sqrt(df['react_x']**2 + df['react_y']**2)
     elif 'v_sx' in df.columns and 'v_sy' in df.columns:

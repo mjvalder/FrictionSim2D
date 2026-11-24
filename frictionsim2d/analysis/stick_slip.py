@@ -58,7 +58,7 @@ MIN_SLIP_A = 0.3
 TAXLIB_SLIP_K = 5.0
 #: taxlib: a slip event covers at least this many lattice periods.
 TAXLIB_MIN_SLIP_A = 0.3
-#: The drop reasons of a run without the tiers s39 reads (s39:212 keeps a
+#: The drop reasons of a run without the tiers the method reads (it keeps a
 #: run only if it has both).
 NO_RAW = 'no_raw_tier'
 NO_PERATOM = 'no_peratom_tier'
@@ -207,8 +207,7 @@ def slips_per_period_taxlib(tipx: np.ndarray, dx: float, a: float,
     the window's ``tipx``: a sample slips when the tip advances more than the
     drive step ``dx`` plus :data:`TAXLIB_SLIP_K` robust sd of its jitter;
     consecutive slipping samples make one event, kept when it covers
-    >= :data:`TAXLIB_MIN_SLIP_A` ``a``. ``travel`` is taxlib's ``L = dx * N``
-."""
+    >= :data:`TAXLIB_MIN_SLIP_A` ``a``. ``travel`` is taxlib's ``L = dx * N``."""
     dtx = np.diff(np.asarray(tipx, dtype=float))
     jit = 1.4826 * np.median(np.abs(dtx - np.median(dtx)))      # the run's own thermal jitter
     slipping = dtx > dx + TAXLIB_SLIP_K * jit

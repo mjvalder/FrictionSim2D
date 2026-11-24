@@ -13,7 +13,7 @@ from ...core.observables import (
     REGISTRY, TIER_ARGS, channels_for, layer_channels)
 
 #: Output-schema marker stamped on every results file. Must stay in step with
-#: DataReader._LF_SCHEMA_CURRENT; _parse_lf_schema reads the integer, so
+#: read_data.LF_SCHEMA_CURRENT; parse_lf_schema reads the integer, so
 #: adding keys (family=) is not a schema bump.
 _LF_SCHEMA = 2
 

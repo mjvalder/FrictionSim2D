@@ -70,8 +70,8 @@ ELEMENTS: Dict[str, Tuple[int, float]] = {
     'Bi': (15, 2.02),
 }
 
-#: A tip-sheet LJ pair line of ``system.in.settings`` (s40:56, the tip types
-#: left free; the sheet element from the trailing comment).
+#: A tip-sheet LJ pair line of ``system.in.settings`` (the tip types left
+#: free; the sheet element from the trailing comment).
 _PAIR = re.compile(r'^pair_coeff (\S+) ([\d*]+) lj/cut (\S+) (\S+)\s*# \w+\(tip\)-(\w+)\(sheet\)',
                    re.M)
 _LAYER = re.compile(r'^layer_(\d+)$')

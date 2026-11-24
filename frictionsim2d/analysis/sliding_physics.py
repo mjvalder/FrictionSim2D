@@ -91,9 +91,8 @@ NAN = float('nan')
 # --------------------------------------------------------------------------
 
 def spring_fit(lfx: np.ndarray, tipx: np.ndarray, dx: float) -> Tuple[float, float]:
-    """``(K nN/A, r^2)`` of ``lfx = K (dx * step - (tipx - tipx0)) + c``
-; NaN when the stretch varies by less than
-    :data:`MIN_STRETCH_RANGE` or a value is not finite."""
+    """``(K nN/A, r^2)`` of ``lfx = K (dx * step - (tipx - tipx0)) + c``;
+    NaN when the stretch varies by less than :data:`MIN_STRETCH_RANGE` or a value is not finite."""
     lfx = np.asarray(lfx, dtype=float)
     tipx = np.asarray(tipx, dtype=float)
     s = dx * np.arange(len(lfx), dtype=float) - (tipx - tipx[0])
@@ -133,8 +132,8 @@ def friction_work(lfx: np.ndarray, length: float) -> float:
 
 def energy_residual(w: pd.DataFrame, f_n: float, dx: float, w_fric: float,
                     w_floor: float, k: float) -> float:
-    """End residual of the energy balance over max(|W_fric|, floor), 1
-: ``dE_tot - W_drive - W_load + THERMO_SIGN dW_thermostat
+    """End residual of the energy balance over max(|W_fric|, floor), 1:
+    ``dE_tot - W_drive - W_load + THERMO_SIGN dW_thermostat
     + dE_spring``, all eV. NaN without :data:`ENERGY_COLS` or a scale."""
     scale = max(abs(w_fric), w_floor) if np.isfinite(w_floor) else abs(w_fric)
     if not all(c in w.columns for c in ENERGY_COLS) or not np.isfinite(scale) or scale < 1e-9:
@@ -265,8 +264,8 @@ def _finite(value: Any) -> Optional[float]:
 
 
 def load_scale(row: Any) -> Tuple[float, str]:
-    """``(F_N nN, source)``: the achieved load, else the requested force
-. A pressure run has no force: NaN."""
+    """``(F_N nN, source)``: the achieved load, else the requested force.
+    A pressure run has no force: NaN."""
     achieved = _finite(getattr(row, 'load_achieved', None))
     if achieved is not None:
         return achieved, 'provenance'
