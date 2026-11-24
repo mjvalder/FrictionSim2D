@@ -29,14 +29,12 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-from pydantic import field_validator
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks
 
 from .base import Analysis, register
-from .cof_ranking import WINDOW, _loads
-from .periods import (NO_PERIOD, PeriodDepends, PeriodParams, _json_before, drive_step,
-                      material_key, period_map, summary_identity)
+from .periods import (NO_PERIOD, PeriodDepends, TaxlibParams, WindowParams, drive_step,
+                      material_key, period_map, summary_identity, window_rows)
 
 __all__ = ['BIN_A', 'LOCK', 'MIN_OVERLAP', 'MIN_SLIP_A', 'RING', 'R_CLEAR', 'SLIP_K',
            'StickSlip', 'StickSlipParams', 'TAXLIB_SLIP_K', 'measure', 'on_displacement',
@@ -232,25 +230,9 @@ def slips_per_period_taxlib(tipx: np.ndarray, dx: float, a: float,
             len(lengths) / periods if np.isfinite(periods) else np.nan)
 
 
-class StickSlipParams(PeriodParams):
-    """The window loads (s39:49) and the angle, where ``a_x`` comes from
-    (:class:`~.periods.PeriodParams`), and ``taxlib_a``: material -> the
-    lattice ``a`` taxlib counts slips against (its materials database
-    ``lat_a``); a material not in it takes ``a_x``."""
-
-    loads: Tuple[float, ...] = WINDOW
-    angle: float = 0.0
-    taxlib_a: Dict[str, float] = {}
-
-    @field_validator('loads', mode='before')
-    @classmethod
-    def _parse_loads(cls, value: Any) -> Any:
-        return _loads(value)
-
-    @field_validator('taxlib_a', mode='before')
-    @classmethod
-    def _parse_taxlib(cls, value: Any) -> Any:
-        return _json_before(value)
+class StickSlipParams(TaxlibParams, WindowParams):
+    """The window loads and the angle, where ``a_x`` comes from
+    (:class:`~.periods.PeriodParams`), and ``taxlib_a`` (:class:`~.periods.TaxlibParams`)."""
 
 
 @register
@@ -270,10 +252,7 @@ class StickSlip(PeriodDepends, Analysis):  # pylint: disable=too-few-public-meth
         no peratom tier (:data:`NO_PERATOM`), or a trace the measures cannot
         be taken on (:data:`UNMEASURABLE`) is dropped. With no drive step,
         ``slips_per_period_taxlib`` is NaN (s39 merges it ``how='left'``, :215)."""
-        loads = tuple(float(f) for f in params.loads)
-        rows = source.rows
-        rows = rows[rows['load'].astype(float).isin(loads)
-                    & (rows['angle'].astype(float) == float(params.angle))]
+        rows = window_rows(source, params)
         period = period_map(source, params)
         out: List[Dict[str, Any]] = []
         for row in rows.itertuples():

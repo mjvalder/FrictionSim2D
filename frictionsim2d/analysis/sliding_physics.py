@@ -42,10 +42,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from pydantic import field_validator
 
 from .base import Analysis, register
-from .periods import (PeriodParams, _json_before, _spring, drive_step, geometry_depends,
+from .periods import (PeriodParams, TaxlibParams, _spring, drive_step, geometry_depends,
                       material_key, period_map, settle_skip, summary_identity)
 
 __all__ = ['SlidingPhysics', 'SlidingPhysicsParams', 'ageing', 'block_se', 'body_start',
@@ -254,20 +253,11 @@ def shear_strength_gpa(lf: float, area: float) -> float:
 # the analysis
 # --------------------------------------------------------------------------
 
-class SlidingPhysicsParams(PeriodParams):
-    """The angle read (taxlib reads 0 degree runs, taxlib_adapter.py:35),
-    where ``a_x`` comes from (:class:`~.periods.PeriodParams`), and
-    ``taxlib_a``: material -> the lattice ``a`` taxlib scales by (its
-    materials database ``lat_a``, taxlib_adapter.py:46-51); a material not in
-    it takes ``a_x``."""
+class SlidingPhysicsParams(TaxlibParams, PeriodParams):
+    """The angle read (taxlib reads 0 degree runs), where ``a_x`` comes from
+    (:class:`~.periods.PeriodParams`), and ``taxlib_a`` (:class:`~.periods.TaxlibParams`)."""
 
     angle: float = 0.0
-    taxlib_a: Dict[str, float] = {}
-
-    @field_validator('taxlib_a', mode='before')
-    @classmethod
-    def _parse_taxlib(cls, value: Any) -> Any:
-        return _json_before(value)
 
 
 def _finite(value: Any) -> Optional[float]:

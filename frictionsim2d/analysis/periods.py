@@ -32,9 +32,10 @@ from .base import Analysis, register
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['GEOMETRY', 'NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'PeriodDepends', 'PeriodParams',
-           'PeriodSummary', 'dominant_period', 'geometry_depends', 'period_map', 'run_periods',
-           'settle_skip', 'whole_periods']
+__all__ = ['GEOMETRY', 'NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'WINDOW', 'PeriodDepends',
+           'PeriodParams', 'PeriodSummary', 'TaxlibParams', 'WindowParams', 'dominant_period',
+           'geometry_depends', 'json_before', 'parse_loads', 'period_map', 'run_periods',
+           'settle_skip', 'whole_periods', 'window_rows']
 
 #: 1 eV/A in nN, per family: taxlib/constants.py:3 (AFM) and the sheet
 #: converter's EV_PER_A_TO_NN (:37). They differ in the 8th figure; each is kept.
@@ -225,7 +226,7 @@ def summary_identity(row: Any) -> Dict[str, Any]:
             'angle': float(row.angle), 'speed': float(row.speed)}
 
 
-def _json_before(value: Any) -> Any:
+def json_before(value: Any) -> Any:
     """A JSON text (a CLI ``--param``) as its value."""
     return json.loads(value) if isinstance(value, str) else value
 
@@ -253,7 +254,51 @@ class PeriodParams(BaseModel):
     @field_validator('period_x', 'lattice', mode='before')
     @classmethod
     def _parse(cls, value: Any) -> Any:
-        return _json_before(value)
+        return json_before(value)
+
+
+#: The load window (nN) of the published ranking.
+WINDOW = (10.0, 20.0, 30.0, 50.0)
+
+
+def parse_loads(value: Any) -> Any:
+    """``"10,20,30,50"`` or a JSON list (a CLI ``--param``) as a list."""
+    if isinstance(value, str):
+        text = value.strip()
+        return [float(v) for v in (text.strip('[]').split(',') if text else [])]
+    return value
+
+
+class WindowParams(PeriodParams):
+    """:class:`PeriodParams`, the window ``loads`` and the ``angle`` whose runs are read."""
+
+    loads: Tuple[float, ...] = WINDOW
+    angle: float = 0.0
+
+    @field_validator('loads', mode='before')
+    @classmethod
+    def _parse_loads(cls, value: Any) -> Any:
+        return parse_loads(value)
+
+
+class TaxlibParams(BaseModel):
+    """``taxlib_a``: material -> the lattice ``a`` taxlib counts slips against
+    (its materials database ``lat_a``); a material not in it takes ``a_x``."""
+
+    taxlib_a: Dict[str, float] = {}
+
+    @field_validator('taxlib_a', mode='before')
+    @classmethod
+    def _parse_taxlib(cls, value: Any) -> Any:
+        return json_before(value)
+
+
+def window_rows(source: Any, params: WindowParams) -> pd.DataFrame:
+    """The pass rows of ``source`` at the window ``loads`` and ``angle``."""
+    loads = tuple(float(f) for f in params.loads)
+    rows = source.rows
+    return rows[rows['load'].astype(float).isin(loads)
+                & (rows['angle'].astype(float) == float(params.angle))]
 
 
 def period_map(source: Any, params: PeriodParams) -> Dict[str, float]:
@@ -307,21 +352,14 @@ class PeriodDepends:  # pylint: disable=too-few-public-methods
         return geometry_depends(dataset, params)
 
 
-class _GeometryView:  # pylint: disable=too-few-public-methods
-    """Every point of the source (`sheet_geometry` reads ``all_rows``), with
-    drops kept apart: a material without a structure is handled by
-    :func:`period_rows` here, not dropped twice."""
-
-    def __init__(self, source: Any) -> None:
-        self.all_rows = source.all_rows
-        self.dropped: List[Tuple[str, str]] = []
-        self.structure_text = source.structure_text
-        self.settings_text = source.settings_text
-
-
 def _own_geometry(source: Any) -> pd.DataFrame:
+    """`sheet_geometry` of ``source`` itself; the points it drops are not
+    dropped here (:func:`period_rows` handles a material without a structure)."""
     from .sheet_geometry import SheetGeometry  # pylint: disable=import-outside-toplevel
-    return SheetGeometry().compute(_GeometryView(source), SheetGeometry.Params())
+    kept = len(source.dropped)
+    table = SheetGeometry().compute(source, SheetGeometry.Params())
+    del source.dropped[kept:]
+    return table
 
 
 def period_rows(source: Any, rows: pd.DataFrame, period: Dict[str, float]) -> List[Dict[str, Any]]:

@@ -28,3 +28,26 @@ def test_period_x_given_overrides_the_lattice_and_reads_no_geometry():
         period_x={'a': 3.0}, lattice={'a': 1.0, 'b': 2.0}))
 
     assert out == {'a': 3.0, 'b': 2.0}
+
+
+def test_own_geometry_does_not_leave_its_drops_on_the_source():
+    rows = pd.DataFrame([{'point_uuid': 'p1', 'verdict_status': 'complete',
+                          'materials': ['h-MoS2'], 'layers': 2}])
+    source = SimpleNamespace(all_rows=rows, dropped=[('earlier', 'failed')],
+                             structure_text=lambda row: None, settings_text=lambda row: '')
+
+    table = periods._own_geometry(source)  # pylint: disable=protected-access
+
+    assert table.empty
+    assert source.dropped == [('earlier', 'failed')]
+
+
+def test_window_rows_keeps_the_window_loads_at_the_angle():
+    rows = pd.DataFrame({'load': [5.0, 10.0, 10.0, 20.0, 30.0],
+                         'angle': [0.0, 0.0, 15.0, 0.0, 0.0]})
+    source = SimpleNamespace(rows=rows)
+
+    got = periods.window_rows(source, periods.WindowParams(loads='10,20'))
+
+    assert list(got['load']) == [10.0, 20.0]
+    assert list(periods.window_rows(source, periods.WindowParams(angle=15.0))['load']) == [10.0]

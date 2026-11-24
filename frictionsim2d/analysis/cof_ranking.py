@@ -16,53 +16,36 @@ import pandas as pd
 from pydantic import field_validator
 
 from .base import Analysis, register
-from .periods import PeriodDepends, PeriodParams, material_key, period_map, period_rows
+from .periods import (WINDOW, PeriodDepends, WindowParams, json_before, material_key, period_map,
+                      period_rows)
 from .source import PASS_STATUS
 
 __all__ = ['NOT_RUN', 'CofRanking', 'WINDOW']
 
-#: The load window (nN) of the published ranking (rank_cof_v2.py:33).
-WINDOW = (10.0, 20.0, 30.0, 50.0)
 #: Verdicts of a load point with no data to analyse: rank_cof_v2 keeps only
 #: ``~(i0_missing | unobserved)`` (:68), i.e. drops ``no_output``,
 #: ``not_reached``, ``unreadable`` and the frame-less ``halted`` (ingest_v2.py:140-142).
 NOT_RUN = frozenset({'no_output', 'not_reached', 'unreadable', 'halted'})
 
 
-def _loads(value: Any) -> Any:
-    """``"10,20,30,50"`` or a JSON list (a CLI ``--param``) as a list."""
-    if isinstance(value, str):
-        text = value.strip()
-        return [float(v) for v in (text.strip('[]').split(',') if text else [])]
-    return value
-
-
 def _label(load: float) -> str:
     return f'{load:g}'
 
 
-class RankingParams(PeriodParams):
+class RankingParams(WindowParams):
     """The window, the slice of the dataset and the tribology index.
 
     ``trib_index`` is rank_cof_v2's JSON (``materials``, ``tribIndex``,
     ``dev``; :81-82), given as its content so the parameters hash covers it.
     """
 
-    loads: Tuple[float, ...] = WINDOW
     layer: int = 2
-    angle: float = 0.0
     trib_index: Optional[Dict[str, List[Any]]] = None
-
-    @field_validator('loads', mode='before')
-    @classmethod
-    def _parse_loads(cls, value: Any) -> Any:
-        return _loads(value)
 
     @field_validator('trib_index', mode='before')
     @classmethod
     def _parse_trib(cls, value: Any) -> Any:
-        import json  # pylint: disable=import-outside-toplevel
-        return json.loads(value) if isinstance(value, str) else value
+        return json_before(value)
 
 
 def _material_row(material: str, loads: Tuple[float, ...], points: pd.DataFrame,

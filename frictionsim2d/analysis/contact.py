@@ -30,14 +30,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
-from pydantic import field_validator
 from scipy.spatial import ConvexHull, QhullError, cKDTree  # pylint: disable=no-name-in-module
 
 from ..postprocessing.snapshot_geometry import expand_lammps_types, parse_type_groups
 from .base import Analysis, register
-from .cof_ranking import WINDOW, _loads
-from .periods import (NO_PERIOD, PeriodDepends, PeriodParams, material_key, period_map,
-                      summary_identity)
+from .periods import (NO_PERIOD, PeriodDepends, WindowParams, material_key, period_map,
+                      summary_identity, window_rows)
 
 __all__ = ['CUTOFF', 'FAR', 'RMIN', 'SUBLAYER_DZ', 'Contact', 'ContactParams', 'anion',
            'contact_metrics', 'lj_energy', 'tip_pairs']
@@ -193,17 +191,9 @@ def _e_int_step0(frames: Dict[str, pd.DataFrame]) -> float:
     return float(at0.iloc[0]) if len(at0) else float('nan')
 
 
-class ContactParams(PeriodParams):
-    """The window loads (s40:50) and the angle whose end snapshot is read,
-    plus where ``a_x`` comes from (:class:`~.periods.PeriodParams`)."""
-
-    loads: Tuple[float, ...] = WINDOW
-    angle: float = 0.0
-
-    @field_validator('loads', mode='before')
-    @classmethod
-    def _parse_loads(cls, value: Any) -> Any:
-        return _loads(value)
+class ContactParams(WindowParams):
+    """The window loads and the angle whose end snapshot is read, plus where
+    ``a_x`` comes from (:class:`~.periods.PeriodParams`)."""
 
 
 @register
@@ -223,10 +213,7 @@ class Contact(PeriodDepends, Analysis):  # pylint: disable=too-few-public-method
         cannot be read (:data:`UNREADABLE`), or one whose contact atoms have a
         flat hull (:data:`DEGENERATE`), is dropped; a run whose material
         has no ``a_x`` is dropped (:data:`~.periods.NO_PERIOD`)."""
-        loads = tuple(float(f) for f in params.loads)
-        rows = source.rows
-        rows = rows[rows['load'].astype(float).isin(loads)
-                    & (rows['angle'].astype(float) == float(params.angle))]
+        rows = window_rows(source, params)
         period = period_map(source, params)
         out: List[Dict[str, Any]] = []
         for row in rows.itertuples():

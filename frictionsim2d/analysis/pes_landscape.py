@@ -22,7 +22,6 @@ simulation types).
 """
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -32,7 +31,7 @@ from pydantic import BaseModel, field_validator
 from ..postprocessing import pes_scan
 from ..postprocessing.pes_scan import KIND_BY_FAMILY
 from .base import Analysis, register
-from .periods import material_key, summary_identity
+from .periods import json_before, material_key, summary_identity
 
 __all__ = ['KIND_BY_FAMILY', 'NO_GRID', 'PesLandscape', 'PesLandscapeParams', 'pt_eta']
 
@@ -73,7 +72,7 @@ class PesLandscapeParams(BaseModel):
     @field_validator('k', 'a', mode='before')
     @classmethod
     def _parse(cls, value: Any) -> Any:
-        return json.loads(value) if isinstance(value, str) else value
+        return json_before(value)
 
 
 @register
