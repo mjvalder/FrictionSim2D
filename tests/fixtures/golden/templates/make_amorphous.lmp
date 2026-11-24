@@ -1,0 +1,39 @@
+# LAMMPS input script for melt-quench amorphization
+
+clear
+
+units           metal
+atom_style      atomic
+boundary        p p p
+neighbor        2.0 bin
+neigh_modify delay 0
+
+read_data       base.data
+
+# Potential commands
+pair_style sw
+pair_coeff * * x.sw Si
+
+min_style       cg
+minimize 1e-8 1e-10 1000 10000
+
+timestep        0.001
+thermo          1000
+thermo_style    custom step temp pe ke etotal press vol
+
+velocity        all create 3000 42 rot yes dist gaussian
+run             0
+
+fix             melt all npt temp 3000 3000 $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             1000
+unfix           melt
+
+fix             quench all npt temp 3000 300 $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             5000
+unfix           quench
+
+fix             relax all npt temp 300 300 $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             2000
+unfix           relax
+
+write_data      amor.data

@@ -1,0 +1,99 @@
+# LAMMPS input script for heterostructure interlayer PES scan
+# Static energy-vs-lateral-position map over the matched interface's MINIMAL
+# in-plane repeat unit -- measured off the assembled stack by
+# frictionsim2d.builders.construction.hetero_stack.detect_inplane_repeat. That is generally a SUB-cell
+# of the assembled box: each material is tiled to the configured x/y footprint
+# before the coincidence match runs, so a near-lattice-matched pair matches with
+# (near-)identity matrices and the box comes out an n x m superlattice of the
+# repeat unit.
+#   - Bottom layer (layer_1, material 1) frozen.
+#   - Top layer (layer_2, material 2) rigid in-plane, grid-scanned laterally.
+#   - At each (dx, dy) the layers stay rigid, then the
+#     total potential energy is recorded, divided by n_cells = how many repeat
+#     units tile the box -- so the CSV is an energy PER INTERFACE REPEAT UNIT,
+#     independent of the configured footprint and directly comparable with the
+#     homogeneous scan's per-unit-cell energy.
+# No dynamics, no thermostat, no sliding, no drive: each grid point is one
+# energy evaluation. Every path is RUN-DIR-RELATIVE (hetero.data,
+# lammps/system.in.settings, results/...), like hetero/slide.lmp: LAMMPS must be
+# launched with cwd = the run dir so the settings file's staged
+# provenance/potentials/... prefix resolves.
+
+clear
+units           metal
+atom_style      atomic
+pair_style mlip
+boundary        p p p
+
+neighbor        2.0 bin
+neigh_modify delay 0
+
+region          box block 0.0 10.0 0.0 12.0 -5.0 20.0 units box
+read_data       hetero.data group all_atoms
+change_box      all z final -5.0 20.0 units box
+
+include         lammps/system.in.settings
+
+# ---- Layer groups by initial z-slab (hetero: shared types, so region not type) ----
+# Identical convention to hetero/slide.lmp: heterostructure layers share atom
+# types, so the type-based layer_N groups the homogeneous PES scan relies on
+# cannot exist here. Bands come from compute_layer_zbands (known placement).
+region          reg_layer_1 block INF INF INF INF -1.0000 1.0000 units box
+group           layer_1 region reg_layer_1
+region          reg_layer_2 block INF INF INF INF 2.0000 5.0000 units box
+group           layer_2 region reg_layer_2
+
+
+velocity        layer_1 set 0.0 0.0 0.0 units box
+velocity        layer_2 set 0.0 0.0 0.0 units box
+
+# Bottom layer fully frozen; top layer held rigid in-plane.
+fix             freeze_bottom layer_1 setforce 0.0 0.0 0.0
+fix             top_inplane layer_2 setforce 0.0 0.0 0.0
+
+min_style       cg
+timestep        0.001
+thermo          100
+
+# --- lateral scan grid over ONE interface repeat unit --------------------------
+variable        Nx     equal 4
+variable        Ny     equal 4
+variable        Lx     equal 3.2
+variable        Ly     equal 5.5
+variable        ncell  equal 6
+variable        dxstep equal v_Lx/v_Nx
+variable        dystep equal v_Ly/v_Ny
+
+# Energy per interface repeat unit: ncell of them tile the box.
+variable        pe_cell equal pe/v_ncell
+
+# CSV: dx, dy in Angstrom (top-layer displacement); energy_eV per surface cell.
+print           "# family=pes_sheet" file results/pes.csv screen no
+print           "dx,dy,energy_eV" append results/pes.csv screen no
+
+# We only ever move the top layer by the delta from the previous grid point to
+# the current one, so the xy positions stay exactly on the grid (z relaxation
+# never touches xy) and periodic wrap-around is harmless. prev_dx/prev_dy are
+# snapshotted with immediate $(...) evaluation each step: `variable ... equal v_dx`
+# would be re-evaluated lazily (always == current dx), making the delta always 0.
+variable        prev_dx equal 0.0
+variable        prev_dy equal 0.0
+
+variable        ix loop ${Nx}
+label           loop_ix
+variable        iy loop ${Ny}
+label           loop_iy
+variable        dx equal (v_ix-1)*v_dxstep
+variable        dy equal (v_iy-1)*v_dystep
+displace_atoms  layer_2 move $(v_dx-v_prev_dx) $(v_dy-v_prev_dy) 0.0 units box
+variable        prev_dx equal $(v_dx)
+variable        prev_dy equal $(v_dy)
+run             0
+print           "$(v_dx),$(v_dy),$(v_pe_cell)" append results/pes.csv screen no
+next            iy
+jump            SELF loop_iy
+next            ix
+jump            SELF loop_ix
+
+# End-of-scan snapshot (integrity stage 3).
+write_data      results/final_pes.data
