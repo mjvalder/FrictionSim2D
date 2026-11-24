@@ -1,13 +1,11 @@
 """Timeseries plotting mixin."""
-# pylint: disable=too-many-locals,too-many-branches,too-many-statements
-# pylint: disable=too-many-arguments,too-many-positional-arguments
-# pylint: disable=too-few-public-methods,missing-class-docstring
+# pylint: disable=too-many-locals
+# pylint: disable=too-few-public-methods
 # pylint: disable=too-many-nested-blocks,duplicate-code
 
 from __future__ import annotations
 
 import logging
-
 
 from .plot_mixin_base import PlotterMixinBase
 
@@ -15,17 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class PlotTimeseriesMixin(PlotterMixinBase):
-    @staticmethod
-    def _run_time_axis(df, time_scale: float, shift_to_zero: bool):
-        """One run's own time column, shifted and scaled.
-
-        Per run, not per plot: a global `time_series` from the metadata forced
-        every run onto the first one's length, so a crashed arm or a longer
-        4 ns run was either truncated or raised.
-        """
-        run_time = df['time'].to_numpy(dtype=float)
-        origin = run_time[0] if (shift_to_zero and run_time.size) else 0.0
-        return (run_time - origin) * time_scale
+    """Per-run time-series plots."""
 
     def _generate_timeseries_plot(self, plot_config: dict) -> None:
         """Generate a timeseries plot with support for multiple datasets."""
@@ -71,51 +59,8 @@ class PlotTimeseriesMixin(PlotterMixinBase):
             )
 
         def apply_filters_to_runs(all_runs) -> list[dict]:
-            filters = {
-                'id': plot_config.get('filter_materials'),
-                'force': force_filter,
-                'pressure': pressure_filter,
-                'angle': plot_config.get('angle'),
-                'layer': plot_config.get('filter_layer'),
-                'speed': plot_config.get('filter_speed'),
-                'tip_radius': plot_config.get('filter_tip_radius'),
-            }
-
-            if filters['layer'] is None:
-                layers = {run.get('layer') for run in all_runs if 'layer' in run}
-                if 1 in layers:
-                    filters['layer'] = 1
-            if filters['angle'] is None:
-                filters['angle'] = 0.0
-
-            filters = {
-                k: v for k, v in filters.items()
-                if k not in ['force', 'pressure'] or v is not None
-            }
-
-            filtered_runs = []
-            for run in all_runs:
-                match = True
-                for key, value in filters.items():
-                    if value is None:
-                        continue
-                    run_value = run.get(key)
-                    if run_value is None:
-                        match = False
-                        break
-                    if key == 'id' and isinstance(value, list):
-                        if not any(v in run_value for v in value):
-                            match = False
-                            break
-                    elif isinstance(value, list):
-                        if run_value not in value:
-                            match = False
-                            break
-                    elif run_value != value:
-                        match = False
-                        break
-                if match:
-                    filtered_runs.append(run)
+            filtered_runs = self._filter_runs(
+                all_runs, plot_config, force=force_filter, pressure=pressure_filter)
 
             if force_filter and isinstance(force_filter, list):
                 force_order = {
@@ -237,8 +182,8 @@ class PlotTimeseriesMixin(PlotterMixinBase):
                     else self._get_palette_color(color_idx)
                 )
                 primary_line, = ax.plot(
-                    self._run_time_axis(df, time_scale,
-                                        shift_time_to_zero),
+                    self._time_axis(df['time'].to_numpy(dtype=float), time_scale,
+                                    shift=shift_time_to_zero),
                     df[run_y_col],
                     label=primary_label,
                     color=color,
@@ -261,8 +206,8 @@ class PlotTimeseriesMixin(PlotterMixinBase):
                     else:
                         assert ax2 is not None
                         secondary_line, = ax2.plot(
-                            self._run_time_axis(df, time_scale,
-                                        shift_time_to_zero),
+                            self._time_axis(df['time'].to_numpy(dtype=float), time_scale,
+                                    shift=shift_time_to_zero),
                             df[secondary_y_col] * secondary_y_scale,
                             label='_nolegend_',
                             color=color,

@@ -77,10 +77,8 @@ def linear_fit(x_data, y_data, x_range: Optional[list] = None,
                constraint: str = 'first_point') -> Optional[Dict[str, float]]:
     """Constrained linear regression; ``None`` when there is nothing to fit.
 
-    Moved verbatim out of ``PlotCommonMixin._calculate_linear_fit`` so a
-    non-Plotter caller (``cof_slope``, the plot worker) can use it without
-    instantiating the whole mixin stack. ``constraint`` is 'first_point'
-    (default, the line passes through the first point), 'origin' or 'none'.
+    ``constraint`` is 'first_point' (default, the line passes through the first
+    point), 'origin' or 'none'.
     """
     if len(x_data) < 2:
         return None
@@ -147,21 +145,3 @@ def linear_fit(x_data, y_data, x_range: Optional[list] = None,
         'r_squared': r_squared,
         'rmse': rmse,
     }
-
-
-def cof_slope(nf, lf, *, x_range: Optional[list] = None,
-              constraint: str = 'first_point') -> Dict[str, float]:
-    """The regression slope of lateral force against normal load.
-
-    A DIFFERENT quantity from the COF, which is ``mean(LF)/mean(NF)`` and comes
-    from ``summarise_run`` alone. Both are legitimate; calling them by the same
-    name is what put three definitions on one plot. Returns NaN for all three
-    keys when the fit cannot be made.
-    """
-    fit = linear_fit(nf, lf, x_range, constraint)
-    if fit is None:
-        return {'cof_slope': float('nan'), 'cof_slope_stderr': float('nan'),
-                'cof_slope_r2': float('nan')}
-    return {'cof_slope': float(fit['slope']),
-            'cof_slope_stderr': float(fit['slope_stderr']),
-            'cof_slope_r2': float(fit['r_squared'])}

@@ -94,32 +94,6 @@ def test_linear_fit_refuses_a_single_point():
     assert linear_fit(np.array([1.0]), np.array([1.0])) is None
 
 
-def test_cof_slope_is_named_for_what_it_is():
-    """The regression slope of LF vs NF is NOT the COF -- the COF is
-    mean(LF)/mean(NF) from summarise_run. Plotting the slope under the label
-    'COF' put two different quantities on one axis."""
-    from frictionsim2d.postprocessing.plot_derived import cof_slope
-
-    nf = np.array([0.0, 10.0, 20.0, 30.0])
-    lf = 0.15 * nf
-
-    out = cof_slope(nf, lf, constraint='none')
-
-    assert set(out) == {'cof_slope', 'cof_slope_stderr', 'cof_slope_r2'}
-    assert out['cof_slope'] == pytest.approx(0.15)
-    assert out['cof_slope_r2'] == pytest.approx(1.0)
-
-
-def test_cof_slope_of_an_unfittable_series_is_nan():
-    from frictionsim2d.postprocessing.plot_derived import cof_slope
-
-    out = cof_slope(np.array([1.0]), np.array([1.0]))
-
-    assert math.isnan(out['cof_slope'])
-    assert math.isnan(out['cof_slope_stderr'])
-    assert math.isnan(out['cof_slope_r2'])
-
-
 def test_the_mixin_still_delegates_with_its_old_signature(tmp_path):
     from frictionsim2d.postprocessing.plot_data import Plotter
     from frictionsim2d.postprocessing.plot_derived import linear_fit

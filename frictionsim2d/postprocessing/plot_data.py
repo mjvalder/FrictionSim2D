@@ -1,6 +1,5 @@
 """Thin Plotter facade composed from dedicated plotting mixins."""
 # pylint: disable=too-many-instance-attributes,too-many-ancestors
-# pylint: disable=too-many-arguments,too-many-positional-arguments
 
 from __future__ import annotations
 

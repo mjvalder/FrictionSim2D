@@ -1,7 +1,6 @@
 """Friction ranking export mixin."""
-# pylint: disable=too-many-locals,too-many-branches,too-many-statements
-# pylint: disable=too-few-public-methods,missing-class-docstring
-# pylint: disable=trailing-newlines
+# pylint: disable=too-many-locals
+# pylint: disable=too-few-public-methods
 
 from __future__ import annotations
 
@@ -54,6 +53,8 @@ def read_ranking(path) -> dict:
 
 
 class PlotRankingMixin(PlotterMixinBase):
+    """Friction ranking plots."""
+
     def rank_friction(self, plot_config: dict) -> None:
         """Rank materials by friction and export to JSON."""
         logger.info("Generating friction rankings...")
@@ -247,4 +248,3 @@ class PlotRankingMixin(PlotterMixinBase):
     # =====================================================================
     # MAIN DISPATCHER
     # =====================================================================
-

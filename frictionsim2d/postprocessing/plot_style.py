@@ -19,8 +19,6 @@ GEM24_COLORS = [
     '#6B4226', '#0096C7', '#C9B400', '#80B918', '#D4694A', '#7B4FBB',
 ]
 
-GEM12_COLORS = GEM24_COLORS
-
 #: The screen defaults, generated from the model so the two cannot drift.
 #: `postprocess plot --preset publication` merges the shipped preset on top.
 DEFAULT_SETTINGS: dict[str, Any] = PlotSettings().model_dump()

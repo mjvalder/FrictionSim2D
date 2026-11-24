@@ -7,7 +7,7 @@ the integrity panels). The drawing follows the originals line for line so the
 images reproduce. Tables are read with ``float_precision='round_trip'``: the
 default CSV parser can be 1 ulp off the written value.
 """
-# pylint: disable=too-many-locals,too-many-statements,too-many-branches
+# pylint: disable=too-many-locals
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import pandas as pd
 
 from .plot_config import TableSource
 from .plot_mixin_base import PlotDataError, PlotterMixinBase
-from .plot_style import GEM12_COLORS
+from .plot_style import GEM24_COLORS
 from .snapshot_geometry import parse_type_groups, radial_profile, read_type_groups
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def analysis_table(name: str, dataset: str, version: Any = None,
     """
     _load_aiida_profile(f'analysis {name}')
     # pylint: disable=import-outside-toplevel
-    from ..analysis import catalogue  # noqa: F401  # pylint: disable=unused-import
+    from ..analysis import catalogue  # noqa: F401  # pylint: disable=unused-import  # registers the analyses in ANALYSES
     from ..analysis import store
     try:
         node = store.select_result_node(name, dataset, params, version=version)
@@ -236,7 +236,7 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
     @staticmethod
     def _load_colors(loads, plot_config: dict) -> list:
         """One colour per load: ``load_colors`` from the spec, else the palette in order."""
-        colors = plot_config.get('load_colors') or GEM12_COLORS
+        colors = plot_config.get('load_colors') or GEM24_COLORS
         return [colors[i % len(colors)] for i in range(len(loads))]
 
     def _run_table(self, source: Any, required: Sequence[str],

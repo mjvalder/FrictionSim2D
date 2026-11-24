@@ -1,8 +1,6 @@
 """Summary plotting mixin: summary lines, external series, and COF histogram."""
-# pylint: disable=too-many-locals,too-many-branches,too-many-statements
-# pylint: disable=too-many-arguments,too-many-positional-arguments
+# pylint: disable=too-many-locals
 # pylint: disable=too-many-boolean-expressions,too-few-public-methods
-# pylint: disable=missing-class-docstring,trailing-newlines
 
 from __future__ import annotations
 
@@ -21,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class PlotSummaryMixin(PlotterMixinBase):
+    """Summary plots: friction versus load, histograms, external series."""
+
     def _plot_external_series(
         self,
         ax,
@@ -71,28 +71,7 @@ class PlotSummaryMixin(PlotterMixinBase):
                 )
                 continue
 
-            x_transform = series.get('x_transform')
-            y_transform = series.get('y_transform')
-            if x_transform:
-                transformed_x = self._apply_series_transform(str(x_transform), x_data)
-                if transformed_x is not None:
-                    x_data = transformed_x
-                else:
-                    logger.warning(
-                        "Unsupported x_transform expression '%s'. Ignoring.",
-                        x_transform,
-                    )
-            if y_transform:
-                transformed_y = self._apply_series_transform(
-                    str(y_transform), y_data, x_values=data.get(x_key),
-                )
-                if transformed_y is not None:
-                    y_data = transformed_y
-                else:
-                    logger.warning(
-                        "Unsupported y_transform expression '%s'. Ignoring.",
-                        y_transform,
-                    )
+            x_data, y_data = self._transformed_xy(series, x_data, y_data)
 
             try:
                 external_y_values.extend([
@@ -692,34 +671,7 @@ class PlotSummaryMixin(PlotterMixinBase):
                 color_idx += 1
                 continue
 
-            orig_x = list(x_data)
-            x_transform = series.get('x_transform')
-            y_transform = series.get('y_transform')
-            if x_transform:
-                transformed_x = self._apply_series_transform(
-                    str(x_transform),
-                    x_data,
-                )
-                if transformed_x is not None:
-                    x_data = transformed_x
-                else:
-                    logger.warning(
-                        "Unsupported x_transform expression '%s'. Ignoring.",
-                        x_transform,
-                    )
-            if y_transform:
-                transformed_y = self._apply_series_transform(
-                    str(y_transform),
-                    y_data,
-                    x_values=orig_x,
-                )
-                if transformed_y is not None:
-                    y_data = transformed_y
-                else:
-                    logger.warning(
-                        "Unsupported y_transform expression '%s'. Ignoring.",
-                        y_transform,
-                    )
+            x_data, y_data = self._transformed_xy(series, x_data, y_data)
 
             x_arr = np.array(x_data, dtype=float)
             y_arr = np.array(y_data, dtype=float)
@@ -781,12 +733,7 @@ class PlotSummaryMixin(PlotterMixinBase):
         ax.set_xlim(-0.5, len(bar_labels) - 0.5)
         ax.set_ylim(bottom=0)
         ax.set_ylim(top=max(v + e for v, e in zip(spec_v, spec_e)) * 1.35)
-        y_limits = plot_config.get('y_limits')
-        if y_limits:
-            if y_limits[0] is not None:
-                ax.set_ylim(bottom=y_limits[0])
-            if len(y_limits) > 1 and y_limits[1] is not None:
-                ax.set_ylim(top=y_limits[1])
+        self._apply_y_limits(ax, plot_config)
 
         internal_label_set = {
             self._display_dataset_label(ds_label) for ds_label in ordered_ds
@@ -891,4 +838,3 @@ class PlotSummaryMixin(PlotterMixinBase):
     # =====================================================================
     # CORRELATION PLOTS
     # =====================================================================
-

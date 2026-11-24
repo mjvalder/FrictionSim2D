@@ -1,9 +1,7 @@
 """Shared Plotter helpers for loading, filtering, fitting, and base drawing."""
 # pylint: disable=too-many-lines
-# pylint: disable=too-many-locals,too-many-branches,too-many-statements
-# pylint: disable=too-many-arguments,too-many-positional-arguments
-# pylint: disable=too-many-return-statements,too-few-public-methods
-# pylint: disable=missing-class-docstring,trailing-newlines
+# pylint: disable=too-many-locals
+# pylint: disable=too-few-public-methods
 
 from __future__ import annotations
 
@@ -45,6 +43,8 @@ SUMMARY_COLUMN_ALIASES = {
 
 
 class PlotCommonMixin(PlotterMixinBase):
+    """Shared helpers for every plot mixin: labels, filters, fits, saving."""
+
     def _display_dataset_label(self, label: str) -> str:
         """Return configured display label for a dataset key."""
         return self.dataset_display_labels.get(label, label)
@@ -117,6 +117,81 @@ class PlotCommonMixin(PlotterMixinBase):
             return out_dir_candidate
 
         return p
+
+    @staticmethod
+    def _filter_runs(all_runs: list[dict], plot_config: dict, *,
+                     force=None, pressure=None) -> list[dict]:
+        """The runs matching the plot's id/force/pressure/angle/layer/speed/tip_radius.
+
+        ``id`` matches as a substring; a run lacking a filtered key is excluded.
+        Layer defaults to 1 when present, angle to 0.
+        """
+        filters = {
+            'id': plot_config.get('filter_materials'),
+            'force': force,
+            'pressure': pressure,
+            'angle': plot_config.get('angle'),
+            'layer': plot_config.get('filter_layer'),
+            'speed': plot_config.get('filter_speed'),
+            'tip_radius': plot_config.get('filter_tip_radius'),
+        }
+        if filters['layer'] is None:
+            layers = {run.get('layer') for run in all_runs if 'layer' in run}
+            if 1 in layers:
+                filters['layer'] = 1
+        if filters['angle'] is None:
+            filters['angle'] = 0.0
+
+        def matches(run: dict) -> bool:
+            for key, value in filters.items():
+                if value is None:
+                    continue
+                run_value = run.get(key)
+                if run_value is None:
+                    return False
+                if key == 'id' and isinstance(value, list):
+                    if not any(v in run_value for v in value):
+                        return False
+                elif isinstance(value, list):
+                    if run_value not in value:
+                        return False
+                elif run_value != value:
+                    return False
+            return True
+
+        return [run for run in all_runs if matches(run)]
+
+    @staticmethod
+    def _time_axis(run_time: np.ndarray, time_scale: float, *,
+                   shift: bool = True) -> np.ndarray:
+        """One run's own time column in display units, from 0 unless ``shift``
+        is False (which keeps the LAMMPS clock).
+
+        Per run, not per plot: a global `time_series` from the metadata forced
+        every run onto the first one's length.
+        """
+        origin = run_time[0] if (shift and run_time.size) else 0.0
+        return (run_time - origin) * time_scale
+
+    def _transformed_xy(self, series: dict, x_data, y_data):
+        """``(x, y)`` after the series' ``x_transform``/``y_transform``, if any.
+
+        An unsupported expression is logged and the data left as it was.
+        """
+        orig_x = list(x_data)
+        out = []
+        for axis, values, kwargs in (('x', x_data, {}),
+                                     ('y', y_data, {'x_values': orig_x})):
+            expr = series.get(f'{axis}_transform')
+            if expr:
+                transformed = self._apply_series_transform(str(expr), values, **kwargs)
+                if transformed is not None:
+                    values = transformed
+                else:
+                    logger.warning("Unsupported %s_transform expression '%s'. Ignoring.",
+                                   axis, expr)
+            out.append(values)
+        return out[0], out[1]
 
     def _apply_series_transform(
         self,
@@ -934,9 +1009,7 @@ class PlotCommonMixin(PlotterMixinBase):
     ) -> dict | None:
         """Constrained linear regression. Delegates to `plot_derived.linear_fit`.
 
-        Kept as a method because every mixin calls it as one; the arithmetic
-        lives in `plot_derived` so `cof_slope` and the plot worker can reach it
-        without a Plotter.
+        Kept as a method because every mixin calls it as one.
         """
         from .plot_derived import linear_fit  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
@@ -1130,14 +1203,19 @@ class PlotCommonMixin(PlotterMixinBase):
             legend_loc = plot_config.get('legend_location', s["legend"]["location"])
             ax.legend(handles, labels, loc=legend_loc, fontsize=fontsize)
 
-    def _apply_axis_limits(self, ax, plot_config: dict) -> None:
-        """Apply explicit x and y axis limits from plot config."""
+    @staticmethod
+    def _apply_y_limits(ax, plot_config: dict) -> None:
+        """Apply explicit y axis limits from plot config."""
         y_limits = plot_config.get('y_limits')
         if y_limits:
             if y_limits[0] is not None:
                 ax.set_ylim(bottom=y_limits[0])
             if len(y_limits) > 1 and y_limits[1] is not None:
                 ax.set_ylim(top=y_limits[1])
+
+    def _apply_axis_limits(self, ax, plot_config: dict) -> None:
+        """Apply explicit x and y axis limits from plot config."""
+        self._apply_y_limits(ax, plot_config)
 
         x_limits = plot_config.get('x_limits')
         if x_limits:
@@ -1761,4 +1839,3 @@ class PlotCommonMixin(PlotterMixinBase):
     # =====================================================================
     # TIMESERIES PLOT
     # =====================================================================
-

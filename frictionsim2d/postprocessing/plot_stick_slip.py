@@ -1,7 +1,6 @@
 """Stick-slip analysis plotting mixin."""
-# pylint: disable=too-many-locals,too-many-branches,too-many-statements
-# pylint: disable=too-many-return-statements,too-few-public-methods
-# pylint: disable=missing-class-docstring,too-many-function-args,trailing-newlines
+# pylint: disable=too-many-locals
+# pylint: disable=too-few-public-methods
 # pylint: disable=duplicate-code
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib import ticker
+from scipy.signal import find_peaks
 
 from .plot_mixin_base import PlotterMixinBase
 from .plot_style import StickSlipPSD
@@ -21,11 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class PlotStickSlipMixin(PlotterMixinBase):
-    @staticmethod
-    def _find_peaks(*args, **kwargs):
-        """Import scipy peak finder only when stick-slip routines are used."""
-        from scipy.signal import find_peaks
-        return find_peaks(*args, **kwargs)
+    """Stick-slip trace and spectrum plots."""
 
     @staticmethod
     def _apply_consistent_y_formatter(ax) -> None:
@@ -42,13 +38,6 @@ class PlotStickSlipMixin(PlotterMixinBase):
         ax.yaxis.set_major_formatter(
             ticker.FormatStrFormatter(f'%.{decimals}f'),
         )
-
-    @staticmethod
-    def _stick_slip_time(run_time: np.ndarray, time_scale: float, *,
-                         shift: bool = True) -> np.ndarray:
-        """The run's time axis in display units; from 0 unless ``shift`` is
-        False, which keeps the LAMMPS clock (the published figures' axis)."""
-        return ((run_time - run_time[0]) if shift else run_time) * time_scale
 
     def _load_stick_slip_run(self, plot_config: dict) -> dict | None:
         """Load and filter one run for stick-slip analysis.
@@ -88,46 +77,10 @@ class PlotStickSlipMixin(PlotterMixinBase):
             )
             return None
 
-        filters = {
-            'id': plot_config.get('filter_materials'),
-            'force': plot_config.get('filter_forces') or plot_config.get('force'),
-            'pressure': plot_config.get('pressures') or plot_config.get('filter_pressures'),
-            'angle': plot_config.get('angle'),
-            'layer': plot_config.get('filter_layer'),
-            'speed': plot_config.get('filter_speed'),
-            'tip_radius': plot_config.get('filter_tip_radius'),
-        }
-
-        if filters['layer'] is None:
-            layers = {run.get('layer') for run in all_runs if 'layer' in run}
-            if 1 in layers:
-                filters['layer'] = 1
-        if filters['angle'] is None:
-            filters['angle'] = 0.0
-
-        filtered_runs = []
-        for run in all_runs:
-            match = True
-            for key, value in filters.items():
-                if value is None:
-                    continue
-                run_value = run.get(key)
-                if run_value is None:
-                    match = False
-                    break
-                if key == 'id' and isinstance(value, list):
-                    if not any(v in run_value for v in value):
-                        match = False
-                        break
-                elif isinstance(value, list):
-                    if run_value not in value:
-                        match = False
-                        break
-                elif run_value != value:
-                    match = False
-                    break
-            if match:
-                filtered_runs.append(run)
+        filtered_runs = self._filter_runs(
+            all_runs, plot_config,
+            force=plot_config.get('filter_forces') or plot_config.get('force'),
+            pressure=plot_config.get('pressures') or plot_config.get('filter_pressures'))
 
         if not filtered_runs:
             logger.error("No runs matched filters for stick_slip_analysis.")
@@ -167,7 +120,7 @@ class PlotStickSlipMixin(PlotterMixinBase):
             logger.error("Not enough points for stick-slip analysis.")
             return None
 
-        t = self._stick_slip_time(run_time[:n], time_scale,
+        t = self._time_axis(run_time[:n], time_scale,
                                   shift=plot_config.get('shift_time_to_zero', True))
         x = np.asarray(df[displacement_col].iloc[:n], dtype=float) * displacement_scale
 
@@ -233,7 +186,7 @@ class PlotStickSlipMixin(PlotterMixinBase):
         fft_peak_distance = max(
             int(plot_config.get('fft_peak_min_distance_points', 1)), 1,
         )
-        fft_peak_local_idx, _ = self._find_peaks(
+        fft_peak_local_idx, _ = find_peaks(
             valid_psd,
             prominence=float(fft_peak_prominence),
             distance=fft_peak_distance,
@@ -318,12 +271,12 @@ class PlotStickSlipMixin(PlotterMixinBase):
         if prominence is None:
             prominence = 0.8 * np.std(extrema_signal) if len(extrema_signal) > 0 else 0.0
         min_distance = max(int(plot_config.get('extrema_min_distance_points', 5)), 1)
-        maxima_idx, _ = self._find_peaks(
+        maxima_idx, _ = find_peaks(
             extrema_signal,
             prominence=float(prominence),
             distance=min_distance,
         )
-        minima_idx, _ = self._find_peaks(
+        minima_idx, _ = find_peaks(
             -extrema_signal,
             prominence=float(prominence),
             distance=min_distance,
@@ -693,4 +646,3 @@ class PlotStickSlipMixin(PlotterMixinBase):
                     },
                 }, f, indent=2)
             logger.info("Saved stick-slip analysis results: %s", results_path)
-

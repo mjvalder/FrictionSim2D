@@ -699,8 +699,8 @@ def test_stick_slip_time_keeps_the_run_clock_when_asked():
     ``shift_time_to_zero: false`` keeps it, the default still starts at 0."""
     import numpy as np  # pylint: disable=import-outside-toplevel
     clock = np.array([22000.0, 23000.0, 24000.0])
-    assert list(Plotter._stick_slip_time(clock, 0.001, shift=True)) == [0.0, 1.0, 2.0]
-    assert list(Plotter._stick_slip_time(clock, 0.001, shift=False)) == [22.0, 23.0, 24.0]
+    assert list(Plotter._time_axis(clock, 0.001, shift=True)) == [0.0, 1.0, 2.0]
+    assert list(Plotter._time_axis(clock, 0.001, shift=False)) == [22.0, 23.0, 24.0]
 
 
 def test_dataset_prefilter_mirrors_the_plots_force_filters():
@@ -719,3 +719,59 @@ def test_dataset_prefilter_mirrors_the_plots_force_filters():
     assert not match(row, {'plot_all_forces': True, 'filter_materials': ['h_WS2']})
     pressure = {'pressure': 1.0, 'force': float('nan')}
     assert match(pressure, {'pressures': [1.0], 'filter_pressures': [5.0]})
+
+
+def test_time_axis_of_an_empty_run_is_empty():
+    import numpy as np  # pylint: disable=import-outside-toplevel
+    assert Plotter._time_axis(np.array([]), 0.001).size == 0  # pylint: disable=protected-access
+
+
+def test_transformed_xy_scales_and_tolerates_a_bad_expression(tmp_path, caplog):
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    series = {'x_transform': 'lambda x: x * 2', 'y_transform': 'nonsense'}
+
+    x, y = plotter._transformed_xy(series, [1.0, 2.0], [3.0, 4.0])  # pylint: disable=protected-access
+
+    assert list(x) == [2.0, 4.0]
+    assert list(y) == [3.0, 4.0]
+    assert 'Unsupported y_transform' in caplog.text
+
+
+def test_filter_runs_defaults_layer_and_angle_and_matches_id_by_substring():
+    runs = [
+        {'id': 'h_MoS2', 'layer': 1, 'angle': 0.0, 'force': 5},
+        {'id': 'h_MoS2', 'layer': 2, 'angle': 0.0, 'force': 5},
+        {'id': 'h_WS2', 'layer': 1, 'angle': 0.0, 'force': 10},
+        {'id': 'h_MoS2', 'layer': 1, 'angle': 15.0, 'force': 5},
+        {'id': 'h_MoS2', 'layer': 1, 'angle': 0.0, 'force': None},
+    ]
+    pick = Plotter._filter_runs  # pylint: disable=protected-access
+
+    assert pick(runs, {}) == [runs[0], runs[2], runs[4]]
+    assert pick(runs, {'filter_materials': ['MoS']}, force=[5]) == [runs[0]]
+    assert pick(runs, {'angle': 15.0}) == [runs[3]]
+
+
+def test_stick_slip_psd_recovers_the_period_of_a_sine(tmp_path):
+    import numpy as np  # pylint: disable=import-outside-toplevel
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    t = np.arange(0, 100.0, 0.1)
+    signal = np.sin(2 * np.pi * t / 5.0)
+
+    psd = plotter._compute_stick_slip_psd(t, signal, {})  # pylint: disable=protected-access
+
+    assert psd is not None
+    assert psd.period == pytest.approx(5.0, rel=0.05)
+
+
+def test_iterative_outlier_removal_drops_the_largest_residual():
+    import numpy as np  # pylint: disable=import-outside-toplevel
+    x = np.arange(8.0)
+    y = 2.0 * x
+    y[3] += 30.0
+
+    _, y_out, _, _, mats = Plotter._iterative_outlier_removal(  # pylint: disable=protected-access
+        x, y, None, None, list('abcdefgh'), 1)
+
+    assert mats == list('abcefgh')
+    assert len(y_out) == 7

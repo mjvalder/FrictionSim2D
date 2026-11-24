@@ -1,6 +1,5 @@
 """Correlation plotting mixin."""
 # pylint: disable=too-many-locals,too-few-public-methods
-# pylint: disable=missing-class-docstring,trailing-newlines
 
 from __future__ import annotations
 
@@ -16,10 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class PlotCorrelationMixin(PlotterMixinBase):
+    """Correlation heatmaps and pairwise scatter plots."""
+
     @staticmethod
     def _seaborn():
         """Import seaborn on demand for correlation heatmaps."""
-        import seaborn as sns
+        import seaborn as sns  # pylint: disable=import-outside-toplevel
         return sns
 
     def _generate_correlation_plots(self, plot_config: dict) -> None:
@@ -199,4 +200,3 @@ class PlotCorrelationMixin(PlotterMixinBase):
     # =====================================================================
     # FRICTION RANKING
     # =====================================================================
-
