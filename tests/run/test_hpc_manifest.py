@@ -89,7 +89,7 @@ def test_scan_angle_manifest_count_matches_predicted_job_count(tmp_path: Path, m
 
 
 def test_pre_mlip_manifest_json_still_loads(tmp_path: Path) -> None:
-    """The MLIP resource fields (needs_gpu/framework/launcher_flags) are added
+    """The MLIP resource fields (needs_gpu/framework) are added
     with dataclass defaults precisely so a manifest.json written by an older
     version — which has none of those keys — still round-trips. A user with an
     in-flight campaign must not have to regenerate it."""
@@ -121,6 +121,7 @@ def test_pre_mlip_manifest_json_still_loads(tmp_path: Path) -> None:
                 "simulation_node_uuid": None,
                 "results_node_uuid": None,
                 "error_message": None,
+                "launcher_flags": "-k on",   # a key since dropped: must still load
             }
         ],
     }
@@ -135,7 +136,7 @@ def test_pre_mlip_manifest_json_still_loads(tmp_path: Path) -> None:
     # Missing keys fall back to the CPU defaults.
     assert job.needs_gpu is False
     assert job.framework is None
-    assert job.launcher_flags == ""
+    assert not hasattr(job, "launcher_flags")
 
     # And a fresh entry still serialises the new keys.
     entry = JobEntry(job_id="job_1", simulation_path="afm/mos2/L1",

@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from frictionsim2d.core.mlip import get_mlip
 from frictionsim2d.hpc.manifest import JobManifest, parse_mlip_flavor
 from frictionsim2d.run.naming import output_dir_for
 
@@ -84,20 +83,18 @@ class TestManifestInfersGPUFields:
         for job in manifest.jobs:
             assert job.needs_gpu is False
             assert job.framework is None
-            assert job.launcher_flags == ''
 
     @pytest.mark.parametrize('framework,segment', [
         ('deepmd', 'pot_deepmd_dpa3'),
         ('mace', 'pot_mace-d3_mace-mp'),
     ])
-    def test_mlip_tree_sets_gpu_framework_and_flags(self, tmp_path, framework, segment):
+    def test_mlip_tree_sets_gpu_and_framework(self, tmp_path, framework, segment):
         _make_sim(tmp_path, f'{SHEET}/{segment}')
         manifest = JobManifest.from_simulation_directory(tmp_path)
         assert manifest.jobs
         for job in manifest.jobs:
             assert job.needs_gpu is True
             assert job.framework == framework
-            assert job.launcher_flags == get_mlip(framework).launcher.lmp_flags
 
     def test_mixed_campaign_splits_into_three_groups(self, tmp_path):
         """A classical + deepmd + mace campaign must yield three distinct keys."""
@@ -121,6 +118,6 @@ class TestManifestInfersGPUFields:
         out = tmp_path / 'manifest.json'
         manifest.save(out)
         reloaded = JobManifest.load(out)
-        assert [(j.needs_gpu, j.framework, j.launcher_flags) for j in reloaded.jobs] == \
-               [(j.needs_gpu, j.framework, j.launcher_flags) for j in manifest.jobs]
+        assert [(j.needs_gpu, j.framework) for j in reloaded.jobs] == \
+               [(j.needs_gpu, j.framework) for j in manifest.jobs]
         assert reloaded.jobs[0].needs_gpu is True

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, fields, asdict
 
-from ..core.mlip import get_mlip
 from ..core.observables import FAMILIES
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,6 @@ def _mlip_job_fields(path_str: str) -> Dict[str, Any]:
     return {
         'needs_gpu': True,
         'framework': framework,
-        'launcher_flags': get_mlip(framework).launcher.lmp_flags,
     }
 
 
@@ -109,9 +107,6 @@ class JobEntry:
             key ``HPCScriptGenerator`` groups on: MACE and DeePMD are two
             mutually incompatible LAMMPS builds, so they cannot share one array
             job even when their resource request is identical.
-        launcher_flags: Extra ``lmp`` flags this job's framework needs (from
-            ``frictionsim2d.core.mlip.LauncherSpec.lmp_flags``), recorded at generation
-            time so the manifest stays self-describing.
     """
     job_id: str
     simulation_path: str
@@ -131,7 +126,6 @@ class JobEntry:
     # manifest.json written before MLIP support still loads through from_dict().
     needs_gpu: bool = False
     framework: Optional[str] = None
-    launcher_flags: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""

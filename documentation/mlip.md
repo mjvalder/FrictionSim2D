@@ -843,9 +843,8 @@ For an MLIP job group (`frictionsim2d/hpc/scripts.py::HPCConfig`):
 re-reading the configs — so the only surviving record of which framework a run
 used is the `pot_<framework>[-d3]_<stem>` segment from §2.
 `parse_mlip_flavor` decodes it into `(framework, dispersion)` and populates
-`needs_gpu`, `framework` and `launcher_flags` (the latter straight from the
-registry's `LauncherSpec`). Every path segment is checked, not just the leaf. A
-classical path yields no flavour and keeps the `False` / `None` / `""`
+`needs_gpu` and `framework`. Every path segment is checked, not just the leaf. A
+classical path yields no flavour and keeps the `False` / `None`
 defaults, so a wholly classical campaign still renders as a single CPU script
 byte-identically.
 
