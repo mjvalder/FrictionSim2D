@@ -14,7 +14,7 @@ from frictionsim2d.aiida.block_schema import (OBSERVABLE_UNIT_ALIASES, SUMMARY_U
                                     normalise_unit, summary_units)
 from frictionsim2d.core.observables import FAMILIES, channel_by_role
 from frictionsim2d.data.models import RunSummary, summarise_run
-from frictionsim2d.postprocessing.post_channels import AFM_LIKE_FAMILIES
+from frictionsim2d.core.observables import AFM_LIKE as AFM_LIKE_FAMILIES
 
 _ALLOWED = {'1', 'nN', 'angstrom', 'eV', 'eV/angstrom^2', 'nN/angstrom',
             'nN*angstrom', 'count', 'samples'}

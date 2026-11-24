@@ -25,7 +25,8 @@ import numpy as np
 import pandas as pd
 
 from frictionsim2d.core.config import IntegritySettings
-from frictionsim2d.core.observables import FAMILIES, expected_tier_rows, rename_map
+from frictionsim2d.core.observables import (AFM_LIKE, FAMILIES, SHEET_LIKE, expected_tier_rows,
+                                            rename_map)
 from frictionsim2d.data.models import EV_A_TO_NN, compute_derived_columns
 
 from .integrity import (SKIP_DETAILS, IntegrityVerdict, check_point,
@@ -52,13 +53,6 @@ class SchemaError(ValueError):
     value.
     """
 
-
-#: Families whose results files follow the sheet-on-sheet schema. The legacy
-#: lateral-force correction applies only to these -- the AFM stack never wrote
-#: an eV/A lateral force.
-SHEET_FAMILIES = ('sheetonsheet', 'hetero', 'flake', 'pes_sheet')
-#: Families on the AFM stack. Only these have a positional LEGACY_2026 fallback.
-AFM_FAMILIES = ('afm', 'indent', 'pes_tip')
 
 #: eV/A -> nN (the legacy schema-1 lateral-force correction).
 LF_SCHEMA1_CORRECTION = EV_A_TO_NN
@@ -135,7 +129,7 @@ def correct_legacy_lf_schema1(df, filepath, family: str):
     FROZEN legacy path, moved verbatim from
     `DataReader._correct_legacy_lf_schema1`. The ONLY change is the
     vocabulary: the old `if sim_type != 'sheet'` becomes
-    `if family not in SHEET_FAMILIES`, so a hetero or flake file is corrected
+    `if family not in SHEET_LIKE`, so a hetero or flake file is corrected
     too -- under the old traversal vocabulary they arrived as `'sheet'` and
     were, which is the behaviour being preserved, not extended.
     """
@@ -144,7 +138,7 @@ def correct_legacy_lf_schema1(df, filepath, family: str):
         return df
     df.attrs['lf_corrected'] = False
     schema = df.attrs.get('lf_schema', 1)
-    if family not in SHEET_FAMILIES or schema != 1:
+    if family not in SHEET_LIKE or schema != 1:
         if schema > LF_SCHEMA_CURRENT or schema < 1:
             logger.warning(
                 "%s: output schema %s is not one this reader understands "
@@ -258,7 +252,7 @@ def read_results_file(filepath: Path, family: str,
     # LEGACY_2026 positional fallback -- AFM stack only. The sheet corpus was
     # surveyed on 2026-08-29: zero non-empty headerless files. Guessing is
     # worse than refusing.
-    if family not in AFM_FAMILIES:
+    if family not in AFM_LIKE:
         raise SchemaError(
             f"{filepath}: no column header and no positional schema for "
             f"family {family!r}")

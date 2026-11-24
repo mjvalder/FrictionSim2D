@@ -22,6 +22,11 @@ FAMILIES: Tuple[str, ...] = (
     'afm', 'indent', 'sheetonsheet', 'hetero', 'flake', 'pes_tip', 'pes_sheet',
 )
 
+#: The AFM stack (tip on sheet) and the sheet-on-sheet stack: the two schemas
+#: a family's results files follow.
+AFM_LIKE: Tuple[str, ...] = ('afm', 'indent', 'pes_tip')
+SHEET_LIKE: Tuple[str, ...] = ('sheetonsheet', 'hetero', 'flake', 'pes_sheet')
+
 # fix ave/time argument triples (Nevery, Nrepeat, Nfreq), validated against LAMMPS
 TIER_ARGS = {
     'window': (1, 1000, 1000),

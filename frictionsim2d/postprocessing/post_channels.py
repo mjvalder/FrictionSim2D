@@ -25,13 +25,12 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from frictionsim2d.core.observables import AFM_LIKE
+
 logger = logging.getLogger(__name__)
 
-__all__ = ['AFM_LIKE_FAMILIES', 'read_atom_z', 'final_data_path',
+__all__ = ['read_atom_z', 'final_data_path',
            'post_channels', 'post_channels_for']
-
-#: Families whose final state holds a tip above a sheet.
-AFM_LIKE_FAMILIES = ('afm', 'indent', 'pes_tip')
 
 #: `final_f30N_a0.data` / `final_p1.5GPa_a-15.data`, as the templates spell them.
 _FINAL_RE = re.compile(
@@ -139,7 +138,7 @@ def post_channels(data_file: Path, record, family: str) -> Dict[str, float]:
     out: Dict[str, float] = {}
     top = bands[-1]
 
-    if family in AFM_LIKE_FAMILIES:
+    if family in AFM_LIKE:
         sheet_z = [z for band in bands for z in band]
         sheet_top = max(sheet_z)
         layer_types = {int(t) for types in layer_type_map.values()

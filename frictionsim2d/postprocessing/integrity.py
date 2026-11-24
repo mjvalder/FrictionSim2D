@@ -33,12 +33,11 @@ import numpy as np
 import pandas as pd
 
 from frictionsim2d.core.config import IntegritySettings
+from frictionsim2d.core.observables import AFM_LIKE, SHEET_LIKE
 
 from .run_status import UNOBSERVED
 from .snapshot_geometry import parse_type_groups
 
-AFM_LIKE = ('afm', 'indent', 'pes_tip')
-SHEET_LIKE = ('sheetonsheet', 'hetero', 'flake', 'pes_sheet')
 
 _AFM_CORE = ('nf', 'lfx', 'lfy', 'comx', 'comy', 'comz', 'tipx', 'tipy', 'tipz')
 _SHEET_CORE = ('lfx', 'lfy', 'nf')
