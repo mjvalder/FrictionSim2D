@@ -19,7 +19,6 @@ TESTS = Path(__file__).resolve().parents[1]
 
 ALLOWED_TARGET_PREFIXES = (
     "frictionsim2d.interfaces.lammps.",
-    "frictionsim2d.interfaces.atomsk.",
     "frictionsim2d.builders.construction.components.make_amorphous",
     "frictionsim2d.builders.construction.components.run_lammps_commands",
     "frictionsim2d.builders.components.run_lammps_commands",   # lazy alias of the line above

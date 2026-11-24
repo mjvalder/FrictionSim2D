@@ -32,7 +32,7 @@ guard, so the guard and the marker cannot drift apart (`repo/test_lammps_marker.
 - **Name the behaviour, not the function:** `test_<subject>_<condition>_<expected>`.
 - **Assert on produced artifacts** (rendered script text, data-file contents, directory
   names), not on `mock.assert_called()`.
-- **Mock only expensive boundaries:** LAMMPS, atomsk, subprocess, DB, network. Partially
+- **Mock only expensive boundaries:** LAMMPS, subprocess, DB, network. Partially
   enforced by `repo/test_mock_targets.py` (string-form targets only; object-form
   `monkeypatch.setattr(obj, 'name', …)` is not checked); its `KNOWN_VIOLATIONS` list is a
   ratchet that only shrinks.

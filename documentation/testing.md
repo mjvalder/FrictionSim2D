@@ -84,7 +84,7 @@ One case in `test_example_configs.py` also carries `lammps`: a hetero build shel
 - **Name the behaviour, not the function:** `test_<subject>_<condition>_<expected>`.
 - **Assert on produced artifacts** — rendered script text, data-file contents, directory
   names — not on `mock.assert_called()`.
-- **Mock only expensive boundaries:** LAMMPS, atomsk, subprocess, DB, network. Partially
+- **Mock only expensive boundaries:** LAMMPS, subprocess, DB, network. Partially
   enforced by `tests/repo/test_mock_targets.py`, whose `KNOWN_VIOLATIONS` list is a
   ratchet that only shrinks.
 - **One reason to fail per test.**

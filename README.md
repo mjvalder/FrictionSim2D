@@ -13,7 +13,7 @@ Full documentation lives in [documentation/](documentation/) — start with
 ## Installation
 
 FrictionSim2D is not yet published on conda-forge. Create an environment, then install
-from source. Requires Python 3.9+ and LAMMPS on your path; Atomsk is optional.
+from source. Requires Python 3.9+ and LAMMPS on your path.
 
 ```bash
 conda create -n frictionsim2d python=3.11
@@ -45,7 +45,7 @@ FrictionSim2D is distributed as a Conda package for maximum reproducibility and 
 
 ### Option A – Base package (recommended for most users)
 
-Install LAMMPS, Atomsk, and core dependencies:
+Install LAMMPS and core dependencies:
 
 ```bash
 conda create -n frictionsim2d -c conda-forge frictionsim2d
@@ -56,7 +56,6 @@ Verify:
 ```bash
 FrictionSim2D --help
 lmp -h
-atomsk --version
 ```
 
 ### Option B – With AiiDA (provenance tracking, HPC submission)
