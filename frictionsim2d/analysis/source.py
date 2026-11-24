@@ -74,7 +74,7 @@ class RunSource:
         #: column it left out and why); stored with the result.
         self.notes: List[str] = []
         #: The stored results the analysis reads (``Analysis.depends_on``), set
-        #: by :func:`~frictionsim2d.analysis.store.run_analysis`; None: look them up.
+        #: by :func:`~frictionsim2d.analysis.store.result_node`; None: look them up.
         self.depends: Optional[Dict[str, Any]] = None
 
     def __enter__(self) -> 'RunSource':

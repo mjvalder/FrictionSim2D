@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     from .base import ANALYSES, Analysis, get_analysis, register
     from .source import RunSource
-    from .store import find_result, run_analysis, store_result
+    from .store import store_result
 
 #: Public name -> the submodule that defines it.
 _EXPORTS = {
     'ANALYSES': 'base', 'Analysis': 'base', 'get_analysis': 'base', 'register': 'base',
     'RunSource': 'source',
-    'find_result': 'store', 'run_analysis': 'store', 'store_result': 'store',
+    'store_result': 'store',
 }
 
 __all__ = sorted(_EXPORTS)

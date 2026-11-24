@@ -11,7 +11,8 @@ pytestmark = pytest.mark.aiida
 
 from frictionsim2d.aiida.steps import build_dataset  # noqa: E402
 from frictionsim2d.analysis.base import get_analysis  # noqa: E402
-from frictionsim2d.analysis.store import find_result_node, params_hash, run_analysis, store_result  # noqa: E402
+from frictionsim2d.analysis.store import find_result_node, params_hash, store_result  # noqa: E402
+from tests.analysis.helpers import run_analysis  # noqa: E402
 from tests.analysis.test_store import no_profile_switch, store  # noqa: E402,F401
 
 PERIOD_ANALYSES = ('period_summary', 'cof_ranking', 'contact', 'stick_slip', 'sliding_physics')

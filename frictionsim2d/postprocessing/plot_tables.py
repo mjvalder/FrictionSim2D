@@ -73,7 +73,7 @@ def analysis_table(name: str, dataset: str, version: Any = None,
         flags = ''.join(f' --param {k}={_param_text(v)}' for k, v in sorted((params or {}).items()))
         raise PlotDataError(f"no stored {name} over {dataset}{at}; run: "
                             f"FrictionSim2D analyse run {name} {dataset}{flags}")
-    return store._from_csv(node.get_content(mode='rb'))  # pylint: disable=protected-access
+    return store.table_from_csv(node.get_content(mode='rb'))
 
 
 def _param_text(value: Any) -> str:

@@ -36,8 +36,9 @@ import frictionsim2d.aiida.query as query_mod  # noqa: E402
 import frictionsim2d.aiida.steps as steps_mod  # noqa: E402
 from frictionsim2d.aiida.query import related  # noqa: E402
 from frictionsim2d.analysis.store import (  # noqa: E402
-    ANALYSIS_GROUP_PREFIX, find_result, params_hash, store_result,
+    ANALYSIS_GROUP_PREFIX, params_hash, store_result,
 )
+from tests.analysis.helpers import find_result  # noqa: E402
 from frictionsim2d.aiida.steps import build_dataset, postprocess_group  # noqa: E402
 from frictionsim2d.aiida.store import BLOCK_HASH_EXTRA, verify  # noqa: E402
 from frictionsim2d.postprocessing.read_data import DataReader  # noqa: E402

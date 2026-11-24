@@ -145,7 +145,7 @@ class RunStatus(Analysis):  # pylint: disable=too-few-public-methods
         """One row per point of ``source.all_rows``. Nothing is dropped: the
         non-pass points :class:`RunSource` pre-lists in ``dropped`` are rows
         here, so the list is cleared and the stored result's ``n_dropped`` is 0."""
-        # `store.run_analysis` reads `source.dropped` after `compute`, so clearing
+        # `store.result_node` reads `source.dropped` after `compute`, so clearing
         # it here is what makes the stored `n_dropped` 0.
         source.dropped.clear()
         out = []

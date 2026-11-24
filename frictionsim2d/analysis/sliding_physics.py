@@ -385,8 +385,8 @@ def contact_result(dataset: str) -> Any:
 
 
 def _node_table(node: Any) -> pd.DataFrame:
-    from .store import _from_csv  # pylint: disable=import-outside-toplevel,protected-access
-    return _from_csv(node.get_content(mode='rb'))
+    from .store import table_from_csv  # pylint: disable=import-outside-toplevel
+    return table_from_csv(node.get_content(mode='rb'))
 
 
 CONTACT_KEYS = ('run_uuid', 'load', 'angle')

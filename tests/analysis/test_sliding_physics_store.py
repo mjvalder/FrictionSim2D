@@ -10,7 +10,8 @@ pytestmark = pytest.mark.aiida
 from aiida import orm  # noqa: E402
 
 from frictionsim2d.analysis.base import get_analysis  # noqa: E402
-from frictionsim2d.analysis.store import find_result_node, run_analysis, store_result  # noqa: E402
+from frictionsim2d.analysis.store import find_result_node, store_result  # noqa: E402
+from tests.analysis.helpers import run_analysis  # noqa: E402
 from tests.analysis.test_store import no_profile_switch, store  # noqa: E402,F401
 
 PERIOD = {'period_x': {'h_MoS2': 3.16}}

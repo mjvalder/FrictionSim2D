@@ -36,8 +36,6 @@ __all__ = ['GEOMETRY', 'NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'PeriodDepends'
            'PeriodSummary', 'dominant_period', 'geometry_depends', 'period_map', 'run_periods',
            'settle_skip', 'whole_periods']
 
-#: 1 m/s in A/ps (taxlib/constants.py:4); the converter's ``speed / 100.0`` (:91).
-MS_TO_A_PER_PS = 0.01
 #: 1 eV/A in nN, per family: taxlib/constants.py:3 (AFM) and the sheet
 #: converter's EV_PER_A_TO_NN (:37). They differ in the 8th figure; each is kept.
 EV_PER_A_TO_NN = {'afm': 1.602176634, 'sheetonsheet': 1.602176565}
@@ -269,8 +267,8 @@ def period_map(source: Any, params: PeriodParams) -> Dict[str, float]:
     if node is None:
         node = geometry_depends(getattr(source, 'dataset', None), params).get(GEOMETRY)
     if node is not None:
-        from .store import _from_csv  # pylint: disable=import-outside-toplevel,protected-access
-        geometry = _from_csv(node.get_content(mode='rb'))
+        from .store import table_from_csv  # pylint: disable=import-outside-toplevel
+        geometry = table_from_csv(node.get_content(mode='rb'))
     else:
         geometry = _own_geometry(source)
     if not geometry.empty:

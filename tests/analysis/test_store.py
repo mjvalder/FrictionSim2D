@@ -21,8 +21,8 @@ from frictionsim2d.aiida.steps import build_dataset, postprocess_group  # noqa: 
 from frictionsim2d.analysis import base  # noqa: E402
 from frictionsim2d.analysis.base import Analysis, register  # noqa: E402
 from frictionsim2d.analysis.source import RunSource  # noqa: E402
-from frictionsim2d.analysis.store import (ANALYSIS_GROUP_PREFIX, find_result,  # noqa: E402
-                                run_analysis, store_result)
+from frictionsim2d.analysis.store import ANALYSIS_GROUP_PREFIX, store_result  # noqa: E402
+from tests.analysis.helpers import find_result, run_analysis  # noqa: E402
 from tests.aiida.test_steps_integrity import _tree  # noqa: E402
 
 #: Floats a lossy CSV would bend.
