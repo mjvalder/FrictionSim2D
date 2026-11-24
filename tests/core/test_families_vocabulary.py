@@ -20,8 +20,7 @@ def test_models_are_the_top_directory_axis():
     assert set(MODELS) <= set(FAMILIES)
 
 
-def test_consumers_share_the_one_tuple():
-    assert JobManifest._TOP_DIRS is FAMILIES
+def test_data_reader_uses_the_family_tuple():
     for family in FAMILIES:
         assert DataReader._registry_sim_type('tip', f'x family={family}') == family
     with pytest.raises(ValueError, match='unknown family'):

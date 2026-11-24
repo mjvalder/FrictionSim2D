@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
-from ..core.observables import FAMILIES
+from ..run.naming import MODELS, mlip_flavor_from_pot_token
 
 
 def parse_mlip_flavor(path_str: str) -> Optional[Tuple[str, str]]:
@@ -26,7 +26,6 @@ def parse_mlip_flavor(path_str: str) -> Optional[Tuple[str, str]]:
     Returns:
         ``(framework, 'none' | 'd3')``, or ``None`` for a classical path.
     """
-    from ..run.naming import mlip_flavor_from_pot_token  # pylint: disable=import-outside-toplevel
     for segment in reversed(Path(path_str).parts):
         flavor = mlip_flavor_from_pot_token(segment)
         if flavor is not None:
@@ -95,12 +94,6 @@ class JobManifest:
     name: str = "friction2d_manifest"
     source_directory: Optional[str] = None
     jobs: List[JobEntry] = field(default_factory=list)
-
-    #: Top-directory vocabulary for `from_simulation_directory`'s material
-    #: parse. An alias of `core.observables.FAMILIES` -- see the constraint
-    #: in that module's docstring on why `hpc/` imports FAMILIES rather than
-    #: `run.naming.MODELS` (importing `run` here would close a cycle).
-    _TOP_DIRS = FAMILIES
 
     def __post_init__(self):
         if self.jobs is None:
@@ -175,7 +168,7 @@ class JobManifest:
             parts = rel_path.parts
             material = (
                 parts[1]
-                if len(parts) >= 2 and parts[0] in cls._TOP_DIRS
+                if len(parts) >= 2 and parts[0] in MODELS
                 else (parts[0] if parts else "")
             )
             layer_match = layer_pattern.search(path_str)
