@@ -43,7 +43,7 @@ from typing import (
 
 from pydantic import BaseModel
 
-from ..builders.construction.amorphous import AmorphousMissing
+from ..builders.construction.amorphous import AmorphousMissing, legacy_rebuild_lookup
 from ..core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
 from ..run.artifacts import generate_package
 from ..run.naming import AFM_LIKE_MODELS
@@ -442,11 +442,14 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
             _fix_config_aliases(config_json, model)
             settings_file = prov_dir / 'settings.yaml'
             try:
-                result = generate_package(
-                    config_json, model, output_root=dest,
-                    settings_file=settings_file if settings_file.is_file() else None,
-                    generate_hpc=generate_hpc,
-                    simulation_root_name='.')
+                # A tree built before the keyed block library may record quench
+                # conditions its (shipped) block was never made under.
+                with legacy_rebuild_lookup():
+                    result = generate_package(
+                        config_json, model, output_root=dest,
+                        settings_file=settings_file if settings_file.is_file() else None,
+                        generate_hpc=generate_hpc,
+                        simulation_root_name='.')
             except AmorphousMissing as exc:
                 # A rebuild never melt-quenches: the run is skipped, named.
                 logger.error('Rebuild skipped %s: %s', rel_path, exc)

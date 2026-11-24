@@ -21,7 +21,7 @@
   "pot_type": "sw",
   "potential_file": "Si.sw",
   "cif_file": "Si.cif",
-  "frictionsim2d_version": "0.1.0",
+  "frictionsim2d_version": "<VERSION>",
   "git_commit": "<GITHASH>",
   "created": "<TIMESTAMP>"
 }

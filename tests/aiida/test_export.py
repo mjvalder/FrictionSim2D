@@ -232,6 +232,31 @@ def test_rebuild_set_collects_the_failures_of_the_router(aiida_profile_clean,
     assert failed[0].startswith('afm/h-MoS2')
 
 
+def test_rebuild_set_looks_blocks_up_in_legacy_rebuild_mode(aiida_profile_clean,
+                                                           no_profile_switch, tmp_path,
+                                                           monkeypatch):
+    """Older trees record quench conditions their shipped block was never made
+    under; only a rebuild may fall back to that block."""
+    from frictionsim2d.builders.construction import amorphous
+
+    root = tmp_path / 'sim'
+    _run(root, 'h-MoS2', loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+    modes = []
+
+    class _Result:  # pylint: disable=too-few-public-methods
+        created, failures = [], []
+
+    def _fake(*_a, **_k):
+        modes.append(amorphous._LEGACY_REBUILD.get())  # pylint: disable=protected-access
+        return _Result()
+
+    monkeypatch.setattr(export_mod, 'generate_package', _fake)
+    rebuild_set('camp', tmp_path / 'rebuilt')
+    assert modes == [True]
+    assert amorphous._LEGACY_REBUILD.get() is False  # pylint: disable=protected-access
+
+
 def test_rebuild_set_skips_a_run_whose_amorphous_block_is_missing(aiida_profile_clean,
                                                                 no_profile_switch, tmp_path,
                                                                 monkeypatch):

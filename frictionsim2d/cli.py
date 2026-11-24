@@ -286,7 +286,9 @@ def run_quench(config_file: Optional[str], for_config: Optional[str],  # pylint:
     if run_local:
         from .builders.construction.amorphous import run_quench_root_local
         click.echo("⏳ Running the melt-quench members serially (this takes hours)...")
-        run_quench_root_local(root)
+        _done, failed = run_quench_root_local(root)
+        for member, error in failed:
+            click.echo(f"❌ melt-quench failed in {member}: {error}", err=True)
         _report_quench_import(root, replace=False, source='local')
     else:
         click.echo(f"\n📝 Next: run it (FrictionSim2D hpc generate {root} --scheduler pbs), "

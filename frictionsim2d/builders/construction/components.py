@@ -13,7 +13,7 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, cast
 import re
 import math
 import numpy as np
@@ -1712,37 +1712,15 @@ def apply_sheet_edge_types(component_path: Path, edge_width: float) -> Path:
     return component_path
 
 
-def build_monolayer(
-    config: SheetConfig,
-    edge_mode: str = 'none',
-    edge_width: float = 0.0,
-    interlayer: Optional[str] = None,
-) -> Tuple[Path, dict, dict, int, Dict[str, float]]:
-    """Build single-layer 2D material sheet.
+def _monolayer_cell(config: SheetConfig
+                    ) -> Tuple[Path, List[str], Dict[str, int], int, Dict[str, float]]:
+    """The orthogonal, potential-typed cell a monolayer is tiled from.
 
-    Workflow:
-    1. Read CIF structure and validate against potential.
-    2. Write as LAMMPS data with types matching CIF element order.
-    3. Renumber types to match potential file expectations (if multi-type).
-    4. Duplicate and orthogonalize as needed.
-
-    Args:
-        config: Sheet configuration.
-        interlayer: The run's interlayer style. Under ``ilp`` resolving to
-            ilp/tmd, a chalcogen the potential types once is split into a
-            top and a bottom sub-layer type (:func:`split_chalcogen_sublayers`);
-            ``pot_counts`` then reports 2 for it. ``None``/any other style:
-            unchanged.
-
-    Returns:
-        Tuple of (path, box_dims, pot_counts, total_types, supercell_dims).
-
-    Raises:
-        ValueError: If CIF elements do not match potential file expectations.
+    Returns ``(ortho_cell, cif_elements, pot_counts, total_pot_types,
+    supercell_dims)``; the caller owns (and deletes) ``ortho_cell``.
     """
     cif_path = get_material_path(config.cif_path)
     pot_path = get_material_path(config.pot_path)
-    base_path = _tmp_path(f"{config.mat}_1")
 
     cif_data = cifread(cif_path)
     cif_elements = cif_data['elements']
@@ -1810,14 +1788,64 @@ def build_monolayer(
 
     supercell_dims: Dict[str, float] = {
         k: cast(float, v) for k, v in get_model_dimensions(ortho_cell).items()}
+    return ortho_cell, cif_elements, pot_counts, total_pot_types, supercell_dims
 
+
+def _cell_tiles(config: SheetConfig, supercell_dims: Mapping[str, float]) -> Tuple[int, int]:
+    """Whole cells tiled along x and y: the requested size rounded to the cell."""
     unit_x = supercell_dims['xhi'] - supercell_dims['xlo']
     unit_y = supercell_dims['yhi'] - supercell_dims['ylo']
-
     target_x = config.x[0] if isinstance(config.x, list) else config.x
     target_y = config.y[0] if isinstance(config.y, list) else config.y
-    dup_x = max(1, round(target_x / unit_x))
-    dup_y = max(1, round(target_y / unit_y))
+    return max(1, round(target_x / unit_x)), max(1, round(target_y / unit_y))
+
+
+def built_monolayer_span(config: SheetConfig) -> Tuple[float, float]:
+    """The in-plane box ``(x, y)`` A that :func:`build_monolayer` will produce.
+
+    Reads the CIF and tiles nothing, so a preflight can size an amorphous
+    substrate before the build.
+    """
+    ortho_cell, _elements, _counts, _types, supercell_dims = _monolayer_cell(config)
+    ortho_cell.unlink(missing_ok=True)
+    dup_x, dup_y = _cell_tiles(config, supercell_dims)
+    return (dup_x * (supercell_dims['xhi'] - supercell_dims['xlo']),
+            dup_y * (supercell_dims['yhi'] - supercell_dims['ylo']))
+
+
+def build_monolayer(
+    config: SheetConfig,
+    edge_mode: str = 'none',
+    edge_width: float = 0.0,
+    interlayer: Optional[str] = None,
+) -> Tuple[Path, dict, dict, int, Dict[str, float]]:
+    """Build single-layer 2D material sheet.
+
+    Workflow:
+    1. Read CIF structure and validate against potential.
+    2. Write as LAMMPS data with types matching CIF element order.
+    3. Renumber types to match potential file expectations (if multi-type).
+    4. Duplicate and orthogonalize as needed.
+
+    Args:
+        config: Sheet configuration.
+        interlayer: The run's interlayer style. Under ``ilp`` resolving to
+            ilp/tmd, a chalcogen the potential types once is split into a
+            top and a bottom sub-layer type (:func:`split_chalcogen_sublayers`);
+            ``pot_counts`` then reports 2 for it. ``None``/any other style:
+            unchanged.
+
+    Returns:
+        Tuple of (path, box_dims, pot_counts, total_types, supercell_dims).
+
+    Raises:
+        ValueError: If CIF elements do not match potential file expectations.
+    """
+    base_path = _tmp_path(f"{config.mat}_1")
+    ortho_cell, cif_elements, pot_counts, total_pot_types, supercell_dims = \
+        _monolayer_cell(config)
+
+    dup_x, dup_y = _cell_tiles(config, supercell_dims)
 
     _replicate_or_copy(ortho_cell, base_path, dup_x, dup_y, 1)
     ortho_cell.unlink()

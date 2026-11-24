@@ -228,6 +228,15 @@ amorphous Si block, so the examples find it.
 
 `quench_rate` is in K/s; the quench runs `(melt_temp - quench_temp) / (quench_rate * timestep * 1e-12)` steps (default: 1,100,000), so doubling the rate halves the run. Floats match to 6 significant digits (`1e12` and `1000000000000.0` are the same key).
 
+An older settings file that records other quench conditions no longer finds the
+shipped block for **new** runs. `Publication-data/settings.yaml`, for example, says
+`timestep: 0.001` (and its trees record `melt_steps` 50000, `equilibrate_steps`
+20000), yet those runs were built on the shipped block: the old lookup checked size
+only. For a new run, set `quench` back to the shipped conditions above, or make a
+block for yours with `run quench`. `aiida rebuild` alone falls back to the shipped
+block (same material, potential and a large enough box), with a warning naming the
+recorded-vs-actual conditions, so such sets still rebuild.
+
 `quench_slab_dims` is the default crystal slab a quench melts; `run quench --for`
 takes the axis-wise maximum of it and the size the run needs. It is not part of the
 key.

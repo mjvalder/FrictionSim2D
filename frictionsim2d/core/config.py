@@ -139,11 +139,13 @@ class QuenchSettings(BaseModel):
         if isinstance(data, dict):
             removed = [key for key in _REMOVED_QUENCH_KEYS if key in data]
             if removed:
-                warnings.warn(
-                    f"settings.quench {', '.join(removed)} no longer exist and are "
-                    f"ignored: a friction run never starts a melt-quench; use "
-                    f"`FrictionSim2D run quench` (with --local to run it here).",
-                    DeprecationWarning, stacklevel=2)
+                message = (f"settings.quench {', '.join(removed)} no longer exist and are "
+                           f"ignored: a friction run never starts a melt-quench; use "
+                           f"`FrictionSim2D run quench` (with --local to run it here).")
+                # DeprecationWarning is hidden outside __main__ by default, so the
+                # CLI user would never see it: log it as well.
+                logger.warning("%s", message)
+                warnings.warn(message, DeprecationWarning, stacklevel=2)
                 data = {k: v for k, v in data.items() if k not in _REMOVED_QUENCH_KEYS}
         return data
 

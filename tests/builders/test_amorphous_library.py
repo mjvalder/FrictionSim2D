@@ -307,3 +307,107 @@ def test_aiida_import_refuses_a_quench_root(tmp_path):
     root = write_quench_root(members, tmp_path, settings, root_name='q')
     assert amorphous.is_quench_root(root)
     assert not amorphous.is_quench_root(tmp_path)
+
+
+# --------------------------------------------------------------- fix round 1
+
+#: What the publication set's trees record (Publication-data/settings.yaml):
+#: built on the shipped amor_Si by the old size-only lookup all the same.
+LEGACY_RECORDED = {'timestep': 0.001, 'melt_steps': 50000, 'equilibrate_steps': 20000}
+
+
+def test_legacy_rebuild_lookup_finds_the_shipped_block_for_recorded_conditions():
+    settings = GlobalSettings(quench=QuenchSettings(**LEGACY_RECORDED))
+    with pytest.raises(AmorphousMissing):
+        amorphous.make_amorphous('Si', SI_CIF, 100.0, 100.0, 12.0, SI_POT, 'sw', settings)
+    with amorphous.legacy_rebuild_lookup():
+        found = amorphous.make_amorphous('Si', SI_CIF, 100.0, 100.0, 12.0, SI_POT, 'sw',
+                                         settings)
+    assert found.parent == PACKAGED and found.name.startswith('amor_Si__')
+    # The mode ends with the block: a live lookup is strict again.
+    with pytest.raises(AmorphousMissing):
+        amorphous.make_amorphous('Si', SI_CIF, 100.0, 100.0, 12.0, SI_POT, 'sw', settings)
+
+
+def test_legacy_rebuild_lookup_still_needs_the_same_potential_and_size(tmp_path):
+    other = tmp_path / 'Si_edited.sw'
+    other.write_text(SI_POT.read_text(encoding='utf-8') + '\n# edited\n', encoding='utf-8')
+    settings = GlobalSettings(quench=QuenchSettings(**LEGACY_RECORDED))
+    with amorphous.legacy_rebuild_lookup():
+        with pytest.raises(AmorphousMissing):
+            amorphous.make_amorphous('Si', SI_CIF, 100.0, 100.0, 12.0, other, 'sw', settings)
+        with pytest.raises(AmorphousMissing):
+            amorphous.make_amorphous('Si', SI_CIF, 300.0, 100.0, 12.0, SI_POT, 'sw',
+                                     settings)
+
+
+def _legacy_settings_file(tmp_path) -> Path:
+    import yaml
+    path = tmp_path / 'legacy_settings.yaml'
+    path.write_text(yaml.safe_dump({'quench': {**LEGACY_RECORDED, 'run_local': True}}),
+                    encoding='utf-8')
+    return path
+
+
+def test_legacy_tree_rebuilds_onto_the_shipped_block(tmp_path, lammps_replay, monkeypatch):
+    """A tree recording dt 0.001 / 50000 / 20000 rebuilds with the very
+    substrate the old size-only lookup gave it; a live run with the same
+    settings refuses."""
+    from frictionsim2d.run.artifacts import generate_package
+    from tests.helpers.deck_snapshot import SNAPSHOT_DIR, _deterministic, normalise_deck
+
+    monkeypatch.chdir(REPO)
+    settings_file = _legacy_settings_file(tmp_path)
+    config = REPO / 'examples' / 'afm_config.ini'
+    with pytest.raises(AmorphousMissing):
+        generate_package(config, 'afm', output_root=tmp_path / 'live',
+                         settings_file=settings_file, simulation_root_name='sim')
+    assert not (tmp_path / 'live' / 'sim').exists()
+
+    # As the snapshot renders it (fixed seeds/uuids), so the replayed LAMMPS
+    # calls are the recorded ones.
+    with amorphous.legacy_rebuild_lookup(), _deterministic():
+        # Straight under tmp_path: the replay key covers the normalised paths.
+        result = generate_package(config, 'afm', output_root=tmp_path,
+                                  settings_file=settings_file, simulation_root_name='sim')
+    assert not result.failures and result.created
+    built = next((tmp_path / 'sim').rglob('build/sub.lmp'))
+    expected = next((SNAPSHOT_DIR / 'afm_config').rglob('build/sub.lmp'))
+    text = built.read_text(encoding='utf-8').replace(str(tmp_path), '<BUILD>')
+    assert normalise_deck(text) == expected.read_text(encoding='utf-8')
+
+
+def test_preflight_sizes_the_periodic_substrate_as_built():
+    """A 214.9 A request tiles to 67 whole h-MoS2 cells (213.3 A), which the
+    214.8 A shipped block covers; the request alone would have refused."""
+    run = {
+        '2D': {'mat': 'MoS2', 'pot_type': 'sw', 'cif_path': 'examples/materials/h-MoS2.cif',
+               'pot_path': 'examples/potentials/sw/MoS2_wen.sw', 'x': 214.9, 'y': 100.0,
+               'layers': [1]},
+        'sub': {'mat': 'Si', 'amorph': 'a', 'thickness': 12.0, 'pot_type': 'sw',
+                'pot_path': str(SI_POT), 'cif_path': str(SI_CIF)},
+        'general': {'temp': 300.0},
+    }
+    for name in ('cif_path', 'pot_path'):
+        run['2D'][name] = str(REPO / run['2D'][name])
+    needs = amorphous.amorphous_needs([run], GlobalSettings())
+    assert len(needs) == 1
+    assert 213.0 < needs[0].min_dims[0] < 214.79
+    assert amorphous.missing_members(needs) == []
+
+
+def test_local_run_continues_past_a_failed_member(tmp_path, monkeypatch):
+    settings = GlobalSettings()
+    members = [QuenchMember.make('Si', SI_POT, 'sw', SI_CIF, (12.0, 12.0, 12.0),
+                                 settings.quench, melt_temp=t) for t in (2800, 3000)]
+    root = write_quench_root(members, tmp_path, settings, root_name='q')
+    ran = []
+
+    def flaky(deck, log, cwd):
+        ran.append(deck)
+        if len(ran) == 1:
+            raise subprocess.CalledProcessError(1, ['lmp'])
+
+    monkeypatch.setattr(amorphous, 'run_lmp_serial', flaky)
+    done, failed = amorphous.run_quench_root_local(root)
+    assert len(ran) == 2 and len(done) == 1 and len(failed) == 1

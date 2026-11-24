@@ -30,11 +30,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from importlib import resources
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import (Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple,
+                    Union)
 
 from ...core.config import GlobalSettings, QuenchRunConfig, QuenchSettings
 from ...core.mlip import is_mlip
@@ -512,21 +515,50 @@ def _float(value: Any) -> Optional[float]:
         return None
 
 
-def _first_sheet(run_dict: Mapping[str, Any]) -> Mapping[str, Any]:
-    if isinstance(run_dict.get('2D'), Mapping):
-        return run_dict['2D']
+def _sheet_sections(run_dict: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    """The sheet sections of a run: ``[2D]``/``[2D-N]`` raw, or ``sheet``/``sheets``
+    as a stored ``config.json`` names them."""
+    for key in ('2D', 'sheet'):
+        if isinstance(run_dict.get(key), Mapping):
+            return [run_dict[key]]
     numbered = sorted(k for k in run_dict if str(k).startswith('2D-'))
-    return run_dict[numbered[0]] if numbered and isinstance(run_dict[numbered[0]], Mapping) \
-        else {}
+    sheets = [run_dict[k] for k in numbered] or list(run_dict.get('sheets') or [])
+    return [s for s in sheets if isinstance(s, Mapping)]
+
+
+def _periodic_sheet_span(run_dict: Mapping[str, Any]) -> Tuple[float, float]:
+    """The in-plane size the periodic substrate is cut to: the sheet as built.
+
+    One sheet: its requested size rounded to whole orthogonal cells
+    (:func:`~frictionsim2d.builders.construction.components.built_monolayer_span`,
+    the same rounding the build does). Two or more sheets (a hetero coincidence
+    cell) or anything that cannot be resolved here: the requested ``x, y``.
+    """
+    sheets = _sheet_sections(run_dict)
+    first = sheets[0] if sheets else {}
+    requested = (_float(_as_list(first.get('x'))[0]) or 0.0,
+                 _float(_as_list(first.get('y'))[0]) or 0.0)
+    if len(sheets) != 1:
+        return requested
+    try:
+        # pylint: disable-next=import-outside-toplevel
+        from ...core.config import SheetConfig
+        # pylint: disable-next=import-outside-toplevel,cyclic-import
+        from .components import built_monolayer_span
+        fields = {k: v for k, v in first.items() if v is not None}
+        return built_monolayer_span(SheetConfig(**fields))
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.debug("Sizing the substrate from the requested sheet (%s)", exc)
+        return requested
 
 
 def _component_needs(run_dict: Mapping[str, Any]) -> List[Tuple[Mapping[str, Any], Dims]]:
     """``[(section, min_dims)]`` for the amorphous tip/substrate of one run.
 
     Tip: ``(2r, 2r, 2r)``. Substrate: ``(sub.x, sub.y, thickness)`` for a
-    finite sheet; otherwise the requested sheet ``x, y`` and the thickness.
-    The built sheet can come out a little larger than requested, so the build
-    keeps its own size check.
+    finite sheet; otherwise the sheet as it will be built
+    (:func:`_periodic_sheet_span`) and the thickness. The build keeps its own
+    size check.
     """
     needs = []
     tip = run_dict.get('tip')
@@ -537,10 +569,11 @@ def _component_needs(run_dict: Mapping[str, Any]) -> List[Tuple[Mapping[str, Any
     if isinstance(sub, Mapping) and str(sub.get('amorph') or 'c').strip() == 'a':
         general = run_dict.get('general') or {}
         finite = str(general.get('finite_sheet', False)).strip().lower() in ('true', '1', 'yes')
-        source = sub if finite else _first_sheet(run_dict)
-        dims = (_float(source.get('x')) or 0.0, _float(source.get('y')) or 0.0,
-                _float(sub.get('thickness')) or 0.0)
-        needs.append((sub, dims))
+        if finite:
+            span = (_float(sub.get('x')) or 0.0, _float(sub.get('y')) or 0.0)
+        else:
+            span = _periodic_sheet_span(run_dict)
+        needs.append((sub, (span[0], span[1], _float(sub.get('thickness')) or 0.0)))
     return needs
 
 
@@ -569,9 +602,58 @@ def amorphous_needs(run_dicts: Iterable[Mapping[str, Any]], settings: GlobalSett
     return _merge_members(members)
 
 
+_LEGACY_REBUILD: ContextVar[bool] = ContextVar('amorphous_legacy_rebuild', default=False)
+
+
+@contextmanager
+def legacy_rebuild_lookup() -> Iterator[None]:
+    """Within this block, a key miss may fall back to a shipped legacy block.
+
+    For ``aiida rebuild`` only. Trees built before the keyed library record
+    whatever ``settings.quench`` said (the publication set: timestep 0.001,
+    melt 50000, relax 20000), while the block they were built on was the
+    shipped ``amor_Si``: the old lookup checked size only. Rebuilding them must
+    find that block again. Live runs, previews and ``run quench --for`` never
+    enter this mode and keep strict keyed matching.
+    """
+    token = _LEGACY_REBUILD.set(True)
+    try:
+        yield
+    finally:
+        _LEGACY_REBUILD.reset(token)
+
+
+def _legacy_fallback(key: QuenchKey, min_dims: Sequence[float]) -> Optional[Path]:
+    """The pre-rework rule, in rebuild mode only: a packaged legacy block of the
+    same material and potential that is large enough."""
+    if not _LEGACY_REBUILD.get():
+        return None
+    fits = [b for b in scan_blocks(key.material)
+            if b.root == 'packaged' and b.meta.get('source') == 'legacy'
+            and b.meta.get('material') == key.material
+            and b.meta.get('potential_sha256') == key.potential_sha256
+            and b.fits(min_dims)]
+    if not fits:
+        return None
+    block = min(fits, key=lambda b: (b.volume, b.path.name))
+    differs = block.key.differs(key) if block.key is not None else ['unkeyed']
+    logger.warning(
+        "Rebuild: no block matches the recorded quench conditions [key %s]; using the "
+        "shipped legacy block %s, which older trees were built on whatever their "
+        "settings said. Block (recorded): %s", key.key8, block.path.name,
+        ', '.join(d.replace('(wanted ', '(recorded ') for d in differs))
+    return block.path
+
+
+def resolve_block(key: QuenchKey, min_dims: Sequence[float]) -> Optional[Path]:
+    """:func:`find_block`, plus the rebuild-only legacy fallback
+    (:func:`legacy_rebuild_lookup`)."""
+    return find_block(key, min_dims) or _legacy_fallback(key, min_dims)
+
+
 def missing_members(needs: Iterable[QuenchMember]) -> List[QuenchMember]:
     """The members of ``needs`` that no library block satisfies."""
-    return [m for m in needs if find_block(m.key, m.min_dims) is None]
+    return [m for m in needs if resolve_block(m.key, m.min_dims) is None]
 
 
 def quench_members_for(config: Union[PathLike, Mapping[str, Any]], settings: GlobalSettings,
@@ -685,7 +767,7 @@ def make_amorphous(mat_name: str, cif_path: PathLike, target_x: float, target_y:
     _refuse_mlip(pot_type)
     key = QuenchKey.from_settings(mat_name, pot_path, settings.quench)
     min_dims = (float(target_x), float(target_y), float(target_z))
-    found = find_block(key, min_dims)
+    found = resolve_block(key, min_dims)
     if found is not None:
         logger.info("Using amorphous block %s", found)
         return found
@@ -856,14 +938,18 @@ def run_lmp_serial(deck: str, log: str, cwd: Path) -> None:
     subprocess.run(['lmp', '-in', deck, '-log', log], cwd=str(cwd), check=True)
 
 
-def run_quench_root_local(root: PathLike) -> List[Path]:
+def run_quench_root_local(root: PathLike) -> Tuple[List[Path], List[Tuple[Path, str]]]:
     """Run every member of ``root`` serially, from the root. Hours per member.
 
+    A member whose ``lmp`` fails is logged and the rest still run; import
+    then reports it incomplete.
+
     Returns:
-        The member directories run.
+        ``(members run, [(member, error)])``.
     """
     root = Path(root)
-    done = []
+    done: List[Path] = []
+    failed: List[Tuple[Path, str]] = []
     for mdir in member_dirs(root):
         rel = mdir.relative_to(root).as_posix()
         record = json.loads((mdir / 'provenance.json').read_text(encoding='utf-8'))
@@ -873,9 +959,14 @@ def run_quench_root_local(root: PathLike) -> List[Path]:
                  + int(record['equilibrate_steps']))
         logger.info("Melt-quench %s: ~%s atoms, %d MD steps (serial lmp)",
                     rel, natoms if natoms is not None else '?', total)
-        run_lmp_serial(f'{rel}/lammps/{DECK_NAME}', f'{rel}/lammps/{LOG_NAME}', root)
+        try:
+            run_lmp_serial(f'{rel}/lammps/{DECK_NAME}', f'{rel}/lammps/{LOG_NAME}', root)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            logger.error("Melt-quench %s failed: %s", rel, exc)
+            failed.append((mdir, str(exc)))
+            continue
         done.append(mdir)
-    return done
+    return done, failed
 
 
 # ---------------------------------------------------------------- import

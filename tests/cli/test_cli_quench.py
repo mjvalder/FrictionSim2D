@@ -121,8 +121,10 @@ def test_run_quench_for_turns_each_miss_into_a_member(tmp_path, no_lammps, monke
     members = list((tmp_path / 'out').glob('quench_*/quench/Si/*'))
     assert len(members) == 1
     prov = json.loads((members[0] / 'provenance.json').read_text(encoding='utf-8'))
-    # slab = axis-wise max(quench_slab_dims, needed size): the 100x100 sheet, 12 A thick.
-    assert prov['slab_requested'] == [100.0, 100.0, 12.0]
+    # slab = axis-wise max(quench_slab_dims, needed size): the 100x100 sheet as
+    # built (whole h-MoS2 cells, a little under 100 A), 12 A thick.
+    x, y, z = prov['slab_requested']
+    assert 95.0 < x <= 101.0 and 95.0 < y <= 101.0 and z == 12.0
     assert prov['melt_temp'] == 3000
 
 
@@ -197,3 +199,31 @@ def test_removed_quench_keys_load_with_a_deprecation_warning():
     assert settings.melt_steps == 20000 and settings.equilibrate_steps == 10000
     assert any(issubclass(w.category, DeprecationWarning) for w in caught)
     assert not hasattr(settings, 'run_local')
+
+
+def test_removed_quench_keys_are_logged_where_the_cli_shows_them(caplog):
+    with caplog.at_level('WARNING', logger='frictionsim2d.core.config'):
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            QuenchSettings.model_validate({'run_local': True})
+    assert any('run_local' in r.getMessage() for r in caplog.records)
+
+
+def test_local_run_with_a_failed_member_still_imports_the_rest_and_exits_1(tmp_path,
+                                                                        monkeypatch):
+    ini = _quench_ini(tmp_path)
+    ini.write_text(ini.read_text().replace('melt_temp = 3000', 'melt_temp = [2800, 3000]'))
+    calls = []
+
+    def flaky(deck, log, cwd):
+        calls.append(deck)
+        if len(calls) == 1:
+            raise subprocess.CalledProcessError(1, ['lmp'])
+        _fake_lmp(deck, log, cwd)
+
+    monkeypatch.setattr(amorphous, 'run_lmp_serial', flaky)
+    result = _invoke('run', 'quench', ini, '-o', tmp_path / 'out', '--local')
+    assert result.exit_code == 1
+    assert len(calls) == 2
+    assert 'melt-quench failed' in result.output and 'incomplete' in result.output
+    assert len(list(amorphous.amorphous_library_dir().glob('amor_Si__*.lmp'))) == 1
