@@ -1004,7 +1004,8 @@ class TestSubstrateSection:
             ('2D', {'mat': 'h-MoS2', 'pot_type': 'sw',
                     'pot_path': 'examples/potentials/sw/MoS2_wen.sw',
                     'cif_path': 'examples/materials/h-MoS2.cif',
-                    'x': 60, 'y': 60, 'layers': [1]}),
+                    # >= 2x the tip diameter (4 * r), or the footprint rule rejects it
+                    'x': 100, 'y': 100, 'layers': [1]}),
             ('tip', {'mat': 'Si', 'pot_type': 'sw',
                      'pot_path': 'examples/potentials/sw/Si.sw',
                      'cif_path': 'examples/materials/Si.cif', 'r': 25}),
