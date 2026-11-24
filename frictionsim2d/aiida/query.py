@@ -1,9 +1,9 @@
-"""The query layer over the CalcJob graph (spec §5.2, plan Task 8).
+"""The query layer over the CalcJob graph.
 
 Every point is a ``FolderData`` output (``points__<label>``) of one deck
 CalcJob; the CalcJob holds the run's parameter blocks (``blocks__<name>``)
 and the family's ``schema``. Everything here is read through bulk
-projections and reduced in pandas (critique I8), never node by node:
+projections and reduced in pandas, never node by node:
 
 * :meth:`Friction2DDB.query` -- one row per live point: the run tokens (the
   CalcJob extra ``friction2d_tokens``), the point's own attributes with
@@ -14,8 +14,8 @@ projections and reduced in pandas (critique I8), never node by node:
   schema) plus the swept axes ``load``, ``angle``, ``speed``.
 * :func:`related` -- the points that differ from one point only along
   ``vary``: point-level and field-level, whatever deck shape (array or
-  combined mode) carried them (critique C1a, C1b). Joined on block hash
-  values, never on node identity (C2).
+  combined mode) carried them. Joined on block hash values, never on node
+  identity.
 * :func:`latest` -- the verdict or summary the policy selects for a point.
 * :func:`dataset_rows` -- a dataset's rows joined with their points and the
   summaries it fixed, for the plot source ``aiida://dataset/<name>``.
@@ -40,6 +40,7 @@ from ..core.compare import canonical_text, refill
 from .block_schema import BLOCK_KINDS, FIELD_MAP, REALIZATION_FIELDS, unindexed
 from .blocks import NAME_SEP, block_kind
 from .compare import block_name, schema_tables
+from .layout import DATASET_PREFIX, GROUP_PREFIX, SET_GROUP_FILTER, is_superseded
 from .rulings import Policy
 
 try:
@@ -61,10 +62,6 @@ AXES = ('load', 'angle', 'speed')
 #: between every pair of runs).
 REALIZATION = 'realization'
 
-_GROUP_PREFIX = 'friction2d/'
-_DATASET_PREFIX = 'friction2d/datasets/'
-#: ``frictionsim2d.analysis.store.ANALYSIS_GROUP_PREFIX``: analysis Groups are not sets.
-_ANALYSIS_PREFIX = 'friction2d/analyses/'
 _POINTS_LINK = 'points__%'
 _BLOCKS_LINK = 'blocks__'
 _SCHEMA_LINK = 'schema'
@@ -135,30 +132,37 @@ def _tokens(extras: Mapping[str, Any], rel_path: Optional[str],
     return dict(tokens or {})
 
 
-def _set_groups() -> List[Tuple[str, str, int, Dict[str, Any]]]:
+def _set_group_rows() -> List[Tuple[str, str, int, Dict[str, Any]]]:
     """``(label, uuid, pk, extras)`` of every ``friction2d/<label>`` set Group."""
     qb = orm.QueryBuilder().append(
-        orm.Group, filters={'label': {'like': f'{_GROUP_PREFIX}%'}},
-        project=['label', 'uuid', 'id', 'extras'])
-    return [(label, uuid, pk, extras or {}) for label, uuid, pk, extras in qb.all()
-            if not label.startswith((_DATASET_PREFIX, _ANALYSIS_PREFIX))]
+        orm.Group, filters=SET_GROUP_FILTER, project=['label', 'uuid', 'id', 'extras'])
+    return [(label, uuid, pk, extras or {}) for label, uuid, pk, extras in qb.all()]
 
 
 def _labels_of_calcs() -> Dict[str, List[str]]:
     """CalcJob uuid -> the set labels (``friction2d/`` stripped) holding it."""
-    qb = orm.QueryBuilder().append(
-        orm.Group, tag='g', filters={'label': {'like': f'{_GROUP_PREFIX}%'}},
-        project='label')
+    qb = orm.QueryBuilder().append(orm.Group, tag='g', filters=SET_GROUP_FILTER,
+                                   project='label')
     qb.append(orm.CalcJobNode, with_group='g', project='uuid')
     out: Dict[str, Set[str]] = {}
     for label, uuid in qb.all():
-        if not label.startswith(_DATASET_PREFIX):
-            out.setdefault(str(uuid), set()).add(label[len(_GROUP_PREFIX):])
+        out.setdefault(str(uuid), set()).add(label[len(GROUP_PREFIX):])
     return {uuid: sorted(labels) for uuid, labels in out.items()}
 
 
-def _dead(value: Any) -> bool:
-    return bool(value)
+def _deck_points(calc_project: List[str], point_project: List[str]):
+    """A query of every friction2d CalcJob (tag ``c``) and its point FolderData
+    (tag ``p``), projecting the given columns."""
+    qb = orm.QueryBuilder()
+    qb.append(orm.CalcJobNode, tag='c', filters={'process_type': _process_type()},
+              project=calc_project)
+    return _with_points(qb, point_project)
+
+
+def _with_points(qb, project: List[str]):
+    """Append the point FolderData of the CalcJob tagged ``c``, as tag ``p``."""
+    return qb.append(orm.FolderData, tag='p', with_incoming='c',
+                     edge_filters={'label': {'like': _POINTS_LINK}}, project=project)
 
 
 # ---------------------------------------------------------------------------
@@ -177,18 +181,13 @@ def _points(include_superseded: bool = False) -> _Points:
     from .block_schema import POINT_UNITS  # pylint: disable=import-outside-toplevel
     from .store import RUN_UUID_EXTRA  # pylint: disable=import-outside-toplevel
 
-    qb = orm.QueryBuilder()
-    qb.append(orm.CalcJobNode, tag='c', filters={'process_type': _process_type()},
-              project=['uuid', 'extras'])
-    qb.append(orm.FolderData, tag='p', with_incoming='c',
-              edge_filters={'label': {'like': _POINTS_LINK}}, project=['*'])
+    qb = _deck_points(['uuid', 'extras'], ['*'])
     labels = _labels_of_calcs()
     rows: List[Dict[str, Any]] = []
     nodes: Dict[str, Any] = {}
     for calc_uuid, calc_extras, point in qb.all():
         calc_extras = calc_extras or {}
-        superseded = (_dead(calc_extras.get('superseded'))
-                      or _dead(point.base.extras.get('superseded', False)))
+        superseded = bool(calc_extras.get('superseded')) or is_superseded(point)
         if superseded and not include_superseded:
             continue
         attrs = point.base.attributes.all
@@ -354,13 +353,9 @@ def _block_links(include_superseded: bool):
     from .store import BLOCK_HASH_EXTRA, RUN_UUID_EXTRA, SCHEMA_HASH_EXTRA  # pylint: disable=import-outside-toplevel
     point_attrs = ('point_uuid', 'family', 'load_kind', 'load', 'angle', 'speed',
                    'rel_path', 'deck_name', 'units')
-    qb = orm.QueryBuilder()
-    qb.append(orm.CalcJobNode, tag='c', filters={'process_type': _process_type()},
-              project=['uuid', 'extras.superseded', f'extras.{RUN_UUID_EXTRA}'])
-    qb.append(orm.FolderData, tag='p', with_incoming='c',
-              edge_filters={'label': {'like': _POINTS_LINK}},
-              project=['uuid', 'extras.superseded']
-              + [f'attributes.{name}' for name in point_attrs])
+    qb = _deck_points(['uuid', 'extras.superseded', f'extras.{RUN_UUID_EXTRA}'],
+                      ['uuid', 'extras.superseded']
+                      + [f'attributes.{name}' for name in point_attrs])
     qb.append(orm.Dict, tag='b', with_outgoing='c', edge_tag='link',
               edge_filters={'or': [{'label': {'like': f'{_BLOCKS_LINK}%'}},
                                    {'label': _SCHEMA_LINK}]},
@@ -371,7 +366,7 @@ def _block_links(include_superseded: bool):
         calc_uuid, calc_dead, run_uuid, node_uuid, point_dead = row[:5]
         attrs = dict(zip(point_attrs, row[5:5 + len(point_attrs)]))
         block, schema, label = row[5 + len(point_attrs):]
-        superseded = _dead(calc_dead) or _dead(point_dead)
+        superseded = bool(calc_dead) or bool(point_dead)
         if superseded and not include_superseded:
             continue
         units = attrs.pop('units') or {}
@@ -449,7 +444,7 @@ def point_table(*, include_superseded: bool = False):
 
     Built from one projection of (point, CalcJob, block link label, block
     hash) and one fetch of the distinct block contents by hash, so the cost
-    does not grow with a query per point or per block (critique I8). The
+    does not grow with a query per point or per block. The
     points of a CalcJob whose blocks carry no hash extra, or that has no
     schema to refill from, are left out, with one warning per run
     (``FrictionSim2D aiida reindex`` restores the extras).
@@ -702,7 +697,7 @@ def _point_node(point: Union[str, Any]):
         return point
     qb = orm.QueryBuilder().append(
         orm.FolderData, filters={'attributes.point_uuid': point}, project=['*'])
-    found = [n for n in qb.all(flat=True) if not n.base.extras.get('superseded', False)]
+    found = [n for n in qb.all(flat=True) if not is_superseded(n)]
     if not found:
         found = _nodes_by_uuid([point])
     if len(found) != 1:
@@ -761,12 +756,12 @@ def dataset_rows(name: str) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, s
     from .steps import DATASET_EXTRA  # pylint: disable=import-outside-toplevel
     _require_aiida()
     qb = orm.QueryBuilder().append(
-        orm.Group, tag='g', filters={'label': f'{_DATASET_PREFIX}{name}'})
+        orm.Group, tag='g', filters={'label': f'{DATASET_PREFIX}{name}'})
     qb.append(orm.Dict, with_group='g', filters={f'extras.{DATASET_EXTRA}': name},
               project=['*'])
     tables = qb.all(flat=True)
     if not tables:
-        raise LookupError(f'no dataset {name!r} ({_DATASET_PREFIX}{name})')
+        raise LookupError(f'no dataset {name!r} ({DATASET_PREFIX}{name})')
     table = tables[0]
     entries = table.get('rows') or []
     points = {(r['calc_uuid'], r['point_uuid']): r
@@ -803,7 +798,7 @@ def point_frames(calc_uuid: str, node_uuid: str) -> Dict[str, Any]:
     """
     from tempfile import TemporaryDirectory  # pylint: disable=import-outside-toplevel
 
-    from .steps import _point_frames  # pylint: disable=import-outside-toplevel,protected-access
+    from .steps import point_frames as _stored_frames  # pylint: disable=import-outside-toplevel
     _require_aiida()
     nodes = {n.uuid: n for n in _nodes_by_uuid([calc_uuid, node_uuid])}
     calc, point = nodes.get(calc_uuid), nodes.get(node_uuid)
@@ -812,7 +807,7 @@ def point_frames(calc_uuid: str, node_uuid: str) -> Dict[str, Any]:
     family = point.base.attributes.get('family')
     n_layers = int(calc.inputs.parameters.get_dict()['n_layers'])
     with TemporaryDirectory() as tmp:
-        return _point_frames(point, Path(tmp) / 'results', family, n_layers)
+        return _stored_frames(point, Path(tmp) / 'results', family, n_layers)
 
 
 # ---------------------------------------------------------------------------
@@ -861,25 +856,23 @@ class Friction2DDB:
         from .store import RUN_UUID_EXTRA  # pylint: disable=import-outside-toplevel
         decks: Dict[str, Dict[str, Optional[str]]] = {}
         qb = orm.QueryBuilder().append(
-            orm.Group, tag='g', filters={'label': {'like': f'{_GROUP_PREFIX}%'}},
-            project='label')
+            orm.Group, tag='g', filters=SET_GROUP_FILTER, project='label')
         qb.append(orm.CalcJobNode, with_group='g', tag='c',
                   project=['uuid', 'extras.superseded', f'extras.{RUN_UUID_EXTRA}'])
         for label, uuid, dead, run_uuid in qb.all():
-            if not _dead(dead):
+            if not dead:
                 decks.setdefault(label, {})[str(uuid)] = run_uuid
-        qb.append(orm.FolderData, with_incoming='c', edge_filters={
-            'label': {'like': _POINTS_LINK}}, project=['uuid', 'extras.superseded'])
+        _with_points(qb, ['uuid', 'extras.superseded'])
         points: Dict[str, Set[str]] = {}
         for label, _uuid, calc_dead, _run, point_uuid, dead in qb.all():
-            if not _dead(calc_dead) and not _dead(dead):
+            if not calc_dead and not dead:
                 points.setdefault(label, set()).add(str(point_uuid))
         rows = []
-        for label, uuid, pk, extras in _set_groups():
+        for label, uuid, pk, extras in _set_group_rows():
             live = decks.get(label, {})
             n_points = len(points.get(label, ()))
             rows.append({
-                'label': label[len(_GROUP_PREFIX):], 'uuid': uuid, 'pk': pk,
+                'label': label[len(GROUP_PREFIX):], 'uuid': uuid, 'pk': pk,
                 **{key: extras.get(key) for key in ('model', 'materials', 'created',
                                                     'git_commit', 'source_host',
                                                     'source_root')},
@@ -1001,8 +994,8 @@ class Friction2DDB:
                 if row.get(column) is not None:
                     values[key].add(row[column])
         out = {key: sorted(found) for key, found in values.items()}
-        out['set_labels'] = sorted(label[len(_GROUP_PREFIX):]
-                                   for label, *_rest in _set_groups())
+        out['set_labels'] = sorted(label[len(GROUP_PREFIX):]
+                                   for label, *_rest in _set_group_rows())
         return out
 
     def get_available_materials(self) -> List[str]:

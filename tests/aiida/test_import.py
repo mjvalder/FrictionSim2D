@@ -436,8 +436,10 @@ def test_a_truncated_slide_trace_is_a_truncated_point(aiida_profile_clean, tmp_p
 
 def test_files_over_max_stored_file_mb_are_recorded_not_stored(aiida_profile_clean,
                                                               tmp_path, monkeypatch):
-    from frictionsim2d.aiida import calcjob
-    monkeypatch.setattr(calcjob, '_max_stored_file_mb', lambda: 0)   # every byte is over
+    from types import SimpleNamespace
+    monkeypatch.setattr('frictionsim2d.core.config.load_settings',   # every byte is over
+                        lambda settings_file=None: SimpleNamespace(
+                            aiida=SimpleNamespace(max_stored_file_mb=0)))
     root = tmp_path / 'sim'
     run_dir = make_family_run(root, 'afm', loads=(10.0, 30.0), tiers=('window', 'peratom'),
                               config=slide_config('afm', loads=(10.0, 30.0)))
@@ -608,10 +610,11 @@ def test_a_machine_label_with_another_host_is_reused_with_a_warning(aiida_profil
 
 
 def _with_settings_machine(monkeypatch, machine):
-    """settings.aiida.machine = `machine`, as `ingest._settings_machine` reads it."""
+    """settings.aiida.machine = `machine`, as `aiida_setting` reads it."""
     from types import SimpleNamespace
     settings = SimpleNamespace(aiida=SimpleNamespace(machine=machine))
-    monkeypatch.setattr('frictionsim2d.aiida.ingest._load_settings', lambda settings_file=None: settings)
+    monkeypatch.setattr('frictionsim2d.core.config.load_settings',
+                        lambda settings_file=None: settings)
 
 
 def test_settings_aiida_machine_names_the_computer(aiida_profile_clean, tmp_path,
@@ -691,18 +694,6 @@ def test_a_parse_failure_keeps_run_info_and_is_retried(aiida_profile_clean, tmp_
     assert _by_deck('h-MoS2')['slide'].is_finished_ok
 
 
-def test_on_point_sees_every_new_point(aiida_profile_clean, tmp_path):
-    seen = []
-    root = _tree(tmp_path / 'sim')
-    report = import_root(root, label='camp',
-                         on_point=lambda calc, label, point: seen.append((label, point.uuid)))
-    assert sorted(u for _l, u in seen) == sorted(report.points)
-    assert {label for label, _u in seen} == {'force10_a0_s2'}
-    again = []
-    import_root(root, label='camp', on_point=lambda *a: again.append(a))
-    assert again == []
-
-
 def test_reindex_restores_the_deck_key(aiida_profile_clean, tmp_path):
     from frictionsim2d.aiida.store import reindex
     import_root(_tree(tmp_path / 'sim', materials=('h-MoS2',)), label='camp')
@@ -739,7 +730,6 @@ def test_slide_points_group_the_three_tiers(tmp_path):
     one = points[0]
     assert (one.family, one.load_kind, one.speed, one.layers) == ('afm', 'force', 2.0, 2)
     assert set(one.tiers) == {'window', 'raw'}
-    assert len(one.content_sha256) == 64
 
 
 def test_sheet_points_are_pressures(tmp_path):
@@ -765,7 +755,6 @@ def test_a_sync_conflict_copy_is_not_a_tier(tmp_path):
 
     assert set(point.tiers) == {'window', 'raw'}
     assert not any('.sync-conflict-' in p.name for p in point.tiers.values())
-    assert not any('.sync-conflict-' in p.name for p in point.aux)
 
 def test_indent_pairs_its_retract_curve_with_the_hold(tmp_path):
     root = tmp_path / 'sim'
@@ -787,7 +776,6 @@ def test_pes_refine_grid_is_not_a_second_point(tmp_path):
     point, = load_points(loc)
     assert point.load_kind == 'none'
     assert point.tiers['window'].name == 'pes_scan.csv'
-    assert {Path(p).name for p in point.aux} == {'pes_scan_refine.csv'}
 
 
 FAMILY_CASES = [

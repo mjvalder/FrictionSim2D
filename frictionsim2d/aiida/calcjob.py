@@ -1,34 +1,19 @@
-"""Import-only CalcJob and Parser for finished FrictionSim2D runs (spec §5.1).
+"""Import-only CalcJob and Parser for finished FrictionSim2D runs.
 
-One :class:`LammpsFrictionCalcJob` per LAMMPS deck of a run. It is launched
-with ``engine.run`` and a ``remote_folder`` pointing at the run directory, so
-aiida-core skips upload and submit and only retrieves and parses: LAMMPS is
-never launched through AiiDA. The import path hard-codes ``LocalTransport``
-(``CalcJob._perform_import``), so the run directory must be readable on this
-machine; the ``RemoteData``'s Computer (unconfigured, carrying the real host
-and scheduler, see :func:`frictionsim2d.aiida.store.machine_computer`) only records
-where it came from.
+One :class:`LammpsFrictionCalcJob` per LAMMPS deck of a run, launched with
+``engine.run`` and a ``remote_folder`` pointing at the run directory, so aiida-core
+only retrieves and parses: LAMMPS is never launched through AiiDA. The import
+hard-codes ``LocalTransport``, so the run directory must be readable on this machine.
 
-What each deck's node carries:
+Inputs: the deck, the files it includes, the run's ``provenance/``, parameter blocks
+and potentials (content-addressed through :mod:`frictionsim2d.aiida.store`), the
+``derived`` values, the ``schema``, and ``structures`` (``build/*.lmp`` and, for a
+slide deck, the ``load_*.data`` nodes the system deck output). Outputs: per load point
+``points.<key>``, ``peratom.<key>`` and ``snapshots.<key>``; ``structures`` and
+``aux`` for system decks; ``run_info`` and ``log``.
 
-* inputs -- the deck itself, the files it ``include``\\ s (``includes``:
-  ``lammps/system.in.settings``), the run's ``provenance/`` +
-  ``provenance.json``, its parameter blocks and potential files (all
-  content-addressed through :mod:`frictionsim2d.aiida.store`, so runs share them), the
-  run's ``derived`` values and the family's ``schema`` (units, kinds,
-  defaults), and ``structures``: the ``build/*.lmp`` files the first deck
-  reads and, for a slide deck, the very ``load_*.data`` nodes the system
-  deck output for its loads. That last link is the system -> slide handoff in the graph.
-* outputs -- per load point ``points.<key>`` (window + raw tiers, and the
-  indent retract curve), ``peratom.<key>`` (the per-atom tier) and
-  ``snapshots.<key>`` (the end ``final_*.data``); ``structures`` and ``aux``
-  for system decks; ``run_info`` and ``log``.
-
-Retrieval goes through ``retrieve_temporary_list`` and the parser builds the
-stored nodes itself, so it can drop Syncthing ``*.sync-conflict-*`` copies
-and always keep the original file -- a plain ``retrieve_list`` glob cannot.
-Every output file goes through :func:`frictionsim2d.aiida.data.redact.stage_file`
-(:func:`frictionsim2d.aiida.store.new_file` / :func:`~frictionsim2d.aiida.store.new_folder`).
+Retrieval uses ``retrieve_temporary_list`` and the parser builds the stored nodes
+itself, so Syncthing ``*.sync-conflict-*`` copies are dropped and the original kept.
 """
 from __future__ import annotations
 
@@ -52,8 +37,12 @@ from aiida.common.folders import Folder
 from aiida.engine import CalcJob
 from aiida.parsers.parser import Parser
 
-from ..core.observables import PES_FAMILIES
-from .layout import Deck, content_hash, discover_decks, points_for, retrieve_patterns
+from ..core.observables import PES_FAMILIES, PES_REFINE_NAME
+from . import aiida_setting
+from .layout import (
+    LOAD_TOL, RETRIEVE_LIST, Deck, build_dir, content_hash, discover_decks, is_conflict,
+    plain_files, points_for, reads_build,
+)
 from .store import (
     StoreIndex, calcjob_extras, get_or_create_file, lammps_code, new_file, new_folder,
 )
@@ -73,9 +62,6 @@ class MissingRunUUID(ValueError):
 class ConfigMismatch(ValueError):
     """No candidate ``config.json`` of a run matches its ``config_hash``."""
 
-_CONFLICT = '.sync-conflict-'
-_PES_REFINE_NAME = 'pes_scan_refine.csv'
-_TOL = 1e-9
 
 #: Tiers (keys of `LoadPoint.tiers`) stored on the point node itself; the
 #: per-atom tier gets its own node, `peratom.<key>`.
@@ -83,7 +69,7 @@ _POINT_TIERS = ('window', 'raw', 'retract')
 _READ_TIERS = ('window', 'raw', 'peratom')
 
 #: What each kind of deck retrieves, as remote globs of
-#: :func:`~frictionsim2d.aiida.layout.retrieve_patterns`: a system deck writes the
+#: :data:`~frictionsim2d.aiida.layout.RETRIEVE_LIST`: a system deck writes the
 #: loaded structures (and the AFM hold traces), a slide-like deck the results
 #: and end snapshots.
 _SYSTEM_RETRIEVE = ('data/load_*.data', 'data/hold_*.txt')
@@ -161,7 +147,7 @@ class LammpsFrictionCalcJob(CalcJob):
         spec.input('provenance', valid_type=orm.FolderData, required=False,
                    help="The run's provenance/ directory plus provenance.json.")
         spec.input_namespace('blocks', valid_type=orm.Dict, dynamic=True,
-                             required=False, help='Parameter blocks (spec §5.2).')
+                             required=False, help='Parameter blocks.')
         spec.input('derived', valid_type=orm.Dict, required=False,
                    help="The run's derived values (drive_k, lat_c, ...), not hashed.")
         spec.input('schema', valid_type=orm.Dict, required=False,
@@ -243,10 +229,10 @@ def _temporary_list(writes_structures: bool) -> List[Tuple[str, str, Optional[in
 
     Narrowed by category only, not by load: result filenames spell loads with
     LAMMPS' own number formatting, so a per-load glob could silently miss a
-    file. The parser selects this deck's points (:func:`decks.points_for`).
+    file. The parser selects this deck's points (:func:`~frictionsim2d.aiida.layout.points_for`).
     """
     wanted = _SYSTEM_RETRIEVE if writes_structures else _SLIDE_RETRIEVE
-    return [entry for entry in retrieve_patterns() if entry[0] in wanted]
+    return [entry for entry in RETRIEVE_LIST if entry[0] in wanted]
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +241,8 @@ def _temporary_list(writes_structures: bool) -> List[Tuple[str, str, Optional[in
 
 def _drop_conflict_copies(root: Path) -> None:
     """Delete Syncthing conflict copies from the scratch retrieval."""
-    for path in list(root.rglob(f'*{_CONFLICT}*')):
-        if path.is_file():
+    for path in list(root.rglob('*')):
+        if path.is_file() and is_conflict(path):
             logger.info('Ignoring Syncthing conflict copy %s', path.name)
             path.unlink()
 
@@ -449,14 +435,12 @@ class LammpsFrictionParser(Parser):
                 extras = parse_log_extras(path)
                 info['log_has_version'] = 'lammps_version' in extras
                 info.update(extras)
+                info.update(_log_facts(path, extras))
                 self.out('log', new_file(path, name=log_name))
             wall = _WALL_RE.findall(text)
             if wall:
                 hours, minutes, seconds = (int(x) for x in wall[-1])
                 info['wall_time_s'] = float(hours * 3600 + minutes * 60 + seconds)
-            procs = _PROCS_RE.findall(text)
-            if procs:
-                info['n_procs'] = int(procs[-1])
         return (None if text is None else bool(_WALL_RE.search(text))), info
 
     # -- the stored-file cap ---------------------------------------------------
@@ -597,15 +581,6 @@ def _cap_bytes(max_mb: Any) -> Optional[int]:
     return int(float(max_mb) * 1024 * 1024)
 
 
-def _max_stored_file_mb() -> int:
-    """``settings.aiida.max_stored_file_mb`` (default 20)."""
-    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
-    try:
-        return int(load_settings().aiida.max_stored_file_mb)
-    except (OSError, ValueError, AttributeError):
-        return 20
-
-
 def _point_identity(run_uuid: Optional[str], label: str, ident: Any,
                     record: Mapping[str, Any],
                     point_units: Mapping[str, Mapping[str, str]]) -> Dict[str, Any]:
@@ -633,11 +608,10 @@ def _refine_points(found, locator):
     """A PES ``*_refine`` deck's point: its own refine grid, not the base grid."""
     from dataclasses import replace  # pylint: disable=import-outside-toplevel
 
-    refine = locator.results_dir / _PES_REFINE_NAME
+    refine = locator.results_dir / PES_REFINE_NAME
     if not found or not refine.is_file():
         return []
-    return [replace(found[0], tiers={'window': refine},
-                    content_sha256=content_hash([refine]))]
+    return [replace(found[0], tiers={'window': refine})]
 
 
 # ---------------------------------------------------------------------------
@@ -659,19 +633,6 @@ def _read_json(path: Path) -> dict:
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _files(directory: Path, pattern: str) -> List[Path]:
-    if not directory.is_dir():
-        return []
-    return [p for p in sorted(directory.glob(pattern))
-            if p.is_file() and _CONFLICT not in p.name]
-
-
-def _build_dir(locator) -> Path:
-    """``build/`` of the run, or of the level above ``L{n}`` (AFM)."""
-    here = Path(locator.run_dir) / 'build'
-    return here if here.is_dir() else Path(locator.run_dir).parent / 'build'
 
 
 def _sim_root(locator) -> Path:
@@ -880,10 +841,10 @@ def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
         provenance=get_or_create_provenance(locator.provenance_file, prov_dir,
                                             config_file=config_file, index=index),
         potentials=_unique(((_file_label(p.name), get_or_create_file(p, index=index))
-                            for p in _files(prov_dir / 'potentials', '*')),
+                            for p in plain_files(prov_dir / 'potentials', '*')),
                            'potentials'),
         run_uuid=run_uuid, config=config, record=record, settings=settings,
-        max_stored_file_mb=_max_stored_file_mb())
+        max_stored_file_mb=int(aiida_setting('max_stored_file_mb', 20)))
 
 
 _LMP_TOKEN_RE = re.compile(r'(?:^|\s)(\S*/)?(lmp\S*)(?=\s|$)')
@@ -928,16 +889,16 @@ def _hpc_run_path(locator) -> Optional[str]:
     return None
 
 
-def _log_info(log_path: Optional[Path]) -> Dict[str, Any]:
-    """``lammps_version`` and ``n_procs`` of a deck's log (keys only when found)."""
+def _log_facts(log_path: Path, extras: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """``lammps_version`` and ``n_procs`` of a log (keys only when found).
+    ``extras`` is ``parse_log_extras(log_path)`` when the caller has it."""
     from ..data.provenance import parse_log_extras  # pylint: disable=import-outside-toplevel
 
-    if log_path is None:
-        return {}
+    if extras is None:
+        extras = parse_log_extras(Path(log_path))
     info: Dict[str, Any] = {}
-    version = parse_log_extras(Path(log_path)).get('lammps_version')
-    if version:
-        info['lammps_version'] = version
+    if extras.get('lammps_version'):
+        info['lammps_version'] = extras['lammps_version']
     procs = _PROCS_RE.findall(Path(log_path).read_text(encoding='utf-8', errors='replace'))
     if procs:
         info['n_procs'] = int(procs[-1])
@@ -988,7 +949,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
 
     Block link labels are the block names with ``__`` -> ``_`` (``__`` is
     AiiDA's namespace separator); ``parameters['block_names']`` maps each
-    label back to the unambiguous name [C2].
+    label back to the unambiguous name.
 
     Raises:
         MissingRunUUID: ``provenance.json`` has no ``run_uuid``.
@@ -1002,8 +963,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
     n_layers = resolve_n_layers(locator, run.config or None)
     decks = list(decks) if decks is not None else discover_decks(locator)
 
-    reads_build = deck.writes_structures or not any(d.writes_structures for d in decks)
-    builds = _files(_build_dir(locator), '*.lmp') if reads_build else []
+    builds = plain_files(build_dir(locator), '*.lmp') if reads_build(deck, decks) else []
     handed = _unique([(f'build_{_file_label(p.name)}', get_or_create_file(p, index=index))
                       for p in builds]
                      + list((structures or {}).items()), 'structures')
@@ -1011,7 +971,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
 
     log_name = (Path(deck.log_path).relative_to(run_dir).as_posix()
                 if deck.log_path is not None else None)
-    log_info = _log_info(deck.log_path)
+    log_info = _log_facts(deck.log_path) if deck.log_path is not None else {}
     n_procs = log_info.get('n_procs') or run.record.get('n_procs') or 1
     hpc = _hpc(run)
     if code is None:
@@ -1080,7 +1040,7 @@ def structures_for(deck: Deck, structures: Mapping[str, orm.SinglefileData]
     out = {}
     for key, node in structures.items():
         match = _LOAD_FILE_RE.match(node.filename)
-        if match and abs(float(match['load']) - float(load)) <= _TOL:
+        if match and abs(float(match['load']) - float(load)) <= LOAD_TOL:
             out[key] = node
     return out
 

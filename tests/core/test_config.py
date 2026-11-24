@@ -1316,3 +1316,37 @@ class TestSheetSectionsAgreeOnDispersion:
             '2D-1': self._sheet(tmp_path, dispersion='d3'),
             '2D-2': self._sheet(tmp_path, dispersion='d3')})
         assert len(cfg.sheets) == 2
+
+
+# --- integrity overrides (aiida import / recheck --integrity) --------------------
+
+def test_integrity_overrides_parse_scalars_and_margins():
+    from frictionsim2d.core.config import integrity_overrides
+
+    assert integrity_overrides(['hole_bonds=2', 'ejected_atoms=none', 'collapse=false',
+                                'margins.hole=0.1', 'margins.gap=0.2']) == {
+        'hole_bonds': 2, 'ejected_atoms': None, 'collapse': False,
+        'margins': {'hole': 0.1, 'gap': 0.2}}
+
+
+@pytest.mark.parametrize('pair', ['hole_bonds', '=3', 'bogus=1', 'margins=1', 'margins.=1'])
+def test_integrity_overrides_reject_a_bad_key(pair):
+    from frictionsim2d.core.config import integrity_overrides
+
+    with pytest.raises(ValueError):
+        integrity_overrides([pair])
+
+
+def test_merged_integrity_overrides_one_threshold_and_revalidates():
+    from pydantic import ValidationError
+
+    from frictionsim2d.core.config import IntegritySettings, merged_integrity
+
+    base = IntegritySettings(margins={'hole': 0.5}).model_dump(mode='json')
+    merged = merged_integrity(base, {'hole_bonds': 3.0, 'margins': {'gap': 0.1}})
+
+    assert merged['hole_bonds'] == 3.0 and merged['isolated_atoms'] == base['isolated_atoms']
+    assert merged['margins'] == {'hole': 0.5, 'gap': 0.1}
+    assert merged_integrity(base, None) == base
+    with pytest.raises(ValidationError):
+        merged_integrity(base, {'isolated_atoms': 'many'})

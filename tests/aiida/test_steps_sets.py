@@ -146,3 +146,21 @@ def test_delete_of_an_unshared_set_warns_nothing(aiida_profile_clean, no_profile
     with caplog.at_level('WARNING'):
         delete_simulation_set('camp')
     assert not [r for r in caplog.records if 'superseded copies' in r.getMessage()]
+
+
+def test_clear_removes_nodes_of_the_removed_friction2d_data_types(aiida_profile_clean,
+                                                                  no_profile_switch):
+    legacy = orm.Dict({'kept': 'no'}).store()
+    bystander = orm.Dict({'kept': 'yes'}).store()
+    from aiida.manage import get_manager
+    legacy_pk, bystander_pk = legacy.pk, bystander.pk
+    session = get_manager().get_profile_storage().get_session()
+    model = legacy.backend_entity.bare_model
+    model.node_type = 'data.friction2d.simulation.SimulationData.'
+    session.add(model)
+    session.commit()
+
+    assert clear_all_nodes() >= 1
+
+    assert not orm.QueryBuilder().append(orm.Node, filters={'id': legacy_pk}).count()
+    assert orm.QueryBuilder().append(orm.Node, filters={'id': bystander_pk}).count() == 1

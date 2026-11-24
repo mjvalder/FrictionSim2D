@@ -22,8 +22,9 @@ from aiida.common import exceptions  # noqa: E402
 import frictionsim2d.aiida.steps as steps  # noqa: E402
 from frictionsim2d.aiida.block_schema import SUMMARY_UNITS  # noqa: E402
 from frictionsim2d.aiida.ingest import import_root  # noqa: E402
+from frictionsim2d.aiida.layout import DATASET_PREFIX  # noqa: E402
 from frictionsim2d.aiida.rulings import Policy  # noqa: E402
-from frictionsim2d.aiida.steps import (DATASET_PREFIX, apply_rulings, build_dataset,  # noqa: E402
+from frictionsim2d.aiida.steps import (apply_rulings, build_dataset,  # noqa: E402
                              clear_all_nodes, delete_dataset, delete_simulation_set,
                              is_provisional, latest_verdict,
                              merge_units, normalise_options, options_hash,
@@ -421,7 +422,7 @@ def test_build_dataset_groups_summaries_and_one_dict(aiida_profile_clean,
 
     table = build_dataset('d', ['camp'])
 
-    group = orm.Group.collection.get(label=f'{DATASET_PREFIX}/d')
+    group = orm.Group.collection.get(label=f'{DATASET_PREFIX}d')
     nodes = list(group.nodes)
     summaries = [n for n in nodes if n.base.extras.get('friction2d_kind') == 'summary']
     dicts = [n for n in nodes if n.base.extras.get('friction2d_kind') == 'dataset']
@@ -571,7 +572,7 @@ def test_a_failed_dataset_store_leaves_nothing(aiida_profile_clean, no_profile_s
 
     assert orm.QueryBuilder().append(orm.Node).count() == before
     assert not orm.QueryBuilder().append(
-        orm.Group, filters={'label': {'like': f'{DATASET_PREFIX}/%'}}).count()
+        orm.Group, filters={'label': {'like': f'{DATASET_PREFIX}%'}}).count()
 
 
 def test_delete_without_a_dataset_takes_the_summaries(aiida_profile_clean,

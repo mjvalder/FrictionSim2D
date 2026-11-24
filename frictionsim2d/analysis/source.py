@@ -167,7 +167,7 @@ class StoreFetcher:
         from aiida import orm
 
         from ..aiida.query import point_frames
-        from ..aiida.steps import _point_frames
+        from ..aiida.steps import point_frames as stored_frames
         frames = point_frames(row.calc_uuid, row.node_uuid)
         if 'peratom' in frames:
             return frames
@@ -180,7 +180,7 @@ class StoreFetcher:
             return frames
         n_layers = int(calc.inputs.parameters.get_dict()['n_layers'])
         with tempfile.TemporaryDirectory() as tmp:
-            frames.update(_point_frames(calc.outputs.peratom[label], Path(tmp) / 'results',
+            frames.update(stored_frames(calc.outputs.peratom[label], Path(tmp) / 'results',
                                         point.base.attributes.get('family'), n_layers))
         return frames
 
@@ -286,14 +286,15 @@ def dataset_table(name: str) -> Any:
     # pylint: disable=import-outside-toplevel
     from aiida import orm
 
-    from ..aiida.steps import DATASET_EXTRA, DATASET_PREFIX
+    from ..aiida.layout import DATASET_PREFIX
+    from ..aiida.steps import DATASET_EXTRA
     qb = orm.QueryBuilder().append(
-        orm.Group, tag='g', filters={'label': f'{DATASET_PREFIX}/{name}'})
+        orm.Group, tag='g', filters={'label': f'{DATASET_PREFIX}{name}'})
     qb.append(orm.Dict, with_group='g', filters={f'extras.{DATASET_EXTRA}': name},
               project=['*'])
     tables = qb.all(flat=True)
     if not tables:
-        raise LookupError(f'no dataset {name!r} ({DATASET_PREFIX}/{name})')
+        raise LookupError(f'no dataset {name!r} ({DATASET_PREFIX}{name})')
     return tables[0]
 
 
@@ -310,13 +311,14 @@ def _excluded_rows(table: Any, kept: set) -> List[Dict[str, Any]]:
     # pylint: disable=import-outside-toplevel,protected-access
     from ..aiida import query, steps
     from ..aiida.rulings import Policy
+    from ..aiida.store import resolve_set
     policy = Policy.from_dict(table.get('policy') or {})
     identity = {(r['calc_uuid'], r['point_uuid']): r
                 for r in query._points(include_superseded=True).rows}
     out: List[Dict[str, Any]] = []
     seen = set()
     for label in table.get('labels') or []:
-        points = [p for p in steps._live_points(steps._set_group(label))
+        points = [p for p in steps._live_points(resolve_set(label))
                   if p.pk not in seen]
         verdicts = steps.latest_verdicts(points, policy)
         for point in points:
@@ -354,6 +356,7 @@ def _run_calcs(calc: Any) -> List[Any]:
     """``calc`` first, then the run's other live friction2d CalcJobs."""
     from aiida import orm  # pylint: disable=import-outside-toplevel
 
+    from ..aiida.layout import is_superseded  # pylint: disable=import-outside-toplevel
     from ..aiida.store import RUN_UUID_EXTRA  # pylint: disable=import-outside-toplevel
     run_uuid = calc.base.extras.get(RUN_UUID_EXTRA, None)
     others: List[Any] = []
@@ -362,8 +365,7 @@ def _run_calcs(calc: Any) -> List[Any]:
             orm.CalcJobNode, filters={f'extras.{RUN_UUID_EXTRA}': run_uuid,
                                       'uuid': {'!==': calc.uuid}},
             project=['*'])
-        others = sorted((n for n in qb.all(flat=True)
-                         if not n.base.extras.get('superseded', False)),
+        others = sorted((n for n in qb.all(flat=True) if not is_superseded(n)),
                         key=lambda n: n.uuid)
     return [calc, *others]
 

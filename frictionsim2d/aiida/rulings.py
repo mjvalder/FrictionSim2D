@@ -2,15 +2,15 @@
 
 Pure Python, no AiiDA import, in two parts.
 
-**The version policy** -- what "latest" verdict and summary mean (critique
-I4): :class:`Policy` and :func:`select`.
+**The version policy** -- what "latest" verdict and summary mean:
+:class:`Policy` and :func:`select`.
 
 Selection is by DECLARED version, never by creation time: an imported node
 keeps its origin ``ctime``, so "latest by ctime" depends on clocks and import
 order, and a verdict re-run with older thresholds (to reproduce a paper)
 would silently win over a newer one.
 
-Verdict order (controller ruling P2-R13; Task 8's query layer uses the same):
+Verdict order (the query layer uses the same):
 
 1. **Generation first**: the highest semver ``thresholds_version``, then the
    highest semver ``code_version``. A verdict of a newer generation wins

@@ -48,6 +48,10 @@ SLIDE_FAMILIES: Tuple[str, ...] = ('afm', 'sheetonsheet', 'hetero', 'flake')
 #: The static potential-energy-surface scan families: one grid evaluation per run.
 PES_FAMILIES: Tuple[str, ...] = ('pes_tip', 'pes_sheet')
 
+#: The grid a PES run writes under `results/`, and the optional refinement grid.
+PES_BASE_NAME = 'pes_scan.csv'
+PES_REFINE_NAME = 'pes_scan_refine.csv'
+
 def tier_frequencies(config: Mapping[str, Any]) -> Dict[str, int]:
     """Output interval (steps) of each tier; `{}` if the window one is unknown."""
     try:

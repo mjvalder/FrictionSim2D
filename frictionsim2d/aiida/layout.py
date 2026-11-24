@@ -1,36 +1,14 @@
 """What a finished run holds, as the import and the CalcJob both read it -- aiida-free.
 
-Three parts, none of which imports `aiida` (so `frictionsim2d.aiida.ingest`,
-`frictionsim2d.aiida.compare` and :mod:`frictionsim2d.aiida.calcjob` can all import this at
-module level, and `ingest` stays importable without aiida-core):
-
-* **Shared vocabulary** -- what `ingest` and the CalcJob parser must agree
-  on: :data:`TIER_KEYS` (`ingest` needs it at module load time for
-  `POINT_KEYS = TIER_KEYS + ('retract',)`), :func:`content_hash` and
-  :func:`is_superseded`.
-
-* **Retention** -- what a finished run keeps. One rule, two consumers.
-  `ingest.load_points` derives each point's aux files from
-  :func:`retained_paths`. The import-only `LammpsFrictionCalcJob` retrieves
-  from :func:`retrieve_patterns`, narrowed per deck kind
-  (`calcjob._temporary_list`): results, end snapshots, loaded structures and
-  hold traces are retrieved and stored as outputs, while the run's inputs
-  (decks, `system.in.settings`, `provenance/`, `build/*.lmp`, potentials)
-  are stored as content-addressed CalcJob inputs read straight from the run
-  directory. Root-level `*.out` and `log*.lammps` of a multi-deck local run
-  are retained here but not yet stored by the CalcJob path. Trajectories
-  (`visuals/`, `*.lammpstrj`) are deliberately excluded: spec U3 keeps
-  visual files on disk for verification only. Of `build/`, only the `*.lmp`
-  structures are kept.
-
-* **Deck discovery** -- which `lammps/*.in` decks a run holds. Each deck
-  becomes one import-only CalcJob, so this part decides which decks exist,
-  which load points each covers and which log belongs to each. `LoadPoint`
-  is only named for typing (under `TYPE_CHECKING`) and :func:`points_for`
-  duck-types on `.load`/`.angle`/`.speed`, so any object carrying those
-  attributes works. The point filter inverts
-  `core.utils.tokens.format_numeric_token` exactly as `hpc/manifest.py`
-  does: `m` is a minus sign, `p` a decimal point.
+* Shared vocabulary: tier keys, content hashes, Group label prefixes, the
+  Syncthing-conflict rule and the superseded flag.
+* :data:`RETRIEVE_LIST`: the files the import-only CalcJob retrieves. Trajectories
+  (``visuals/``, ``*.lammpstrj``) are excluded on purpose; of ``build/`` only the
+  ``*.lmp`` structures are kept.
+* Deck discovery: which ``lammps/*.in`` decks a run holds, which load points each
+  covers and which log belongs to each. The point filter inverts
+  ``core.utils.tokens.format_numeric_token`` as ``hpc/manifest.py`` does: ``m`` is a
+  minus sign, ``p`` a decimal point.
 """
 from __future__ import annotations
 
@@ -45,9 +23,10 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..run.tree import RunLocator
     from .ingest import LoadPoint
 
-__all__ = ['TIER_KEYS', 'content_hash', 'is_superseded',
-           'RETAINED_GLOBS', 'RETRIEVE_LIST', 'retained_paths', 'retrieve_patterns',
-           'Deck', 'discover_decks', 'deck_log', 'points_for']
+__all__ = ['ANALYSIS_GROUP_PREFIX', 'CONFLICT', 'DATASET_PREFIX', 'GROUP_PREFIX',
+           'LOAD_TOL', 'RETRIEVE_LIST', 'SET_GROUP_FILTER', 'TIER_KEYS', 'Deck', 'content_hash',
+           'build_dir', 'deck_log', 'discover_decks', 'group_label', 'is_conflict', 'is_superseded',
+           'plain_files', 'points_for', 'reads_build']
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +35,44 @@ logger = logging.getLogger(__name__)
 # Shared vocabulary
 # ---------------------------------------------------------------------------
 
-#: The three sampling tiers that become stored tier files. `frictionsim2d/aiida/
-#: ingest.py` imports this rather than declaring its own, so `POINT_KEYS =
-#: TIER_KEYS + ('retract',)` there and the CalcJob parser cannot disagree
-#: about what a tier is.
+#: The three sampling tiers that become stored tier files.
 TIER_KEYS = ('window', 'raw', 'peratom')
+
+#: Group label prefixes: a set is ``friction2d/<label>``, a dataset
+#: ``friction2d/datasets/<name>``, an analysis ``friction2d/analyses/<dataset>``.
+#: Stored in every profile and archive: never change them.
+GROUP_PREFIX = 'friction2d/'
+DATASET_PREFIX = 'friction2d/datasets/'
+ANALYSIS_GROUP_PREFIX = 'friction2d/analyses/'
+
+#: QueryBuilder filter on Group labels: the set Groups, not datasets or analyses.
+SET_GROUP_FILTER = {'and': [{'label': {'like': f'{GROUP_PREFIX}%'}},
+                            {'label': {'!like': f'{DATASET_PREFIX}%'}},
+                            {'label': {'!like': f'{ANALYSIS_GROUP_PREFIX}%'}}]}
+
+
+def group_label(label: str) -> str:
+    """The AiiDA Group every node of the set ``label`` belongs to."""
+    return f'{GROUP_PREFIX}{label}'
+
+#: Marks a Syncthing copy of a file; the original is the record.
+CONFLICT = '.sync-conflict-'
+
+#: Tolerance when matching a load, angle or speed read from a file name.
+LOAD_TOL = 1e-9
+
+
+def is_conflict(path: Path) -> bool:
+    """Whether ``path`` is a Syncthing conflict copy."""
+    return CONFLICT in Path(path).name
+
+
+def plain_files(directory: Path, pattern: str) -> List[Path]:
+    """Files matching ``pattern`` in ``directory``, Syncthing copies left out."""
+    if not Path(directory).is_dir():
+        return []
+    return [p for p in sorted(Path(directory).glob(pattern))
+            if p.is_file() and not is_conflict(p)]
 
 
 def is_superseded(node) -> bool:
@@ -88,64 +100,14 @@ def content_hash(paths: Sequence[Path]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Retention
+# Retrieval
 # ---------------------------------------------------------------------------
 
-#: LOCAL retention, evaluated with `pathlib.Path.glob`, where `**` recurses.
-RETAINED_GLOBS: Tuple[str, ...] = (
-    'provenance.json',
-    'provenance/**/*',
-    'lammps/*.in',
-    'lammps/system.in.settings',
-    'lammps/run_*.log',
-    'results/*',
-    'data/hold_*.txt',
-    'data/final_*.data',
-    'data/load_*.data',
-    'build/*.lmp',
-    'log*.lammps',
-    '*.out',
-)
-
-#: REMOTE retention, evaluated by AiiDA's transport via
-#: `aiida.engine.daemon.execmanager.retrieve_files_from_list`. Verified against
-#: that function directly (real `LocalTransport`, no daemon/profile needed --
-#: see `test_real_retrieval_preserves_the_tree`), because reasoning about it
-#: from the docstring alone is exactly how the first version of this list
-#: shipped broken:
-#:   1. `(remote, local, depth)` tuples, not plain strings. A plain string is
-#:      flattened to its basename (`execmanager.py:703-712`
-#:      `local_names = [os.path.split(rem)[1]]`), so `results/friction_*.txt`
-#:      would arrive at the top of the FolderData with no `results/` directory
-#:      and the parser would find nothing.
-#:   2. No `**`: the transport's glob is fnmatch-style and does not recurse, so
-#:      every provenance level is named explicitly.
-#:   3. Every WILDCARD entry uses `local='.'` with `depth=None`. With
-#:      `depth=None`, execmanager builds each match's local name from
-#:      `rel_rem` -- the match's path *relative to the remote run root* -- so
-#:      the retrieved tree reproduces the run directory's own shape, and
-#:      `execmanager` pre-creates each needed subdirectory first (the
-#:      `depth is None or depth > 1` branch). A fixed `depth=0` local dir per
-#:      category (e.g. `('results/*', 'results', 0)`) looks equivalent but
-#:      collapses EVERY match from that one pattern onto the SAME local name --
-#:      two files under `results/` would collide, last-writer-wins, onto a
-#:      single flat file literally named `results`.
-#:   4. The two genuinely LITERAL (non-wildcard) entries -- `provenance.json`
-#:      and `lammps/system.in.settings` -- cannot use `depth=None`: execmanager
-#:      compares it with `depth > 0` in the non-wildcard branch and raises
-#:      `TypeError`. They use `depth` = the pattern's own path-segment count
-#:      instead (1 and 2), which reproduces the exact same
-#:      whole-path-relative-to-root effect that `None` gives a wildcard, and
-#:      still triggers directory pre-creation once `depth > 1`
-#:      (`lammps/system.in.settings`). `depth=0` for a nested literal path
-#:      (e.g. `lammps/system.in.settings` with `local='.'`) instead drops the
-#:      `lammps/` prefix and writes the bare basename to the retrieved root --
-#:      confirmed with a real `LocalTransport` run before this fix.
-#:
-#: `lammps/run_*.log` covers the per-deck HPC job logs (see
-#: `frictionsim2d/templates/hpc/_environment.j2` / `pbs_array.j2`, which write
-#: `<run>/lammps/run_<deck>.log` and copy them back alongside results/,
-#: visuals/ and data/); `log*.lammps` above stays for local (non-HPC) runs.
+#: ``(remote, local, depth)`` entries for AiiDA's ``retrieve_files_from_list``. Plain
+#: strings would be flattened to their basename; wildcard entries use ``depth=None``
+#: so the retrieved tree keeps the run's shape, and the two literal entries carry
+#: their own path-segment count (``depth=None`` raises ``TypeError`` for a literal).
+#: The transport's glob does not recurse, so every ``provenance/`` level is named.
 RETRIEVE_LIST: Tuple[Tuple[str, str, Optional[int]], ...] = (
     ('provenance.json', '.', 1),
     ('provenance/*', '.', None),
@@ -162,50 +124,6 @@ RETRIEVE_LIST: Tuple[Tuple[str, str, Optional[int]], ...] = (
     ('log*.lammps', '.', None),
     ('*.out', '.', None),
 )
-
-
-def retained_paths(run_dir: Path) -> List[Path]:
-    """Every retained file under `run_dir`, absolute and sorted."""
-    run_dir = Path(run_dir)
-    found = set()
-    for pattern in RETAINED_GLOBS:
-        for path in run_dir.glob(pattern):
-            if path.is_file():
-                found.add(path.resolve())
-    return sorted(found)
-
-
-def retrieve_patterns(prefix: str = '') -> List[Tuple[str, str, Optional[int]]]:
-    """`RETRIEVE_LIST`, optionally nested under a remote working-directory prefix.
-
-    Only the REMOTE half of each tuple is prefixed, and the retrieved tree must
-    reproduce the SAME shape under that prefix as the unprefixed tree does at
-    its root -- `<prefix>/results/x.txt` next to `<prefix>/provenance.json`,
-    never one nested under the prefix while the other lands flattened at the
-    retrieved root.
-
-    That consistency does not fall out of prefixing the remote string alone.
-    A WILDCARD entry (`depth=None`) already reproduces the full path relative
-    to the remote working directory (`execmanager`'s `rel_rem` -- see
-    `RETRIEVE_LIST`'s own docstring), so prepending the prefix to the pattern
-    is enough: `rel_rem` picks it up for free. A LITERAL entry's `depth` is
-    instead a fixed path-SEGMENT COUNT (`tmp_rname.split('/')[-depth:]`) sized
-    to the pattern's own segments (`provenance.json` -> 1,
-    `lammps/system.in.settings` -> 2); left unchanged under a prefix, that
-    same count now selects only the pattern's own tail and drops the prefix
-    off the front, landing the two literal files at the retrieved ROOT while
-    every wildcard entry lands under `<prefix>/` -- exactly the split layout
-    `locator_for` cannot make sense of (it looks for `provenance.json`
-    alongside `results/`, not four directories above it). Every literal
-    entry's depth is therefore widened by the prefix's own segment count, so
-    it takes in the whole prefixed path too.
-    """
-    if not prefix:
-        return list(RETRIEVE_LIST)
-    head = prefix.rstrip('/')
-    extra = len(head.split('/'))
-    return [(f'{head}/{remote}', local, depth if depth is None else depth + extra)
-            for remote, local, depth in RETRIEVE_LIST]
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +147,6 @@ _STEM_PATTERNS = (
 
 #: Stems that legitimately cover every point of the run, so get `{}` silently.
 _UNFILTERED_STEMS = ('slide', 'slide_refine')
-
-_CONFLICT = '.sync-conflict-'
-_TOL = 1e-9
 
 
 @dataclass(frozen=True)
@@ -263,14 +178,9 @@ def _parse_filter(stem: str) -> Dict[str, float]:
     return {}
 
 
-def _is_conflict(path: Path) -> bool:
-    return _CONFLICT in path.name
-
-
 def _stems(locator: 'RunLocator') -> List[str]:
     """Deck stems: `system*` first, then the rest, each sorted."""
-    stems = sorted(p.stem for p in locator.lammps_dir.glob('*.in')
-                   if not _is_conflict(p))
+    stems = sorted(p.stem for p in plain_files(locator.lammps_dir, '*.in'))
     return ([s for s in stems if s.startswith('system')]
             + [s for s in stems if not s.startswith('system')])
 
@@ -292,8 +202,7 @@ def deck_log(locator: 'RunLocator', deck_name: str) -> Optional[Path]:
         if candidate.is_file():
             return candidate
     if len(_stems(locator)) == 1:
-        local = [p for p in locator.run_dir.glob('log*.lammps')
-                 if not _is_conflict(p)]
+        local = plain_files(locator.run_dir, 'log*.lammps')
         if len(local) == 1:
             return local[0]
     return None
@@ -309,8 +218,20 @@ def discover_decks(locator: 'RunLocator') -> List[Deck]:
             for stem in _stems(locator)]
 
 
+def build_dir(locator: 'RunLocator') -> Path:
+    """``build/`` of the run, or of the level above ``L{n}`` (AFM)."""
+    here = Path(locator.run_dir) / 'build'
+    return here if here.is_dir() else Path(locator.run_dir).parent / 'build'
+
+
+def reads_build(deck: Deck, decks: Sequence[Deck]) -> bool:
+    """Whether ``deck`` is handed the run's ``build/*.lmp``: the system deck, or the
+    only deck when the run has no system deck."""
+    return deck.writes_structures or not any(d.writes_structures for d in decks)
+
+
 def points_for(deck: Deck, points: List['LoadPoint']) -> List['LoadPoint']:
     """The load points this deck covers (all of them for an empty filter)."""
     return [p for p in points
-            if all(abs(getattr(p, key) - value) <= _TOL
+            if all(abs(getattr(p, key) - value) <= LOAD_TOL
                    for key, value in deck.point_filter.items())]

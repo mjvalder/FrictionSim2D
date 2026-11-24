@@ -208,6 +208,30 @@ def test_rebuild_set_hands_each_config_once_to_the_router(aiida_profile_clean,
         assert kwargs['output_root'] == tmp_path / 'rebuilt'
 
 
+def test_rebuild_set_collects_the_failures_of_the_router(aiida_profile_clean,
+                                                       no_profile_switch, tmp_path,
+                                                       monkeypatch):
+    root = tmp_path / 'sim'
+    _run(root, 'h-MoS2', loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+
+    class _Failure:  # pylint: disable=too-few-public-methods
+        @staticmethod
+        def render():
+            return 'amorphous block missing'
+
+    class _Result:  # pylint: disable=too-few-public-methods
+        created, failures = [], [_Failure()]
+
+    monkeypatch.setattr(export_mod, 'generate_package', lambda *a, **k: _Result())
+    failed = []
+    created, _dest = rebuild_set('camp', tmp_path / 'rebuilt', failures=failed)
+
+    assert created == []
+    assert len(failed) == 1 and failed[0].endswith(': amorphous block missing')
+    assert failed[0].startswith('afm/h-MoS2')
+
+
 # --- export_archive: gate, contents --------------------------------------------
 
 def test_an_unchecked_point_blocks_the_archive_unless_forced(aiida_profile_clean,
@@ -400,10 +424,9 @@ def test_the_archive_carries_the_analyses_of_the_sets_datasets(
     assert node.creator.inputs.dataset.uuid == tables['only_a']
     assert orm.load_node(both_uuid).creator.inputs.dataset.uuid == tables['both']
     assert orm.load_node(base_uuid).base.attributes.get('dropped') == [['p1', 'failed_integrity']]
-    sets = {label for label, *_ in query_mod._set_groups()}
+    sets = {label for label, *_ in query_mod._set_group_rows()}
     assert sets == {'friction2d/A'}, 'analysis Groups are not sets'
     assert {g.label for g in steps_mod._set_groups()} == {'friction2d/A'}
-    assert export_mod.ANALYSIS_GROUP_PREFIX == ANALYSIS_GROUP_PREFIX
 
 
 # --- Review Focus 3 [C2]: two profiles share hashed nodes -----------------------
@@ -754,6 +777,64 @@ def test_deleted_rows_leave_no_bytes_behind(aiida_profile_clean, no_profile_swit
     assert b'PERATOM-LOG-SECRET' not in db.read_bytes()
 
 
+def test_process_messages_keep_their_first_line_with_basenamed_paths(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+    path = export_archive('camp', tmp_path / 'camp.aiida', keep_hpc_paths=True)
+    db = tmp_path / 'edit.sqlite3'
+    with zipfile.ZipFile(path) as archive:
+        db.write_bytes(archive.read('db.sqlite3'))
+    con = sqlite3.connect(db)
+    rows = con.execute("SELECT id, attributes FROM db_dbnode "
+                       "WHERE node_type LIKE 'process.calculation.calcjob%'").fetchall()
+    for pk, attributes in rows:
+        attributes = json.loads(attributes)
+        attributes['exit_message'] = ('cannot read /home/secretuser/run/results/a.txt\n'
+                                      'second line /home/secretuser/second.txt')
+        attributes['process_status'] = 'waiting on /scratch/secretuser/job'
+        con.execute('UPDATE db_dbnode SET attributes = ? WHERE id = ?',
+                    (json.dumps(attributes), pk))
+    con.commit()
+    con.close()
+
+    counts, _keep, _blobs = export_mod._edit_db(db, lambda key: b'', anonymise=True,
+                                                drop_peratom=False)
+
+    assert counts['anonymised'] >= len(rows)
+    con = sqlite3.connect(db)
+    for _pk, attributes in con.execute("SELECT id, attributes FROM db_dbnode "
+                                       "WHERE node_type LIKE 'process.calculation.calcjob%'"):
+        attributes = json.loads(attributes)
+        assert attributes['exit_message'] == 'cannot read a.txt'
+        assert attributes['process_status'] == 'waiting on job'
+    con.close()
+    assert b'secretuser' not in db.read_bytes()
+
+
+def test_the_provenance_bundle_holds_exactly_the_provenance_files(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = _run(root, loads=(10.0,))
+    prov = run_dir.parent / 'provenance'
+    (prov / 'cif').mkdir(exist_ok=True)
+    (prov / 'cif' / 'MoS2.cif').write_text('data_x\n', encoding='utf-8')
+    (prov / 'potentials').mkdir(exist_ok=True)
+    (prov / 'potentials' / 'MoS.sw').write_text('# sw\n', encoding='utf-8')
+    assert import_root(root, label='camp').ok()
+    calc = next(c for c in _calcjobs('camp') if 'provenance' in c.inputs)
+
+    written = export_mod.export_provenance_bundle(calc, tmp_path / 'bundle')
+
+    names = {p.relative_to(tmp_path / 'bundle').as_posix() for p in written}
+    assert names >= {'provenance.json', 'provenance/config.json', 'provenance/cif/MoS2.cif',
+                     'provenance/potentials/MoS.sw'}
+    assert names == {p.relative_to(tmp_path / 'bundle').as_posix()
+                     for p in (tmp_path / 'bundle').rglob('*') if p.is_file()}
+    assert all(n == 'provenance.json' or n.startswith('provenance/') for n in names)
+
+
 def test_a_failed_parse_stays_visible_without_paths(aiida_profile_clean, no_profile_switch,
                                                     tmp_path, monkeypatch):
     """A deck whose outputs fail to parse logs one ERROR line (no traceback); an
@@ -819,3 +900,38 @@ def test_a_late_failure_leaves_nothing_at_the_targets(aiida_profile_clean,
     with pytest.raises(RuntimeError, match='readme failed'):
         export_archive('camp', out / 'camp.aiida')
     assert list(out.iterdir()) == []
+
+
+# --- config alias re-normalisation ---------------------------------------------
+
+def test_config_aliases_are_restored_and_idempotent():
+    from pydantic import BaseModel, Field
+
+    from frictionsim2d.aiida.export import _normalize_config_aliases
+
+    class Inner(BaseModel):
+        two_d: int = Field(0, alias='2D')
+
+    class Outer(BaseModel):
+        sheet: Inner = Field(default_factory=Inner, alias='sheet_alias')
+        stack: list = Field(default_factory=list)
+        sheets: list[Inner] = Field(default_factory=list)
+
+    data = {'sheet': {'two_d': 1}, 'sheets': [{'two_d': 2}, {'two_d': 3}]}
+    _normalize_config_aliases(data, Outer)
+
+    assert data == {'sheet_alias': {'2D': 1}, 'sheets': [{'2D': 2}, {'2D': 3}]}
+    again = json.loads(json.dumps(data))
+    _normalize_config_aliases(again, Outer)
+    assert again == data
+
+
+def test_a_stored_config_comes_back_under_its_aliases(tmp_path):
+    from frictionsim2d.aiida.export import _fix_config_aliases
+
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'sheet': {'x': 1}, 'general': {}}), encoding='utf-8')
+    _fix_config_aliases(path, 'sheetonsheet')
+
+    data = json.loads(path.read_text(encoding='utf-8'))
+    assert '2D' in data and 'sheet' not in data

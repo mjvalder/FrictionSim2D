@@ -20,7 +20,7 @@ from frictionsim2d.aiida.calcjob import (  # noqa: E402
     LammpsFrictionCalcJob, LammpsFrictionParser, MissingRunUUID, deck_inputs,
     import_deck, import_run, point_label,
 )
-from frictionsim2d.aiida.layout import discover_decks, retrieve_patterns  # noqa: E402
+from frictionsim2d.aiida.layout import RETRIEVE_LIST, discover_decks  # noqa: E402
 from frictionsim2d.aiida.store import machine_computer  # noqa: E402
 from frictionsim2d.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
@@ -161,7 +161,7 @@ def test_afm_system_and_slide_hand_off_structures(computer, tmp_path):
 def test_retrieve_lists_come_from_the_retention_rule(computer, tmp_path):
     loc = _afm_run(tmp_path / 'sim')
     system, slide = import_run(loc, computer=computer)
-    patterns = set(retrieve_patterns())
+    patterns = set(RETRIEVE_LIST)
     for node in (system, slide):
         temporary = {tuple(e) for e in node.base.attributes.get('retrieve_temporary_list')}
         assert temporary and temporary <= patterns
@@ -783,3 +783,46 @@ def test_a_missing_log_stays_exit_0(computer, tmp_path):
     nodes = import_run(_afm_run(tmp_path / 'sim', logs=False), computer=computer)
     assert all(n.exit_status == 0 for n in nodes)
     assert all(n.outputs.run_info['log_missing'] for n in nodes)
+
+
+# --- the HPC run path and the configured keys, without a store ---------------------
+
+def _locator(root, rel_path='afm/h-MoS2/K300'):
+    from types import SimpleNamespace
+    return SimpleNamespace(run_dir=root / rel_path, tokens=SimpleNamespace(rel_path=rel_path))
+
+
+def test_hpc_run_path_is_the_cd_target_plus_the_rel_path(tmp_path):
+    from frictionsim2d.aiida.calcjob import _hpc_run_path
+
+    (tmp_path / 'hpc').mkdir()
+    (tmp_path / 'hpc' / 'preflight.pbs').write_text('cd /ignored\n', encoding='utf-8')
+    (tmp_path / 'hpc' / 'job.pbs').write_text('#!/bin/bash\ncd /scratch/x\nlmp -in a\n',
+                                              encoding='utf-8')
+
+    assert _hpc_run_path(_locator(tmp_path)) == '/scratch/x/afm/h-MoS2/K300'
+
+
+def test_hpc_run_path_is_none_without_an_absolute_cd(tmp_path):
+    from frictionsim2d.aiida.calcjob import _hpc_run_path
+
+    (tmp_path / 'hpc').mkdir()
+    (tmp_path / 'hpc' / 'job.pbs').write_text('cd "$PBS_O_WORKDIR"\ncd relative/dir\n',
+                                              encoding='utf-8')
+
+    assert _hpc_run_path(_locator(tmp_path)) is None
+    assert _hpc_run_path(_locator(tmp_path / 'no-hpc-dir')) is None
+
+
+def test_an_indent_run_is_configured_one_point_per_force():
+    from frictionsim2d.aiida.calcjob import _configured_keys
+    from frictionsim2d.postprocessing.run_status import point_key
+
+    config = {'general': {'force': [10.0, 30.0], 'scan_angle': [0.0], 'scan_speed': [2.0, 5.0]}}
+
+    assert _configured_keys(config, 'indent') == [
+        point_key('force', 10.0, 0.0, 2.0), point_key('force', 30.0, 0.0, 2.0)]
+    assert _configured_keys({'general': {'force': 30.0}}, 'indent') == [
+        point_key('force', 30.0, 0.0, 2.0)]
+    assert _configured_keys({'general': {}}, 'indent') == []
+    assert _configured_keys(None, 'indent') == []

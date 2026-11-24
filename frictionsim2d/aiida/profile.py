@@ -8,7 +8,7 @@ deferred into the function that needs it):
   import-only: the machine ``Computer`` and the LAMMPS ``Code`` of each run
   are created when it is imported (:mod:`frictionsim2d.aiida.store`), and no daemon
   is ever needed.
-* **Pre-flight** (``FrictionSim2D aiida preflight``, spec §8):
+* **Pre-flight** (``FrictionSim2D aiida preflight``):
   :func:`preflight` and :func:`main`. Distinguishes "no profile initialised
   here" from "profile broken" -- the generation machine may legitimately
   have no profile (simulations run elsewhere under the two-tier setup), and
@@ -127,7 +127,6 @@ class PreflightReport:
 
     profile_found: bool = False
     profile_ok: bool = False
-    sync_configured: bool = False
     entry_points_ok: bool = False
     messages: List[str] = field(default_factory=list)
 
@@ -187,7 +186,7 @@ def preflight() -> PreflightReport:
         if not profiles:
             rep.messages.append(
                 "no AiiDA profile initialised on this machine — run "
-                "frictionsim2d-start-aiida on the run host; generation-only "
+                "`FrictionSim2D aiida setup` on the run host; generation-only "
                 "machines can proceed without one")
         else:
             rep.profile_found = True
@@ -209,16 +208,6 @@ def preflight() -> PreflightReport:
             rep.messages.append(
                 f"profile exists but is BROKEN (database unreachable?): {exc}")
 
-        try:
-            from aiida.orm import Computer as _C
-            from aiida import orm
-            remotes = orm.QueryBuilder().append(
-                _C, project=['label']).all(flat=True)
-            rep.sync_configured = bool(remotes)
-            rep.messages.append(f"computers configured: {list(remotes)}")
-        except Exception as exc:  # pylint: disable=broad-except
-            rep.messages.append(f"computer listing failed: {exc}")
-
     try:
         rep.entry_points_ok = _check_entry_points(rep.messages)
     except Exception as exc:  # pylint: disable=broad-except
@@ -232,6 +221,5 @@ def main() -> int:
     for msg in rep.messages:
         print(f"  - {msg}")
     print(f"profile_found={rep.profile_found} profile_ok={rep.profile_ok} "
-          f"sync_configured={rep.sync_configured} "
           f"entry_points_ok={rep.entry_points_ok}")
     return 0 if rep.ok else 1

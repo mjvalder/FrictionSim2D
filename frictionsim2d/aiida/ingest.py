@@ -1,22 +1,16 @@
 """Import a campaign tree into the local AiiDA store: :func:`import_root`.
 
 One import-only CalcJob (:mod:`frictionsim2d.aiida.calcjob`) per LAMMPS deck of every
-run under the root. Identity never comes from a path or a label (critique C3):
+run under the root. Identity never comes from a path or a label: a run is its
+``provenance.json`` ``run_uuid``, a deck is ``f'{run_uuid}|{deck_name}'`` (extra
+``friction2d_deck_key``), and the label only names the Group ``friction2d/<label>``.
 
-* a run is its ``provenance.json`` ``run_uuid``;
-* a deck is ``f'{run_uuid}|{deck_name}'``, the CalcJob extra
-  ``friction2d_deck_key`` (recomputable from ``parameters``);
-* the label only names the Group ``friction2d/<label>``.
+Each deck carries a fingerprint (extra ``friction2d_deck_sha256``,
+:func:`deck_fingerprint`). On re-import an unchanged deck is skipped; a changed one
+gets a new CalcJob and the old one is :func:`supersede`\\ d, locally, as extras.
 
-Each imported deck carries a fingerprint, the extra ``friction2d_deck_sha256``
-(:func:`deck_fingerprint`): its deck file, includes, log, retained output
-files and provenance, and the sha256 of every structure handed to it -- the
-``load_*.data`` a system deck wrote for a slide deck included (critique I2).
-On re-import an unchanged deck is skipped; a changed one gets a new CalcJob
-and the old one is :func:`supersede`\\ d -- locally only, as extras.
-
-The load-point helpers (:class:`LoadPoint`, :func:`load_points`) are aiida-free
-and so is this module at import time: every aiida import is deferred.
+The load-point helpers (:class:`LoadPoint`, :func:`load_points`) are aiida-free, and
+so is this module at import time: every aiida import is deferred.
 """
 from __future__ import annotations
 
@@ -29,17 +23,21 @@ from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple,
+    TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple,
 )
 
-from ..core.observables import PES_FAMILIES
+from ..core.observables import PES_BASE_NAME, PES_FAMILIES
 from ..data.provenance import sha256_file
 from ..postprocessing.read_data import (
     FILE_PATTERN_SHEET, FILE_PATTERN_SHEET_ALT, FILE_PATTERN_TIP,
     FILE_PATTERN_TIP_ALT, tier_of,
 )
 from ..run.naming import AFM_LIKE_MODELS
-from .layout import TIER_KEYS, content_hash
+from . import aiida_setting
+from .layout import (
+    GROUP_PREFIX, LOAD_TOL, TIER_KEYS, build_dir, group_label, is_conflict, is_superseded,
+    plain_files, reads_build,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from aiida import orm
@@ -47,8 +45,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from .layout import Deck
 
 logger = logging.getLogger(__name__)
-
-GROUP_PREFIX = 'friction2d'
 
 #: Every key `LoadPoint.tiers` may hold. `'retract'` is the indent family's
 #: force-distance curve -- not a sampling tier, but it belongs to the same
@@ -59,20 +55,6 @@ POINT_KEYS = TIER_KEYS + ('retract',)
 #: pattern (the DataReader never reads retract curves), so it is not lifted
 #: from anywhere.
 _INDENT_RE = re.compile(r'^indent_f(?P<load>\d+\.?\d*)N_l(?P<layers>\d+)\.csv$')
-#: The base grid. `frictionsim2d.builders.sheetonsheet.pes_sheet._grid_variants` also
-#: writes `_PES_REFINE_NAME` alongside it when `pes.grid_n_refine` is set --
-#: a SECOND grid at a finer resolution for the same (family, load=0) point,
-#: not a second point: both would carry the identical identity (load_kind=
-#: 'none', load=angle=speed=0, layers=None), so treating it as its own point
-#: would make each ingest supersede the other and never settle. It rides
-#: along as an aux file on the one point instead.
-_PES_BASE_NAME = 'pes_scan.csv'
-_PES_REFINE_NAME = 'pes_scan_refine.csv'
-
-
-def group_label(label: str) -> str:
-    """The AiiDA group every node of a set belongs to."""
-    return f'{GROUP_PREFIX}/{label}'
 
 
 @dataclass(frozen=True)
@@ -90,41 +72,6 @@ class LoadPoint:
     speed: float
     layers: Optional[int]
     tiers: Dict[str, Path]
-    aux: Tuple[Path, ...]
-    content_sha256: str
-
-
-#: What the CalcJob stores once per run (its provenance and LAMMPS inputs),
-#: as run-relative globs: these retained files are never also a point's aux.
-_RUN_NODE_GLOBS = ('provenance.json', 'provenance/**/*', 'lammps/*.in',
-                   'lammps/system.in.settings')
-
-
-def _aux_files(locator, claimed=()) -> Tuple[Path, ...]:
-    """Every retained file of the run that neither the run node nor a load
-    point's tier/retract/grid file already stores, Syncthing
-    ``*.sync-conflict-*`` copies left out.
-
-    Derived from `retention.retained_paths` -- the same rule the CalcJob's
-    `retrieve_list` is built from -- so the import path and the CalcJob path
-    store the same set of files: logs, `lammps/run_*.log`, `data/hold_*`,
-    `data/final_*`, `data/load_*`, `*.out`, and any `results/*` file no load
-    point claimed (e.g. `pes_scan_refine.csv`). `claimed` are the absolute
-    tier/retract/grid paths of every point of the run.
-
-    Returned as absolute paths under `locator.run_dir` (not basenames), per
-    R30: `create_results` stores them via `path.relative_to(run_dir)`.
-    """
-    from .layout import retained_paths  # pylint: disable=import-outside-toplevel
-
-    run_dir = Path(locator.run_dir)
-    resolved_root = run_dir.resolve()
-    skip = {Path(p).resolve() for p in claimed}
-    for pattern in _RUN_NODE_GLOBS:
-        skip.update(p.resolve() for p in run_dir.glob(pattern))
-    return tuple(run_dir / path.relative_to(resolved_root)
-                 for path in retained_paths(run_dir)
-                 if path not in skip and _CONFLICT not in path.name)
 
 
 def _match_point(name: str, model: str):
@@ -132,7 +79,7 @@ def _match_point(name: str, model: str):
     filename, or `None` when `name` matches none of DataReader's patterns.
 
     Reuses DataReader's own filename patterns (module level in
-    `frictionsim2d.postprocessing.read_data`; R29/U7 "one parser") so a file this
+    `frictionsim2d.postprocessing.read_data`) so a file this
     grouping accepts is never one the DataReader itself would skip.
     `raw_`/`peratom_` share the new-format grammar with `friction_` apart
     from the prefix, so they are matched by substituting the `friction_`
@@ -182,20 +129,17 @@ def load_points(locator) -> List[LoadPoint]:
         return []
 
     if family in PES_FAMILIES:
-        base = locator.results_dir / _PES_BASE_NAME
+        base = locator.results_dir / PES_BASE_NAME
         if not base.is_file():
             return []
-        # `_PES_REFINE_NAME`, when present, is unclaimed and so rides in aux.
         return [LoadPoint(family=family, load_kind='none', load=0.0, angle=0.0,
                           speed=0.0, layers=locator.tokens.layers,
-                          tiers={'window': base},
-                          aux=_aux_files(locator, claimed=(base,)),
-                          content_sha256=content_hash([base]))]
+                          tiers={'window': base})]
 
     model = locator.tokens.model
     grouped: Dict[Tuple[str, float, float, float, Optional[int]], Dict[str, Path]] = {}
     for path in sorted(locator.results_dir.iterdir()):
-        if _CONFLICT in path.name:
+        if is_conflict(path):
             continue   # a Syncthing copy: the original is the result
         matched = _match_point(path.name, model)
         if matched is None:
@@ -225,16 +169,13 @@ def load_points(locator) -> List[LoadPoint]:
                 if key[1] == load:
                     tiers['retract'] = path
 
-    claimed = [path for tiers in grouped.values() for path in tiers.values()]
-    aux = _aux_files(locator, claimed=claimed)
     points = []
     for (kind, load, angle, speed, layers), tiers in sorted(grouped.items()):
         ordered = {t: tiers[t] for t in POINT_KEYS if t in tiers}
         points.append(LoadPoint(
             family=family, load_kind=kind, load=load, angle=angle, speed=speed,
             layers=layers if layers is not None else locator.tokens.layers,
-            tiers=ordered, aux=aux,
-            content_sha256=content_hash(ordered.values())))
+            tiers=ordered))
     return points
 
 
@@ -257,7 +198,7 @@ class ImportReport:
     """What one :func:`import_root` did, deck by deck.
 
     Deck entries are ``'<rel_path>:<deck_name>'``. ``points`` holds the uuid
-    of every point node a new CalcJob created (the hook integrity uses).
+    of every point node a new CalcJob created.
     ``failures`` are ``(rel_path or deck, message)``: a :class:`MissingRunUUID`
     or :class:`UnitMismatch` for one run lands here and the other runs go on.
     ``verdict_counts`` are the status counts of the verdicts this import's
@@ -347,16 +288,7 @@ class ImportReport:
 # Fingerprints
 # ---------------------------------------------------------------------------
 
-_CONFLICT = '.sync-conflict-'
 _LOAD_DATA_RE = re.compile(r'^load_.+\.data$')
-
-
-def _plain_files(directory: Path, pattern: str) -> List[Path]:
-    """Files matching ``pattern`` in ``directory``, Syncthing copies left out."""
-    if not Path(directory).is_dir():
-        return []
-    return [p for p in sorted(Path(directory).glob(pattern))
-            if p.is_file() and _CONFLICT not in p.name]
 
 
 def _rel(path: Path, run_dir: Path) -> str:
@@ -378,7 +310,7 @@ def _slide_outputs(locator, deck: 'Deck') -> List[Path]:
 
     found: List[Path] = []
     model = locator.tokens.model
-    for path in _plain_files(locator.results_dir, '*'):
+    for path in plain_files(locator.results_dir, '*'):
         matched = _match_point(path.name, model)
         indent = _INDENT_RE.match(path.name)
         if matched is not None:
@@ -390,7 +322,7 @@ def _slide_outputs(locator, deck: 'Deck') -> List[Path]:
             if final is not None:
                 found.append(final)
         elif indent is None or 'load' not in deck.point_filter or \
-                abs(float(indent['load']) - deck.point_filter['load']) <= 1e-9:
+                abs(float(indent['load']) - deck.point_filter['load']) <= LOAD_TOL:
             found.append(path)
     if locator.tokens.family in PES_FAMILIES:
         final = final_data_path(locator.data_dir, 'none', 0.0, 0.0)
@@ -406,14 +338,11 @@ def _structure_files(locator, deck: 'Deck', decks: Sequence['Deck']) -> List[Tup
     # pylint: disable=import-outside-toplevel
     from .calcjob import structures_for
 
-    reads_build = deck.writes_structures or not any(d.writes_structures for d in decks)
     out: List[Tuple[Path, str]] = []
-    if reads_build:
-        here = Path(locator.run_dir) / 'build'
-        build = here if here.is_dir() else Path(locator.run_dir).parent / 'build'
-        out += [(p, p.name) for p in _plain_files(build, '*.lmp')]
+    if reads_build(deck, decks):
+        out += [(p, p.name) for p in plain_files(build_dir(locator), '*.lmp')]
     if not deck.writes_structures and any(d.writes_structures for d in decks):
-        loads = {p.name: p for p in _plain_files(locator.data_dir, 'load_*.data')
+        loads = {p.name: p for p in plain_files(locator.data_dir, 'load_*.data')
                  if _LOAD_DATA_RE.match(p.name)}
         named = {name: SimpleNamespace(filename=name) for name in loads}
         out += [(loads[name], f'data/{name}') for name in structures_for(deck, named)]
@@ -427,7 +356,7 @@ def deck_fingerprint(locator, deck: 'Deck', decks: Sequence['Deck']) -> str:
     files it includes, its log (or its absence), its retained output files
     (``load_*.data`` + ``hold_*.txt`` for a system deck, its points' result
     files and snapshots otherwise), the run's provenance folder key, and the
-    stored sha256 of every structure handed to it (I2). Path-free, so a moved
+    stored sha256 of every structure handed to it. Path-free, so a moved
     tree has the same fingerprints; a log that arrives later changes it.
     """
     # pylint: disable=import-outside-toplevel
@@ -436,8 +365,8 @@ def deck_fingerprint(locator, deck: 'Deck', decks: Sequence['Deck']) -> str:
 
     run_dir = Path(locator.run_dir)
     if deck.writes_structures:
-        outputs = (_plain_files(locator.data_dir, 'load_*.data')
-                   + _plain_files(locator.data_dir, 'hold_*.txt'))
+        outputs = (plain_files(locator.data_dir, 'load_*.data')
+                   + plain_files(locator.data_dir, 'hold_*.txt'))
     else:
         outputs = _slide_outputs(locator, deck)
     entries = [('deck', sha256_file(deck.path))]
@@ -526,8 +455,8 @@ class _Import:
     known: Dict[str, List[_Known]] = field(default_factory=dict)
     index: Any = None
     computers: Dict[str, Any] = field(default_factory=dict)
-    on_point: Optional[Callable[..., None]] = None
     settings_file: Optional[Path] = None
+    integrity: Optional[Mapping[str, Any]] = None
 
 
 def _group_runs(label: str) -> Tuple[Any, Set[int], Set[str]]:
@@ -619,20 +548,6 @@ def _open_group(label: str, root: Path, records: Sequence[dict]):
     return group
 
 
-def _load_settings(settings_file: Optional[Path] = None):
-    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
-    return load_settings(settings_file=settings_file)
-
-
-def _settings_machine(settings_file: Optional[Path] = None) -> Optional[str]:
-    """``settings.aiida.machine`` of ``settings_file``, else of the per-user
-    settings (None when unset)."""
-    try:
-        return _load_settings(settings_file=settings_file).aiida.machine or None
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
 def _computer(state: _Import, settings: dict, config: Optional[dict] = None):
     """The machine Computer of a run: ``import_root(machine=)`` >
     ``settings.aiida.machine`` (both in ``state.machine``) > the run's
@@ -659,9 +574,8 @@ def _other_labels(pk: int, label: str) -> List[str]:
 
     qb = orm.QueryBuilder().append(orm.Node, filters={'id': pk}, tag='n')
     qb.append(orm.Group, with_node='n', project='label',
-              filters={'label': {'like': f'{GROUP_PREFIX}/%'}})
-    prefix = f'{GROUP_PREFIX}/'
-    return sorted(g[len(prefix):] for g in qb.all(flat=True)
+              filters={'label': {'like': f'{GROUP_PREFIX}%'}})
+    return sorted(g[len(GROUP_PREFIX):] for g in qb.all(flat=True)
                   if g != group_label(label))
 
 
@@ -669,12 +583,12 @@ def _has_dead_structures(calc) -> bool:
     """Whether any of ``calc``'s ``structures`` inputs is superseded."""
     if 'structures' not in calc.inputs:
         return False
-    return any(node.base.extras.get('superseded', False)
+    return any(is_superseded(node)
                for node in calc.inputs.structures.values())
 
 
 def _record_new(state: _Import, name: str, node) -> None:
-    """Report what a new deck CalcJob produced; hand each new point to the hook."""
+    """Report what a new deck CalcJob produced."""
     report = state.report
     report.created_decks.append(name)
     info = node.outputs.run_info.get_dict() if 'run_info' in node.outputs else {}
@@ -683,10 +597,7 @@ def _record_new(state: _Import, name: str, node) -> None:
     if 'code' not in node.inputs:
         report.no_version.append(name)
     if 'points' in node.outputs:
-        for label, point in sorted(node.outputs.points.items()):
-            report.points.append(point.uuid)
-            if state.on_point is not None:
-                state.on_point(node, label, point)
+        report.points += [point.uuid for _label, point in sorted(node.outputs.points.items())]
 
 
 class _RunState:  # pylint: disable=too-few-public-methods
@@ -803,7 +714,7 @@ def _import_run(state: _Import, run: _RunState) -> None:
         current = live[-1] if live else None
         # A slide deck reading a replaced system deck's structures re-imports
         # even when its own files are unchanged: a live deck never consumes
-        # superseded inputs (I2).
+        # superseded inputs.
         cascaded = (not deck.writes_structures and run.system_replaced
                     and _receives_structures(deck, decks))
         if (current is not None and current.fingerprint == fingerprint and not cascaded
@@ -866,8 +777,8 @@ def _read_runs(locators, report: ImportReport) -> List[Tuple[Any, str, dict]]:
 def import_root(root: Path, label: Optional[str] = None, *,
                 machine: Optional[str] = None, profile: Optional[str] = None,
                 dry_run: bool = False,
-                on_point: Optional[Callable[..., None]] = None,
-                settings_file: Optional[Path] = None) -> ImportReport:
+                settings_file: Optional[Path] = None,
+                integrity: Optional[Mapping[str, Any]] = None) -> ImportReport:
     """Import every run under ``root`` into ``friction2d/<label>``: one
     CalcJob per deck, keyed on ``run_uuid|deck_name``.
 
@@ -885,10 +796,10 @@ def import_root(root: Path, label: Optional[str] = None, *,
             each run's ``settings.hpc.hpc_host``, else ``'localhost'``.
         profile: The AiiDA profile (default: the configured one).
         dry_run: Classify every deck against the store; create nothing.
-        on_point: Called as ``on_point(calcjob, point_label, point)`` for
-            every point node a new CalcJob creates.
         settings_file: The settings file whose ``aiida.machine`` and
             ``integrity`` thresholds apply (default: the per-user one).
+        integrity: Single integrity thresholds overriding those of the settings
+            (``{'hole_bonds': 2.0, 'margins': {'rule': 0.1}}``).
 
     Raises:
         SetRootMismatch: ``label`` names a non-empty set holding none of the
@@ -913,10 +824,11 @@ def import_root(root: Path, label: Optional[str] = None, *,
     group, group_pks, held = _group_runs(label)
     _check_root(label, group, held, {u for _loc, u, _r in runs})
 
-    state = _Import(report=report, machine=machine or _settings_machine(settings_file),
+    state = _Import(report=report,
+                    machine=machine or aiida_setting('machine', None, settings_file) or None,
                     group_pks=group_pks,
-                    known=_known_decks(u for _loc, u, _r in runs), on_point=on_point,
-                    settings_file=settings_file)
+                    known=_known_decks(u for _loc, u, _r in runs),
+                    settings_file=settings_file, integrity=integrity)
     if not dry_run:
         state.group = _open_group(label, root, [r for _loc, _u, r in runs])
         state.index = StoreIndex.load()
@@ -963,7 +875,8 @@ def _integrity_pass(state: _Import) -> None:
     report.verdict_counts = check_group(state.group, failures=failed,
                                         warnings=report.warnings,
                                         rechecked=report.rechecked,
-                                        settings_file=state.settings_file)
+                                        settings_file=state.settings_file,
+                                        integrity=state.integrity)
     report.failures += [(f'point {uuid}', f'integrity check: {message}')
                         for uuid, message in failed]
     report.rulings = rule_group(state.group)

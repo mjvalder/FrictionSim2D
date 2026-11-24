@@ -1,46 +1,27 @@
 """Getting data back out of the store: trees, rebuilds and archives.
 
 * :func:`export_results` writes a set's CalcJob graph back into an ordinary
-  simulation tree (``provenance/``, ``lammps/``, ``results/``, ``data/``), so
-  ``postprocess read`` gives the statuses it gave on the source tree.
+  simulation tree, so ``postprocess read`` gives the statuses it gave on the source.
 * :func:`rebuild_set` hands each run's stored ``provenance/config.json`` to
-  ``run.artifacts.generate_package`` -- the router ``FrictionSim2D run`` uses.
-  ``generate_package`` is imported at module level so tests can patch
-  ``frictionsim2d.aiida.export.generate_package``; it never touches aiida-core.
-* :func:`export_archive` writes one campaign as an ``.aiida`` archive, gated on
-  every live point having a verdict, with the closure checked to stay inside
-  the campaign [I6], per-atom data opt-in, HPC details anonymised by default,
-  JSON sidecars ``<archive>.params/`` that :func:`frictionsim2d.aiida.compare.
-  load_blocks_from_sidecar` reads, a README and its size logged [M4]. The
-  stored analysis results of the set's datasets travel with it.
+  ``run.artifacts.generate_package``, the router ``FrictionSim2D run`` uses.
+  ``generate_package`` is imported at module level so tests can patch it.
+* :func:`export_archive` writes one campaign as an ``.aiida`` archive, gated on every
+  live point having a verdict and on the closure staying inside the campaign, with
+  per-atom data opt-in, HPC details anonymised by default, JSON sidecars
+  ``<archive>.params/`` (:func:`frictionsim2d.aiida.compare.load_blocks_from_sidecar`),
+  a README, and the stored analysis results of the set's datasets.
 * :func:`export_dataset` writes one dataset as its own archive.
 
 Every aiida import is deferred, so importing this module needs no aiida-core.
 
-**Anonymisation is a rewrite of the written archive**, not of the store:
-nodes are immutable once stored and the local store keeps everything. After
-``create_archive``, :func:`_rewrite_archive` edits the archive's own
-``db.sqlite3`` (``secure_delete`` on, then ``VACUUM``, so nothing scrubbed
-survives in a free page) and repository blobs: the Computer hostname becomes
-its label, a Code's ``filepath_executable`` its basename, ``remote_workdir`` and
-``RemoteData.remote_path`` ``<machine label>:<rel_path>``, ``hpc_run_path``
-leaves the CalcJob ``parameters``, a ruling Dict's ``source`` becomes its
-basename, the set Group's ``source_root`` (and each ruling conflict's
-and pending ruling's ``source``) becomes its
-basename and ``source_host`` the machine label (or ``unknown``), and the
-provenance documents lose ``hpc.hpc_home``/``scratch_dir``/``log_dir``/
-``conda_env``/``account`` and ``database.user``/``host`` (``hpc.hpc_host``
-becomes the machine label; every absolute path its basename). The AiiDA User
-email stays (attribution). The archive is written to a partial file beside
-the target and moved into place only once rewritten. A rewritten provenance
-folder keeps its UUID, so a
-re-import into the source profile still deduplicates onto the full local node
-(its link labels already exist there, which a new UUID would collide with); its
-``friction2d_folder_sha256`` extra is recomputed from the rewritten content and
-it gains ``friction2d_anonymised``, so ``store.verify`` on the far side agrees
-with what it holds. Dropping the ``peratom.<key>`` nodes is the same rewrite:
-the export rules always follow a CalcJob's CREATE links, so they cannot be left
-out of the traversal.
+Anonymisation (what is scrubbed: :data:`HPC_SCRUBBED_KEYS` and the README) is a rewrite of
+the written archive, not of the store, because stored nodes are immutable. A rewritten
+provenance folder keeps its UUID, so a re-import into the source profile still
+deduplicates onto the full local node (a new UUID would collide with its link labels);
+its ``friction2d_folder_sha256`` is recomputed and it gains ``friction2d_anonymised``,
+so ``store.verify`` agrees on the far side. Dropping the ``peratom.<key>`` nodes is the
+same rewrite: the export rules always follow a CalcJob's CREATE links, so they cannot be
+left out of the traversal.
 """
 from __future__ import annotations
 
@@ -66,13 +47,14 @@ from ..core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
 from ..run.artifacts import generate_package
 from ..run.naming import AFM_LIKE_MODELS
 from ..run.tree import provenance_dir_for
+from .layout import ANALYSIS_GROUP_PREFIX, DATASET_PREFIX, is_superseded
+from .store import resolve_set, set_calcjobs
 
 logger = logging.getLogger(__name__)
 
 __all__ = ['ArchiveFormatError', 'ExportClosureError', 'UncheckedPointsError', 'export_archive',
            'export_dataset', 'export_provenance_bundle', 'export_results',
-           'import_archive', 'rebuild_set', 'resolve_set', 'sidecar_documents',
-           'write_sidecars']
+           'import_archive', 'rebuild_set', 'resolve_set', 'sidecar_documents']
 
 #: The extra a rewritten (anonymised) node carries in the archive.
 ANONYMISED_EXTRA = 'friction2d_anonymised'
@@ -100,7 +82,7 @@ class UncheckedPointsError(ValueError):
 
 
 class ExportClosureError(ValueError):
-    """The export closure reaches CalcJobs outside the exported set [I6].
+    """The export closure reaches CalcJobs outside the exported set.
 
     Attributes:
         calcjobs: ``'<uuid> <label>'`` of each foreign CalcJob.
@@ -119,34 +101,8 @@ def _load_profile(profile: Optional[str]) -> None:
     load_aiida_profile(profile)
 
 
-def resolve_set(label: str):
-    """The Group ``friction2d/<label>`` (``LookupError`` when there is none)."""
-    from aiida import orm  # pylint: disable=import-outside-toplevel
-
-    from .ingest import group_label  # pylint: disable=import-outside-toplevel
-
-    found = orm.Group.collection.find(filters={'label': group_label(label)})
-    if not found:
-        raise LookupError(f'no simulation set {label!r} ({group_label(label)})')
-    return found[0]
-
-
-def _live(node) -> bool:
-    return not node.base.extras.get('superseded', False)
-
-
-def _calcjobs(group) -> List[Any]:
-    """Every CalcJob of the set, in pk order."""
-    from aiida import orm  # pylint: disable=import-outside-toplevel
-
-    qb = orm.QueryBuilder().append(orm.Group, filters={'id': group.pk}, tag='g')
-    qb.append(orm.CalcJobNode, with_group='g', tag='c', project='*')
-    qb.order_by({'c': {'id': 'asc'}})
-    return qb.all(flat=True)
-
-
 def _live_calcjobs(group) -> List[Any]:
-    return [calc for calc in _calcjobs(group) if _live(calc)]
+    return [calc for calc in set_calcjobs(group) if not is_superseded(calc)]
 
 
 def _live_points(calcs: Iterable[Any]) -> List[Tuple[Any, str, Any]]:
@@ -155,7 +111,7 @@ def _live_points(calcs: Iterable[Any]) -> List[Tuple[Any, str, Any]]:
     for calc in calcs:
         if 'points' in calc.outputs:
             out += [(calc, key, point) for key, point in sorted(calc.outputs.points.items())
-                    if _live(point)]
+                    if not is_superseded(point)]
     return out
 
 
@@ -221,7 +177,7 @@ def _write_outputs(tree: _Tree, calc, params: Mapping[str, Any], run_dest: Path)
     outputs = calc.outputs
     for namespace in ('points', 'peratom'):
         for node in (outputs[namespace].values() if namespace in outputs else ()):
-            if _live(node):
+            if not is_superseded(node):
                 tree.put_folder(node, lambda rel: run_dest / rel)
     for namespace in ('snapshots', 'structures', 'aux'):
         for node in (outputs[namespace].values() if namespace in outputs else ()):
@@ -289,7 +245,7 @@ def _live_rulings(points: List[Any]) -> Dict[str, List[Any]]:
             f'extras.{POINT_UUID_EXTRA}': {'in': uuids[begin:begin + _CHUNK]}})
         qb.order_by({'v': {'id': 'asc'}})
         for node in qb.all(flat=True):
-            if _live(node):
+            if not is_superseded(node):
                 out.setdefault(node.base.extras.get(POINT_UUID_EXTRA), []).append(node)
     return out
 
@@ -434,7 +390,8 @@ def _model_of(rel_path: str) -> str:
 
 
 def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
-                generate_hpc: bool = False) -> Tuple[List[Path], Path]:
+                generate_hpc: bool = False, failures: Optional[List[str]] = None
+                ) -> Tuple[List[Path], Path]:
     """Regenerate a set's LAMMPS inputs through the real router.
 
     Exports the set (:func:`export_results`) into a staging directory outside
@@ -445,7 +402,8 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
     (:func:`_fix_config_aliases`), with ``allow_generate_amorphous=False``
     and ``simulation_root_name='.'`` so each run keeps its ``rel_path``. The
     run's stored ``provenance/settings.yaml`` is the settings file. Returns
-    ``(created paths, dest)``.
+    ``(created paths, dest)``; a run that could not be rebuilt (its amorphous block is
+    missing, say) is logged and, when ``failures`` is a list, appended to it.
     """
     _load_profile(profile)
     rel_paths = sorted({calc.inputs.parameters['rel_path']
@@ -477,6 +435,8 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
                 simulation_root_name='.', allow_generate_amorphous=False)
             for failure in result.failures:
                 logger.error('Rebuild failed: %s', failure.render())
+                if failures is not None:
+                    failures.append(f'{rel_path}: {failure.render()}')
             created.extend(result.created)
     return created, dest
 
@@ -579,17 +539,11 @@ def _start_pks(group, *, include_peratom: bool = False) -> Set[int]:
     followed unless ``include_peratom``."""
     from aiida import orm  # pylint: disable=import-outside-toplevel
 
-    calcs = {calc.pk for calc in _calcjobs(group)}
+    calcs = {calc.pk for calc in set_calcjobs(group)}
     frontier = _created_by(calcs, orm.CalcJobNode)
     if not include_peratom:
         frontier -= _peratom_pks(calcs)
     return calcs | _reachable_functions(frontier)
-
-
-#: The Group of a dataset's stored analysis results is this plus the dataset
-#: name (``frictionsim2d.analysis.store.ANALYSIS_GROUP_PREFIX``; kept here so this
-#: module never imports ``frictionsim2d.analysis``).
-ANALYSIS_GROUP_PREFIX = 'friction2d/analyses/'
 
 
 def _analysis_groups(label: str) -> List[Any]:
@@ -615,7 +569,7 @@ def _analysis_groups(label: str) -> List[Any]:
 
 def _check_closure(label: str, group, start: Set[int]) -> None:
     """Raise :class:`ExportClosureError` when the default export closure of
-    ``start`` and the group's own nodes holds a CalcJob not in ``group`` [I6]."""
+    ``start`` and the group's own nodes holds a CalcJob not in ``group``."""
     from aiida import orm  # pylint: disable=import-outside-toplevel
     from aiida.tools.graph.graph_traversers import get_nodes_export  # pylint: disable=import-outside-toplevel
 
@@ -1196,7 +1150,7 @@ def sidecar_documents(calcs: Iterable[Any]) -> Dict[str, Dict[str, Any]]:
     documents: Dict[str, Dict[str, Any]] = {}
     schemas = []
     for calc in calcs:
-        if not _live(calc) or 'blocks' not in calc.inputs:
+        if is_superseded(calc) or 'blocks' not in calc.inputs:
             continue
         params = calc.inputs.parameters
         documents[f"{params['rel_path']}/{params['deck_name']}.json"] = _sidecar(calc)
@@ -1215,12 +1169,6 @@ def _put_sidecars(documents: Mapping[str, Mapping[str, Any]], params_dir: Path) 
         path.write_text(json.dumps(document, indent=2, sort_keys=True), encoding='utf-8')
         written.append(path)
     return written
-
-
-def write_sidecars(calcs: Iterable[Any], params_dir: Path) -> List[Path]:
-    """Write :func:`sidecar_documents` under ``params_dir``: what
-    ``compare.load_blocks_from_sidecar`` reads, with no aiida-core needed."""
-    return _put_sidecars(sidecar_documents(calcs), Path(params_dir))
 
 
 def _schema_nodes(calcs: Iterable[Any]) -> List[str]:
@@ -1341,7 +1289,7 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
         LookupError: No such set.
         FileExistsError: ``output_path`` exists.
         UncheckedPointsError: A live point has no live verdict (unless ``force``).
-        ExportClosureError: The closure holds a CalcJob of another set [I6].
+        ExportClosureError: The closure holds a CalcJob of another set.
         ArchiveFormatError: aiida-core wrote an archive layout this module
             does not know how to rewrite.
     """
@@ -1357,7 +1305,7 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
     start = _start_pks(group, include_peratom=include_peratom)
     start |= {node.pk for g in analyses for node in g.nodes}
     _check_closure(label, group, start)
-    calcs = _calcjobs(group)
+    calcs = set_calcjobs(group)
     members = {calc.pk for calc in calcs}
     output_path = Path(output_path)
     sidecars = sidecar_documents(calcs)
@@ -1399,12 +1347,10 @@ def export_dataset(name: str, output_path: Path, *, profile: Optional[str] = Non
     """
     from aiida import orm  # pylint: disable=import-outside-toplevel
 
-    from .steps import DATASET_PREFIX  # pylint: disable=import-outside-toplevel
-
     _load_profile(profile)
-    found = orm.Group.collection.find(filters={'label': f'{DATASET_PREFIX}/{name}'})
+    found = orm.Group.collection.find(filters={'label': f'{DATASET_PREFIX}{name}'})
     if not found:
-        raise LookupError(f'no dataset {name!r} ({DATASET_PREFIX}/{name})')
+        raise LookupError(f'no dataset {name!r} ({DATASET_PREFIX}{name})')
     group = found[0]
     points = list({node.creator.inputs.point.pk: node.creator.inputs.point
                    for node in group.nodes

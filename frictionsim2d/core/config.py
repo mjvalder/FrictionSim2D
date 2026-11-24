@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any, ClassVar, Literal, Mapping, cast
+from typing import List, Optional, Union, Dict, Any, ClassVar, Literal, Mapping, Sequence, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -262,6 +262,52 @@ class IntegritySettings(BaseModel):
     version: str = Field(
         default='1.0.0', description="Version of the integrity rule set")
     model_config = {'validate_by_name': True}
+
+
+def _integrity_fields() -> set:
+    return set(IntegritySettings.model_fields)
+
+
+def integrity_overrides(pairs: Sequence[str]) -> Dict[str, Any]:
+    """``['hole_bonds=2', 'margins.hole=0.1']`` -> ``{'hole_bonds': 2, 'margins': {'hole': 0.1}}``.
+
+    Values are YAML scalars; ``none`` turns a threshold off. ``margins.RULE`` sets one
+    margin; every other key must be an :class:`IntegritySettings` field.
+
+    Raises:
+        ValueError: A pair without ``=``, or an unknown key.
+    """
+    out: Dict[str, Any] = {}
+    for pair in pairs:
+        key, sep, text = pair.partition('=')
+        key = key.strip()
+        if not sep or not key:
+            raise ValueError(f'{pair!r} is not KEY=VALUE')
+        value = None if text.strip().lower() == 'none' else yaml.safe_load(text)
+        head, dot, rule = key.partition('.')
+        if head == 'margins' and dot and rule:
+            out.setdefault('margins', {})[rule] = value
+        elif key != 'margins' and key in _integrity_fields():
+            out[key] = value
+        else:
+            known = sorted(_integrity_fields() - {'margins'})
+            raise ValueError(f'unknown integrity key {key!r}; known: {", ".join(known)}, '
+                             'margins.RULE')
+    return out
+
+
+def merged_integrity(base: Mapping[str, Any], overrides: Optional[Mapping[str, Any]]
+                     ) -> Dict[str, Any]:
+    """``base`` (an ``IntegritySettings`` dump) with ``overrides`` applied
+    (``margins`` merged key by key), re-validated.
+
+    Raises:
+        pydantic.ValidationError: An overridden value does not validate.
+    """
+    merged = {**base, **(overrides or {})}
+    if overrides and 'margins' in overrides:
+        merged['margins'] = {**(base.get('margins') or {}), **overrides['margins']}
+    return IntegritySettings(**merged).model_dump(mode='json')
 
 
 class GPUSettings(BaseModel):

@@ -324,10 +324,10 @@ def test_partial_explicit_file_withdraws_nothing(aiida_profile_clean, no_profile
 
     assert report.applied == 1 and report.withdrawn == []
     assert len(_ruled_live()) == 2 and len(report.overrides) == 1
-    # --withdraw on another file withdraws only that file's rulings.
-    assert apply_rulings('camp', partial, withdraw=True).withdrawn == []
+    # a pass on another file withdraws only that file's rulings.
+    assert apply_rulings('camp', partial).withdrawn == []
     partial.write_text('[]\n', encoding='utf-8')
-    assert apply_rulings('camp', partial, withdraw=True).withdrawn == [_pid(tmp_path, 10.0)]
+    assert apply_rulings('camp', partial).withdrawn == [_pid(tmp_path, 10.0)]
     assert len(_ruled_live()) == 1
 
 
@@ -353,9 +353,9 @@ def test_a_ruling_from_another_file_survives_the_own_file_pass(
     assert again.overrides == [(pid, 'failed_integrity', 'complete', 'viewer artefact')]
     assert len(_ruled_live()) == 1
     assert apply_rulings('camp').withdrawn == []                      # `aiida rule`
-    assert apply_rulings('camp', review, withdraw=True).withdrawn == []
+    assert apply_rulings('camp', review).withdrawn == []
     review.write_text('[]\n', encoding='utf-8')
-    assert apply_rulings('camp', review, withdraw=True).withdrawn == [pid]
+    assert apply_rulings('camp', review).withdrawn == [pid]
     assert _ruled_live() == []
 
 
@@ -715,6 +715,28 @@ def test_recheck_applies_new_thresholds_and_reapplies_rulings(
     assert again.verdict_counts == {} and again.rechecked == []
     assert (again.rulings.applied, again.rulings.skipped) == (0, 1)
     assert len(_nodes('check_integrity')) == checks
+
+
+def test_an_integrity_override_changes_the_verdicts_of_an_import_and_a_recheck(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    """``--integrity KEY=VALUE``: the thresholds of the settings, overridden."""
+    root = tmp_path / 'sim'
+    _tree(root, eject=(30.0,))
+    loose = {'ejected_atoms': 3, 'isolated_atoms': 3}
+
+    strict = import_root(root, label='camp')
+    assert strict.verdict_counts == {'complete': 2, 'failed_integrity': 1}
+
+    report = recheck_set('camp', integrity=loose)
+
+    assert report.rechecked == [(_pid(root, 30.0), 'failed_integrity', 'complete')]
+    assert recheck_set('camp', integrity=loose).verdict_counts == {}      # a second pass: none
+    with pytest.raises(ValueError):
+        recheck_set('camp', integrity={'isolated_atoms': 'many'})
+
+    aiida_profile_clean.reset_storage()
+    imported = import_root(root, label='camp', integrity=loose)
+    assert imported.verdict_counts == {'complete': 3}
 
 
 def test_recheck_follows_a_settings_edit_without_a_version_bump(

@@ -1,36 +1,22 @@
-"""Tracked steps over imported points: integrity verdicts and user rulings.
+"""Tracked steps over imported points: integrity verdicts, rulings, summaries, datasets.
 
-* :func:`check_integrity` -- a calcfunction: one point's verdict from the
-  ported checker, :func:`frictionsim2d.postprocessing.integrity.check_files`, on the
-  point's stored files. The verdict is ``IntegrityVerdict.as_dict()`` plus
-  ``thresholds_version``, ``code_version`` and ``point_uuid``; the thresholds
-  are the integrity module's own (dimensionless, nothing rescaled here).
-* :func:`check_group` -- runs it on every live point of a set that has no
-  live verdict yet; :func:`~frictionsim2d.aiida.ingest.import_root` calls it.
-* :func:`recheck_set` -- ``check_group(recheck=True)`` then the rulings
-  pass: re-checks the points checked under other integrity settings.
-* :func:`apply_ruling` -- a calcfunction: a verdict as one user ruling decides
-  it (:func:`frictionsim2d.postprocessing.integrity_rulings.rule_verdict`, the rulings
-  layer's own decision).
-* :func:`apply_rulings` -- the idempotent rulings pass: reads the set's
-  rulings files into its ruling ledger (:mod:`frictionsim2d.aiida.rulings`) and gives
-  every live verdict the ruling the ledger calls for.
-* :func:`latest_verdict` -- the verdict a :class:`~frictionsim2d.aiida.rulings.Policy`
-  selects for a point, by declared version (never ctime); provisional or
-  not is :func:`is_provisional`.
-* :func:`summarise` -- a calcfunction: one point's ``RunSummary`` with units;
-  :func:`postprocess_group` runs it on every point whose selected verdict is
-  ``complete``.
-* :func:`build_dataset` -- a Group ``friction2d/datasets/<name>`` of the
-  selected summaries plus one table Dict naming the policy.
-* :func:`delete_simulation_set`, :func:`clear_all_nodes` -- delete one set
-  (keeping whatever another set still holds) or every friction2d node and
-  Group; :func:`delete_dataset` deletes one dataset.
+Calcfunctions: :func:`check_integrity` (one point's verdict from
+:func:`frictionsim2d.postprocessing.integrity.check_files` on its stored files),
+:func:`apply_ruling` and :func:`withdraw_ruling` (a user ruling on a verdict) and
+:func:`summarise` (one point's ``RunSummary`` with units).
 
-Every Dict made only to feed a step (``context``, ``settings``, ``ruling``,
-``options``, ``parse``)
-carries the extra ``friction2d_step_input``, so deleting a set or clearing
-the store can collect them once their step is gone.
+Passes over a set: :func:`check_group` (a verdict for every live point without one;
+:func:`~frictionsim2d.aiida.ingest.import_root` calls it), :func:`recheck_set` (the
+points checked under other integrity settings), :func:`apply_rulings` (the idempotent
+rulings pass against the set's ruling ledger, :mod:`frictionsim2d.aiida.rulings`),
+:func:`postprocess_group` (a summary for every point whose selected verdict is
+``complete``) and :func:`build_dataset` (a Group ``friction2d/datasets/<name>`` of
+the selected summaries plus one table Dict naming the policy).
+:func:`latest_verdict` is what a :class:`~frictionsim2d.aiida.rulings.Policy` selects.
+Deletion: :func:`delete_simulation_set`, :func:`clear_all_nodes`, :func:`delete_dataset`.
+
+Every Dict made only to feed a step carries the extra ``friction2d_step_input``, so
+deleting a set or clearing the store can collect them once their step is gone.
 """
 from __future__ import annotations
 
@@ -44,21 +30,27 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
 from aiida import orm
 from aiida.engine import calcfunction
 
 from .. import __version__ as CODE_VERSION
+from .layout import (
+    ANALYSIS_GROUP_PREFIX, DATASET_PREFIX, GROUP_PREFIX, SET_GROUP_FILTER, is_superseded,
+)
 from .rulings import Policy, select
+from .store import resolve_set, set_calcjobs
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'DatasetDeletion', 'RecheckReport', 'RulingReport',
+__all__ = ['CODE_VERSION', 'DATASET_EXTRA', 'KIND_EXTRA', 'LEDGER_EXTRA', 'POINT_UUID_EXTRA',
+           'DatasetDeletion', 'RecheckReport', 'RulingReport',
            'apply_ruling', 'apply_rulings', 'build_dataset', 'check_group', 'check_integrity',
            'delete_dataset', 'is_provisional', 'latest_summaries', 'latest_verdict',
-           'latest_verdicts', 'normalise_options', 'options_hash', 'postprocess_group',
-           'recheck_set', 'rule_group', 'summarise', 'summary_options', 'withdraw_ruling']
+           'latest_verdicts', 'merge_units', 'normalise_options', 'options_hash',
+           'point_frames', 'postprocess_group', 'recheck_set', 'rule_group', 'summarise',
+           'summary_options', 'withdraw_ruling']
 
 #: Marks every Dict made only as a step's input (value: what it is).
 STEP_INPUT_EXTRA = 'friction2d_step_input'
@@ -91,9 +83,6 @@ SUMMARY_VERDICT_EXTRA = 'friction2d_summary_verdict'
 OPTIONS_HASH_EXTRA = 'friction2d_options_hash'
 #: The dataset name on a dataset's table Dict.
 DATASET_EXTRA = 'friction2d_dataset'
-#: Datasets are the Groups ``friction2d/datasets/<name>``.
-DATASET_PREFIX = 'friction2d/datasets'
-
 #: Statuses with no frames in the DataReader: the checker gets no window.
 _NO_FRAMES = ('no_output', 'unreadable', 'not_reached')
 
@@ -112,30 +101,9 @@ def _materialise(node: Optional[orm.SinglefileData], directory: Path) -> Optiona
     return path
 
 
-def _window_name(point: orm.FolderData) -> Optional[str]:
-    """The window-tier file of a point node (``results/<name>``), or None."""
-    # pylint: disable=import-outside-toplevel
-    from ..postprocessing.read_data import tier_of
-    from .ingest import _INDENT_RE  # pylint: disable=protected-access
-
-    repo = point.base.repository
-    if 'results' not in repo.list_object_names():
-        return None
-    names = [n for n in sorted(repo.list_object_names('results'))
-             if tier_of(n) == 'window' and not _INDENT_RE.match(n)]
-    return f'results/{names[0]}' if names else None
-
-
 def _window(point: orm.FolderData, directory: Path, family: str, n_layers: int):
     """The point's window frame, read the way the DataReader reads it."""
-    from .calcjob import _read_frame  # pylint: disable=import-outside-toplevel,protected-access
-
-    name = _window_name(point)
-    if name is None:
-        return None
-    path = directory / Path(name).name
-    path.write_bytes(point.base.repository.get_object_content(name, mode='rb'))
-    return _read_frame(path, family, n_layers)
+    return point_frames(point, directory, family, n_layers, tiers=('window',)).get('window')
 
 
 @calcfunction
@@ -181,10 +149,6 @@ def check_integrity(point: orm.FolderData, snapshot: Optional[orm.SinglefileData
 # What a point's check needs, from the graph
 # ---------------------------------------------------------------------------
 
-def _live(node) -> bool:
-    return not node.base.extras.get('superseded', False)
-
-
 def _creator(point: orm.Node) -> orm.CalcJobNode:
     return point.creator
 
@@ -203,7 +167,7 @@ class _RunView:  # pylint: disable=too-few-public-methods
         calcs = [c for c in orm.QueryBuilder().append(
             orm.CalcJobNode, filters={'process_type': CALCJOB_PROCESS_TYPE,
                                       f'extras.{RUN_UUID_EXTRA}': run_uuid}
-        ).all(flat=True) if _live(c)]
+        ).all(flat=True) if not is_superseded(c)]
         self.lammps_dir = self.run_dir / 'lammps'
         self.data_dir = self.run_dir / 'data'
         self.record: Dict[str, Any] = {}
@@ -217,7 +181,7 @@ class _RunView:  # pylint: disable=too-few-public-methods
             outputs = calc.outputs
             if 'points' in outputs:
                 self.speeds |= {float(p.base.attributes.get('speed'))
-                                for p in outputs.points.values() if _live(p)}
+                                for p in outputs.points.values() if not is_superseded(p)}
             self.has_snapshots = self.has_snapshots or (
                 'snapshots' in outputs and bool(dict(outputs.snapshots.items())))
         self._writes: Optional[bool] = None
@@ -270,7 +234,7 @@ def _point_inputs(point: orm.FolderData, run: _RunView, status: str) -> Dict[str
     """``check_integrity``'s inputs for ``point`` at stage-2 ``status``
     (``context`` as a plain dict)."""
     # pylint: disable=import-outside-toplevel
-    from ..postprocessing.integrity import bond_reference, resolve_layers
+    from ..postprocessing.integrity import point_context
     from ..run.naming import parse_run_path
 
     calc = _creator(point)
@@ -282,13 +246,13 @@ def _point_inputs(point: orm.FolderData, run: _RunView, status: str) -> Dict[str
     if 'snapshots' in calc.outputs and key in calc.outputs.snapshots:
         inputs['snapshot'] = calc.outputs.snapshots[key]
     # Every status, as `check_point` does: the reference gives `n_heat`.
-    ref_path = bond_reference(
-        SimpleNamespace(run_dir=run.run_dir, data_dir=run.data_dir), family,
-        SimpleNamespace(load_kind=attrs.get('load_kind'), load=attrs.get('load')))
+    ref_path, layers = point_context(
+        SimpleNamespace(run_dir=run.run_dir, data_dir=run.data_dir,
+                        lammps_dir=run.lammps_dir), family,
+        SimpleNamespace(load_kind=attrs.get('load_kind'), load=attrs.get('load')),
+        run.record, n_layers)
     if ref_path is not None:
         inputs['reference'] = run.structures[ref_path]
-    layers = resolve_layers(SimpleNamespace(lammps_dir=run.lammps_dir), run.record,
-                            ref_path, n_layers, family=family)
     inputs['context'] = {
         'status': status, 'family': family, 'n_layers': n_layers,
         'T_target': float(parse_run_path(params['rel_path']).temperature),
@@ -317,11 +281,6 @@ def _step_input(content: Dict[str, Any], kind: str) -> orm.Dict:
 # The set's points and verdicts
 # ---------------------------------------------------------------------------
 
-def _set_group(label: str) -> orm.Group:
-    from .ingest import group_label  # pylint: disable=import-outside-toplevel
-    return orm.Group.collection.get(label=group_label(label))
-
-
 def _live_points(group: orm.Group) -> List[orm.FolderData]:
     """Every live point node of the set's live CalcJobs, in pk order."""
     qb = orm.QueryBuilder().append(orm.Group, filters={'id': group.pk}, tag='g')
@@ -345,7 +304,7 @@ def _live_verdicts(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
     qb.append(orm.Dict, with_incoming='f', project='*')
     qb.order_by({orm.Dict: {'id': 'asc'}})
     for pk, verdict in qb.all():
-        if _live(verdict):
+        if not is_superseded(verdict):
             out[pk].append(verdict)
     return out
 
@@ -381,16 +340,19 @@ def _strict_settings(warnings: Optional[List[str]], fallback: str,
 
 
 def _settings_dump(warnings: Optional[List[str]] = None,
-                   settings_file: Optional[Path] = None) -> Dict[str, Any]:
+                   settings_file: Optional[Path] = None,
+                   overrides: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """``settings.integrity`` of the settings file in effect (see
-    :func:`_strict_settings`); the defaults, with a warning in ``warnings``,
-    when that file cannot be read."""
-    from ..core.config import IntegritySettings  # pylint: disable=import-outside-toplevel
+    :func:`_strict_settings`) with ``overrides`` applied
+    (:func:`~frictionsim2d.core.config.merged_integrity`); the defaults, with a
+    warning in ``warnings``, when that file cannot be read."""
+    from ..core.config import IntegritySettings, merged_integrity  # pylint: disable=import-outside-toplevel
     default = IntegritySettings()
     settings = _strict_settings(
         warnings, f'integrity uses the default thresholds v{default.version}',
         settings_file)
-    return (default if settings is None else settings.integrity).model_dump(mode='json')
+    dump = (default if settings is None else settings.integrity).model_dump(mode='json')
+    return merged_integrity(dump, overrides)
 
 
 def _run_uuid(point: orm.Node) -> Optional[str]:
@@ -577,6 +539,7 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 warnings: Optional[List[str]] = None,
                 rechecked: Optional[List[Tuple[str, str, str]]] = None,
                 settings_file: Optional[Path] = None,
+                integrity: Optional[Mapping[str, Any]] = None,
                 recheck: bool = False) -> Dict[str, int]:
     """Give every live point of ``group`` the verdict its current context
     calls for; return the new verdicts' status counts.
@@ -590,7 +553,8 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     ``rechecked`` when the status changed. ``settings`` is an
     ``IntegritySettings`` dump (default: that of ``settings_file``, else of
     the per-user settings file; a fallback to the defaults goes to
-    ``warnings``). A
+    ``warnings``); ``integrity`` overrides single thresholds of that dump
+    (``--integrity KEY=VALUE``). A
     point whose check raises goes to ``failures`` as ``(point uuid,
     message)`` and the others go on.
 
@@ -608,7 +572,7 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
            or verdicts[p.pk][-1].base.extras.get(PROVISIONAL_EXTRA, False)]
     stale: Set[int] = set()
     if recheck:
-        settings = settings or _settings_dump(warnings, settings_file=settings_file)
+        settings = settings or _settings_dump(warnings, settings_file, integrity)
         stale = {p.pk for p in points
                  if verdicts[p.pk] and _stale_settings(verdicts[p.pk][-1], settings)}
     if not new and not stale:
@@ -638,7 +602,7 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                     continue
                 if settings_node is None:
                     settings_node = _step_input(
-                        settings or _settings_dump(warnings, settings_file=settings_file),
+                        settings or _settings_dump(warnings, settings_file, integrity),
                         'integrity_settings')
                 inputs['context'] = _step_input(inputs['context'], 'integrity_context')
                 verdict = check_integrity(**inputs, settings=settings_node)
@@ -806,7 +770,7 @@ def _successors(verdict: orm.Dict) -> List[orm.Dict]:
     qb = orm.QueryBuilder().append(
         orm.Dict, filters={f'extras.{VERDICT_UUID_EXTRA}': verdict.uuid}, tag='d')
     qb.order_by({'d': {'id': 'asc'}})
-    return [n for n in qb.all(flat=True) if _live(n)]
+    return [n for n in qb.all(flat=True) if not is_superseded(n)]
 
 
 def _ruled_by_verdict(uuids: List[str]) -> Dict[str, List[orm.Dict]]:
@@ -819,7 +783,7 @@ def _ruled_by_verdict(uuids: List[str]) -> Dict[str, List[orm.Dict]]:
         f'extras.{VERDICT_UUID_EXTRA}': {'in': sorted(set(uuids))}})
     qb.order_by({'d': {'id': 'asc'}})
     for node in qb.all(flat=True):
-        if _live(node):
+        if not is_superseded(node):
             out.setdefault(node.base.extras.get(VERDICT_UUID_EXTRA), []).append(node)
     return out
 
@@ -841,7 +805,7 @@ def _was_ruled_quarantined(verdict: orm.Dict) -> bool:
         f'extras.{KIND_EXTRA}': 'ruled_verdict',
         f'extras.{POINT_UUID_EXTRA}': verdict.get('point_uuid'),
         'attributes.original_status': 'quarantined'})
-    return any(not _live(n) for n in qb.all(flat=True))
+    return any(is_superseded(n) for n in qb.all(flat=True))
 
 
 def _refusal(pid: str, source: str, entry: Dict[str, Any],
@@ -1174,10 +1138,9 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
     """:func:`apply_rulings` on a loaded set Group; with ``dry_run``, the
     report of what it would do, and nothing written. ``root`` is the root
     being imported, when it is not yet the set's ``source_root`` (a dry run)."""
-    from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
     from .rulings import drop_source  # pylint: disable=import-outside-toplevel
 
-    report = RulingReport(label=group.label[len(GROUP_PREFIX) + 1:], dry_run=dry_run)
+    report = RulingReport(label=group.label[len(GROUP_PREFIX):], dry_run=dry_run)
     own = _own_source(group, root, report.warnings)
     extras = group.base.extras.all
     stored = extras.get(LEDGER_EXTRA)
@@ -1216,7 +1179,6 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
 
 
 def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
-                  withdraw: Optional[bool] = None,
                   withdraw_pending: Optional[Path] = None,
                   profile: Optional[str] = None) -> RulingReport:
     """Reconcile the set ``friction2d/<label>``'s rulings with its ruling
@@ -1231,8 +1193,7 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
     changes nothing. A file that is gone keeps its entries, marked
     ``missing``: they still count and every report lists them as pending.
     ``withdraw_pending`` (resolved as ``rulings_path`` is; it need not
-    exist) deletes that file's entries. ``withdraw`` is accepted for
-    compatibility and changes nothing: every pass follows the files.
+    exist) deletes that file's entries.
 
     Per point the ruling in force is the own file's, else the most recently
     seen (added or changed) entry of another file -- the first of those that
@@ -1246,9 +1207,8 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
-    del withdraw                    # every pass follows the files
     load_aiida_profile(profile)
-    return rule_group(_set_group(label), rulings_path, withdraw_pending=withdraw_pending)
+    return rule_group(resolve_set(label), rulings_path, withdraw_pending=withdraw_pending)
 
 
 @dataclass
@@ -1280,9 +1240,11 @@ class RecheckReport:
 
 
 def recheck_set(label: str, *, settings_file: Optional[Path] = None,
+                integrity: Optional[Mapping[str, Any]] = None,
                 profile: Optional[str] = None) -> RecheckReport:
     """Re-check the set ``friction2d/<label>`` under the current integrity
-    settings (those of ``settings_file``, else of the per-user file).
+    settings (those of ``settings_file``, else of the per-user file, with the
+    ``integrity`` overrides applied).
 
     :func:`check_group` with ``recheck=True``: every live point whose live
     verdict was checked with another ``thresholds_version``, or with other
@@ -1294,9 +1256,9 @@ def recheck_set(label: str, *, settings_file: Optional[Path] = None,
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
     load_aiida_profile(profile)
-    group = _set_group(label)
+    group = resolve_set(label)
     report = RecheckReport(label=label)
-    settings = _settings_dump(report.warnings, settings_file=settings_file)
+    settings = _settings_dump(report.warnings, settings_file, integrity)
     report.version = settings['version']
     report.verdict_counts = check_group(
         group, settings=settings, failures=report.failures, warnings=report.warnings,
@@ -1321,7 +1283,7 @@ def _verdict_candidates(points: List[orm.FolderData]
             f'extras.{KIND_EXTRA}': {'in': ['ruled_verdict', 'withdrawn_verdict']},
             f'extras.{VERDICT_UUID_EXTRA}': {'in': sorted(by_uuid)}})
         for node in qb.all(flat=True):
-            if _live(node):
+            if not is_superseded(node):
                 successors.setdefault(node.base.extras.get(VERDICT_UUID_EXTRA, None),
                                       []).append(node)
     return ({pk: nodes + [s for v in nodes for s in successors.get(v.uuid, [])]
@@ -1396,10 +1358,11 @@ def is_provisional(verdict: orm.Dict) -> bool:
 # summarise
 # ---------------------------------------------------------------------------
 
-def _point_frames(point: orm.FolderData, directory: Path, family: str,
-                  n_layers: int) -> Dict[str, Any]:
+def point_frames(point: orm.FolderData, directory: Path, family: str, n_layers: int,
+                 tiers: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     """The point's stored tiers as frames, the way the DataReader reads them:
-    ``indent_f*N_l*.csv`` is the retract tier, the rest by filename."""
+    ``indent_f*N_l*.csv`` is the retract tier, the rest by filename. ``tiers``
+    limits which are read (default: all)."""
     # pylint: disable=import-outside-toplevel
     from ..postprocessing.read_data import tier_of
     from .calcjob import _read_frame  # pylint: disable=protected-access
@@ -1412,9 +1375,11 @@ def _point_frames(point: orm.FolderData, directory: Path, family: str,
     frames: Dict[str, Any] = {}
     for name in sorted(repo.list_object_names('results')):
         tier = 'retract' if _INDENT_RE.match(name) else tier_of(name)
+        if tier in frames or (tiers is not None and tier not in tiers):
+            continue
         path = directory / name
         path.write_bytes(repo.get_object_content(f'results/{name}', mode='rb'))
-        frames.setdefault(tier, _read_frame(path, family, n_layers))
+        frames[tier] = _read_frame(path, family, n_layers)
     return frames
 
 
@@ -1474,7 +1439,7 @@ def summarise(point: orm.FolderData, options: orm.Dict, parse: orm.Dict,
     family = point.base.attributes.get('family')
     with TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        frames = _point_frames(point, tmp_dir / 'results', family,
+        frames = point_frames(point, tmp_dir / 'results', family,
                                int(parse['n_layers']))
         post = _post(point, snapshot, provenance, tmp_dir)
     summary = summarise_run(frames, family, skip_fraction=float(opts['skip_fraction']),
@@ -1535,7 +1500,7 @@ def _live_summaries(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
     qb.append(orm.Dict, with_incoming='f', project='*')
     qb.order_by({orm.Dict: {'id': 'asc'}})
     for pk, summary in qb.all():
-        if _live(summary):
+        if not is_superseded(summary):
             out[pk].append(summary)
     return out
 
@@ -1626,7 +1591,7 @@ def postprocess_group(label: str, *, policy: Policy = Policy(),
 
     load_aiida_profile(profile)
     problems: List[str] = []
-    points = _live_points(_set_group(label))
+    points = _live_points(resolve_set(label))
     verdicts = _latest(points, policy)
     _report_versions(label, verdicts,
                      _settings_dump(problems, settings_file=settings_file)['version'],
@@ -1670,7 +1635,7 @@ def postprocess_group(label: str, *, policy: Policy = Policy(),
 
 
 # ---------------------------------------------------------------------------
-# Datasets: a Group of selected summaries plus one table Dict (critique M3)
+# Datasets: a Group of selected summaries plus one table Dict
 # ---------------------------------------------------------------------------
 
 #: What each key of a dataset row holds.
@@ -1719,7 +1684,7 @@ def _dataset_rows(name: str, labels: Sequence[str], policy: Policy, digest: str
     units: Dict[str, Dict[str, str]] = {}
     seen: Set[int] = set()
     for label in labels:
-        points = [p for p in _live_points(_set_group(label)) if p.pk not in seen]
+        points = [p for p in _live_points(resolve_set(label)) if p.pk not in seen]
         verdicts = _latest(points, policy)
         summaries = _live_summaries(points)
         for point in points:
@@ -1781,16 +1746,16 @@ def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy()
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
     load_aiida_profile(profile)
-    group_label = f'{DATASET_PREFIX}/{name}'
-    if orm.QueryBuilder().append(orm.Group, filters={'label': group_label}).count():
-        raise ValueError(f'dataset {name!r} exists ({group_label}); datasets are '
+    dataset_label = f'{DATASET_PREFIX}{name}'
+    if orm.QueryBuilder().append(orm.Group, filters={'label': dataset_label}).count():
+        raise ValueError(f'dataset {name!r} exists ({dataset_label}); datasets are '
                          f'not rewritten -- build it under a new name, or '
                          f'delete_dataset({name!r}) first')
     opts = normalise_options(options if options is not None
                              else summary_options(warnings, settings_file=settings_file))
     digest = options_hash(opts)
     rows, members, units = _dataset_rows(name, labels, policy, digest)
-    group = orm.Group(label=group_label).store()
+    group = orm.Group(label=dataset_label).store()
     table: Optional[orm.Dict] = None
     try:
         table = orm.Dict({'name': name, 'labels': list(labels),
@@ -1818,11 +1783,6 @@ class DatasetDeletion(NamedTuple):
     analyses: int
 
 
-#: The Group of a dataset's analysis results is this plus the dataset name
-#: (``frictionsim2d.analysis.store.ANALYSIS_GROUP_PREFIX``).
-_ANALYSIS_GROUP = 'friction2d/analyses/'
-
-
 def delete_dataset(name: str, *, profile: Optional[str] = None) -> DatasetDeletion:
     """Delete the dataset ``friction2d/datasets/<name>``: its Group and its
     table Dict. The summaries it held are kept (their points' sets own them).
@@ -1838,9 +1798,9 @@ def delete_dataset(name: str, *, profile: Optional[str] = None) -> DatasetDeleti
 
     load_aiida_profile(profile)
     found = orm.QueryBuilder().append(
-        orm.Group, filters={'label': f'{DATASET_PREFIX}/{name}'}).all(flat=True)
+        orm.Group, filters={'label': f'{DATASET_PREFIX}{name}'}).all(flat=True)
     if not found:
-        raise ValueError(f'no dataset {name!r} ({DATASET_PREFIX}/{name})')
+        raise ValueError(f'no dataset {name!r} ({DATASET_PREFIX}{name})')
     (group,) = found
     tables = [n.pk for n in group.nodes
               if isinstance(n, orm.Dict) and n.base.extras.get(DATASET_EXTRA, None) == name]
@@ -1856,7 +1816,7 @@ def delete_dataset(name: str, *, profile: Optional[str] = None) -> DatasetDeleti
     if tables:
         delete_nodes(tables, dry_run=False)
     for left in orm.QueryBuilder().append(
-            orm.Group, filters={'label': f'{_ANALYSIS_GROUP}{name}'}).all(flat=True):
+            orm.Group, filters={'label': f'{ANALYSIS_GROUP_PREFIX}{name}'}).all(flat=True):
         if not left.count():
             orm.Group.collection.delete(left.pk)
     return DatasetDeletion(len(tables), analyses)
@@ -1874,37 +1834,25 @@ def delete_dataset(name: str, *, profile: Optional[str] = None) -> DatasetDeleti
 
 def _set_groups() -> List[Any]:
     """Every ``friction2d/<label>`` set Group (dataset and analysis Groups excluded)."""
-    from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
-
-    qb = orm.QueryBuilder().append(
-        orm.Group, filters={'label': {'like': f'{GROUP_PREFIX}/%'}})
-    return [g for g in qb.all(flat=True)
-            if not g.label.startswith((f'{GROUP_PREFIX}/datasets/',
-                                       f'{GROUP_PREFIX}/analyses/'))]
-
-
-def _calcjobs_of(group) -> List[Any]:
-    qb = orm.QueryBuilder().append(orm.Group, filters={'id': group.pk}, tag='g')
-    qb.append(orm.CalcJobNode, with_group='g')
-    return qb.all(flat=True)
+    return orm.QueryBuilder().append(orm.Group, filters=SET_GROUP_FILTER).all(flat=True)
 
 
 def _held_elsewhere(group) -> Set[int]:
     """pks of CalcJobs some OTHER set Group holds."""
     return {calc.pk for other in _set_groups() if other.pk != group.pk
-            for calc in _calcjobs_of(other)}
+            for calc in set_calcjobs(other)}
 
 
 def _dataset_held() -> Dict[int, Set[str]]:
     """node pk -> names of the datasets (``friction2d/datasets/<name>``)
     whose Group holds it."""
     qb = orm.QueryBuilder().append(
-        orm.Group, filters={'label': {'like': f'{DATASET_PREFIX}/%'}}, tag='g',
+        orm.Group, filters={'label': {'like': f'{DATASET_PREFIX}%'}}, tag='g',
         project='label')
     qb.append(orm.Node, with_group='g', project='id')
     held: Dict[int, Set[str]] = {}
     for label, pk in qb.all():
-        held.setdefault(pk, set()).add(label[len(DATASET_PREFIX) + 1:])
+        held.setdefault(pk, set()).add(label[len(DATASET_PREFIX):])
     return held
 
 
@@ -1942,15 +1890,14 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
     from aiida.tools import delete_nodes
 
     from . import load_aiida_profile
-    from .ingest import group_label
 
     load_aiida_profile(profile)
 
-    group = orm.Group.collection.get(label=group_label(label))
+    group = resolve_set(label)
     protected = _held_elsewhere(group)
     in_datasets = _dataset_held()
     doomed: Set[int] = set()
-    for calc in _calcjobs_of(group):
+    for calc in set_calcjobs(group):
         if calc.pk in protected:
             continue
         closure = _delete_closure([calc.pk])
@@ -1988,22 +1935,21 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
 def _stranded_sets(group, doomed: Set[int]) -> Dict[str, Set[str]]:
     """deck key -> labels of the other sets that hold that deck only as a
     superseded CalcJob, once the live CalcJobs in ``doomed`` are deleted."""
-    from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
     from .store import DECK_KEY_EXTRA  # pylint: disable=import-outside-toplevel
 
-    removed = {c.base.extras.get(DECK_KEY_EXTRA) for c in _calcjobs_of(group)
-               if _live(c) and c.pk in doomed}
+    removed = {c.base.extras.get(DECK_KEY_EXTRA) for c in set_calcjobs(group)
+               if not is_superseded(c) and c.pk in doomed}
     removed.discard(None)
     stranded: Dict[str, Set[str]] = {}
     for other in _set_groups():
         if other.pk == group.pk:
             continue
-        calcs = _calcjobs_of(other)
-        live = {c.base.extras.get(DECK_KEY_EXTRA) for c in calcs if _live(c)}
+        calcs = set_calcjobs(other)
+        live = {c.base.extras.get(DECK_KEY_EXTRA) for c in calcs if not is_superseded(c)}
         for calc in calcs:
             key = calc.base.extras.get(DECK_KEY_EXTRA)
             if key in removed and key not in live:
-                stranded.setdefault(key, set()).add(other.label[len(GROUP_PREFIX) + 1:])
+                stranded.setdefault(key, set()).add(other.label[len(GROUP_PREFIX):])
     return stranded
 
 
@@ -2087,7 +2033,7 @@ def _legacy_nodes() -> List[int]:
 
 def clear_all_nodes(profile: Optional[str] = None) -> int:
     """Delete every FrictionSim2D node in the profile and every
-    ``friction2d/*`` Group (spec U6).
+    ``friction2d/*`` Group.
 
     That is every friction2d CalcJob with its descendants, then the inputs
     they leave unused -- content-addressed blocks, files, provenance, schema,
@@ -2100,7 +2046,6 @@ def clear_all_nodes(profile: Optional[str] = None) -> int:
     from aiida.tools import delete_nodes
 
     from . import load_aiida_profile
-    from .ingest import GROUP_PREFIX
 
     load_aiida_profile(profile)
 
@@ -2114,7 +2059,7 @@ def clear_all_nodes(profile: Optional[str] = None) -> int:
     if orphans:
         delete_nodes(orphans, dry_run=False)
     qb = orm.QueryBuilder().append(
-        orm.Group, filters={'label': {'like': f'{GROUP_PREFIX}/%'}}, project='id')
+        orm.Group, filters={'label': {'like': f'{GROUP_PREFIX}%'}}, project='id')
     for group_pk in qb.all(flat=True):
         orm.Group.collection.delete(group_pk)
     return len(doomed) + len(orphans)

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Type, Un
 import pandas as pd
 from pydantic import BaseModel
 
+from ..aiida.layout import ANALYSIS_GROUP_PREFIX
 from .base import Analysis, check_identity, get_analysis
 
 try:
@@ -32,8 +33,6 @@ except ImportError:  # pragma: no cover - the aiida tier skips without it
 __all__ = ['ANALYSIS_GROUP_PREFIX', 'find_result_node', 'params_hash', 'record_analysis',
            'result_node', 'select_result_node', 'store_result', 'table_from_csv']
 
-#: The Group of a dataset's results is this plus the dataset name.
-ANALYSIS_GROUP_PREFIX = 'friction2d/analyses/'
 _CSV_NAME = 'table.csv'
 
 #: The table and drops :func:`record_analysis` stores. Not calcfunction inputs:

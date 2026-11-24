@@ -624,6 +624,17 @@ def check_files(status: str, window: Optional[pd.DataFrame], family: str,  # pyl
                    not_applicable=skipped)
 
 
+def point_context(locator, family: str, point, record, n_layers: int
+                  ) -> Tuple[Optional[Path], Dict[str, Set[int]]]:
+    """``(bond reference, layers)`` of one point, as :func:`check_files` takes them.
+
+    ``point`` needs ``load_kind`` and ``load``; the run store's check
+    (:func:`frictionsim2d.aiida.steps.check_integrity`) resolves them the same way.
+    """
+    ref = bond_reference(locator, family, point)
+    return ref, resolve_layers(locator, record, ref, n_layers, family=family)
+
+
 def check_point(point, record, settings: IntegritySettings, *,
                 multi_speed: bool, writes_snapshot: bool = True) -> IntegrityVerdict:
     """Stage 3 for one ``RunFrames``: resolve the files and layers, then
@@ -634,8 +645,7 @@ def check_point(point, record, settings: IntegritySettings, *,
     locator, family = point.locator, point.family
     n_layers = point.n_layers
     final = final_data_path(locator.data_dir, point.load_kind, point.load, point.angle)
-    ref = bond_reference(locator, family, point)
-    layers = resolve_layers(locator, record, ref, n_layers, family=family)
+    ref, layers = point_context(locator, family, point, record, n_layers)
     window = point.window if point.tiers else None
     return check_files(point.status, window, family, n_layers,
                        float(point.tokens.temperature), final, ref, layers,

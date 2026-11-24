@@ -1,29 +1,15 @@
-"""Content-addressed nodes in the AiiDA store (spec §5.2).
+"""Content-addressed nodes in the AiiDA store.
 
-A parameter block (:mod:`frictionsim2d.aiida.blocks`) is stored once as an ``orm.Dict``
-and found again by its hash, so every run with an identical block links to
-the same node. A file (a potential, a CIF) is stored once as an
-``orm.SinglefileData`` and found again by the sha256 of its STORED bytes --
-what went in through :func:`~frictionsim2d.aiida.data.redact.stage_file` -- so the
-published hash can be checked against the published content (critique M2).
-A schema document is stored once, like a block.
+A parameter block, a file (potential, CIF), a run's provenance folder and a schema
+document are each stored once and found again by hash, so runs that share one link
+to the same node. Lookups go through node extras (``friction2d_block_hash``,
+``friction2d_sha256``, ``friction2d_folder_sha256``, ``friction2d_schema_hash``),
+an index that :func:`reindex` recomputes from the nodes themselves.
 
-Lookups go through node extras, which are an index only:
-``friction2d_block_hash`` / ``friction2d_block_kind`` on blocks,
-``friction2d_sha256`` on files, ``friction2d_folder_sha256`` on a run's
-provenance folder, ``friction2d_schema_hash`` on a schema. Each is
-recomputable from the node itself (:func:`reindex`).
-
-Every content-addressed node gets the deterministic UUID :func:`node_uuid` of
-its slot (block, file, folder, schema) and hash (critique C2).
-``import_archive`` matches nodes by UUID
-(``aiida/tools/archive/imports.py``, ``_import_nodes``: archive nodes whose
-uuid already exists in the profile are not added, only their extras merged),
-so the same block built by two scientists in two profiles is ONE node after an
-archive import, and the UUID unique constraint (``db_dbnode.uuid``) is the
-database-level guarantee. Setting the UUID uses private API
-(:func:`_set_uuid`); when it is unavailable the node keeps a random UUID and
-joins on the hash extras still work (:func:`verify` reports the duplicates).
+Each node gets the deterministic UUID :func:`node_uuid` of its slot and hash, so the
+same block built in two profiles is ONE node after an archive import (setting the
+UUID uses private API, :func:`_set_uuid`; without it the node keeps a random UUID
+and the hash joins still work, and :func:`verify` reports the duplicates).
 """
 from __future__ import annotations
 
@@ -42,8 +28,10 @@ from aiida import orm
 from aiida.common.exceptions import NotExistent
 
 from ..data.provenance import sha256_file
-from .blocks import BLOCK_KINDS, block_hash, block_kind
+from .block_schema import BLOCK_KINDS
+from .blocks import block_hash, block_kind
 from .data.redact import stage_file
+from .layout import group_label, is_conflict
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +55,22 @@ DECK_SHA_EXTRA = 'friction2d_deck_sha256'
 #: (:class:`frictionsim2d.run.naming.RunTokens` as a dict, ``family`` from
 #: ``parameters``) -- what :mod:`frictionsim2d.aiida.query` filters on.
 TOKENS_EXTRA = 'friction2d_tokens'
+
+
+def resolve_set(label: str):
+    """The Group ``friction2d/<label>`` (``LookupError`` when there is none)."""
+    found = orm.Group.collection.find(filters={'label': group_label(label)})
+    if not found:
+        raise LookupError(f'no simulation set {label!r} ({group_label(label)})')
+    return found[0]
+
+
+def set_calcjobs(group) -> List[Any]:
+    """Every CalcJob of ``group``, in pk order."""
+    qb = orm.QueryBuilder().append(orm.Group, filters={'id': group.pk}, tag='g')
+    qb.append(orm.CalcJobNode, with_group='g', tag='c', project='*')
+    qb.order_by({'c': {'id': 'asc'}})
+    return qb.all(flat=True)
 
 
 def deck_key(run_uuid: str, deck_name: str) -> str:
@@ -119,7 +123,6 @@ FRICTION2D_NAMESPACE = UUID('e1ff2212-fbb6-5980-a513-7e1d9d76aa12')
 #: The process type of the import-only CalcJob (entry point ``friction2d.lammps``).
 CALCJOB_PROCESS_TYPE = 'aiida.calculations:friction2d.lammps'
 
-_CONFLICT = '.sync-conflict-'
 _CHUNK = 1 << 20
 
 _warned_uuid = False   # pylint: disable=invalid-name
@@ -468,7 +471,7 @@ def _provenance_members(provenance_file: Optional[Path],
     if provenance_dir is not None and Path(provenance_dir).is_dir():
         root = Path(provenance_dir)
         for path in root.rglob('*'):
-            if path.is_file() and _CONFLICT not in path.name:
+            if path.is_file() and not is_conflict(path):
                 rel = path.relative_to(root).as_posix()
                 members.append((f'provenance/{rel}', path))
     if config_file is not None:

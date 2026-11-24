@@ -267,3 +267,29 @@ def test_summaries_are_filtered_by_options_before_versions():
 def test_options_hash_is_for_summaries_only():
     with pytest.raises(ValueError, match='summaries'):
         select([], 'verdict', Policy(), options_hash='h')
+
+
+# --- the rulings file as the store reads it -------------------------------------
+
+@pytest.mark.parametrize('text', ['', '\n\n', '# only a comment\n'])
+def test_a_file_with_no_yaml_document_is_unreadable_not_empty(tmp_path, text):
+    pytest.importorskip('aiida')
+    from frictionsim2d.aiida.steps import _load_source
+
+    path = tmp_path / 'integrity_rulings.yaml'
+    path.write_text(text, encoding='utf-8')
+
+    loaded = _load_source(str(path))
+
+    assert list(loaded) == ['<file>'] and 'empty' in loaded['<file>'].error
+
+
+def test_an_empty_list_withdraws_and_a_missing_file_is_none(tmp_path):
+    pytest.importorskip('aiida')
+    from frictionsim2d.aiida.steps import _load_source
+
+    path = tmp_path / 'integrity_rulings.yaml'
+    path.write_text('[]\n', encoding='utf-8')
+
+    assert _load_source(str(path)) == {}
+    assert _load_source(str(tmp_path / 'gone.yaml')) is None

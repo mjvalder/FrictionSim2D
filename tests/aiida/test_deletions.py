@@ -18,13 +18,6 @@ def test_workchain_entry_point_is_deregistered():
     assert not friction_eps, f"Expected no friction2d.friction entry points, found: {friction_eps}"
 
 
-def test_lazy_export_is_gone():
-    import frictionsim2d.aiida as aiida_pkg
-    assert 'FrictionWorkChain' not in aiida_pkg._LAZY_EXPORTS
-    with pytest.raises(AttributeError):
-        _ = aiida_pkg.FrictionWorkChain
-
-
 def test_ssh_transport_helpers_are_gone():
     import frictionsim2d.aiida.profile as profile_mod
 
@@ -96,7 +89,6 @@ GONE = [
     '_rebuild_single_material', '_patch_config_paths', '_resolve_set_node',
     '_load_manifest', '_update_manifest_entry',
 ]
-KEPT = ['list_simulation_sets', 'delete_simulation_set', 'clear_all_nodes']
 
 
 @pytest.mark.parametrize('name', GONE)
@@ -107,25 +99,9 @@ def test_superseded_function_is_gone(name):
     assert not hasattr(steps_mod, name), name
 
 
-@pytest.mark.parametrize('name', KEPT)
-def test_surviving_function_is_kept(name):
-    import frictionsim2d.aiida as aiida_pkg
-    assert callable(getattr(aiida_pkg, name))
-
-
-def test_lazy_exports_point_at_the_new_modules():
-    import frictionsim2d.aiida as aiida_pkg
-
-    exports = aiida_pkg._LAZY_EXPORTS
-    assert exports['import_root'][0].endswith('.ingest')
-    assert 'ingest_root' not in exports
-    assert exports['export_results'][0].endswith('.export')
-    assert exports['export_archive'][0].endswith('.export')
-    assert exports['import_archive'][0].endswith('.export')
-    for dead in ('register_simulation_batch', 'register_single_simulation',
-                 'import_results_to_aiida', 'import_simulation_set',
-                 'dump_results_to_json', 'rebuild_simulation_set',
-                 'FrictionProvenanceData', 'FrictionWorkChain',
-                 'FrictionSimulationData', 'FrictionSimulationSetData',
-                 'FrictionResultsData', 'run_with_aiida', 'smart_submit'):
-        assert dead not in exports
+@pytest.mark.parametrize('module, name', [
+    ('frictionsim2d.aiida.query', 'list_simulation_sets'),
+    ('frictionsim2d.aiida.steps', 'delete_simulation_set'),
+    ('frictionsim2d.aiida.steps', 'clear_all_nodes')])
+def test_surviving_function_is_kept(module, name):
+    assert callable(getattr(importlib.import_module(module), name))

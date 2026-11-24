@@ -151,6 +151,21 @@ def test_machine_computer_get_or_create(aiida_profile_clean):
     assert machine_computer('archer2', {}).pk == comp.pk
 
 
+def test_machine_mismatch_names_a_host_or_scheduler_that_disagrees(aiida_profile_clean):
+    from frictionsim2d.aiida.store import machine_mismatch
+
+    assert machine_mismatch('nowhere', {'hpc_host': 'a'}) is None     # no such Computer
+    machine_computer('archer2', {'hpc_host': 'login.archer2.ac.uk', 'scheduler_type': 'slurm'})
+
+    assert machine_mismatch('archer2', {}) is None                    # states nothing
+    assert machine_mismatch('archer2', {'hpc_host': 'login.archer2.ac.uk',
+                                        'scheduler_type': 'slurm'}) is None
+    message = machine_mismatch('archer2', {'hpc_host': 'other.host', 'scheduler_type': 'pbs'})
+    assert "hostname 'login.archer2.ac.uk' != 'other.host'" in message
+    assert "scheduler 'core.slurm' != 'core.pbspro'" in message
+    assert 'settings.aiida.machine' in message
+
+
 def test_machine_computer_defaults(aiida_profile_clean):
     comp = machine_computer('localhost', {})
     assert (comp.hostname, comp.transport_type, comp.scheduler_type) == (
@@ -285,6 +300,23 @@ def test_a_block_whose_extras_were_dropped_is_found_by_uuid(aiida_profile_clean)
     again = get_or_create_block(dict(THERMOSTAT))
     assert again.pk == node.pk
     assert again.base.extras.get('friction2d_block_hash') == block_hash(THERMOSTAT)
+
+
+def test_a_file_and_a_schema_whose_extras_were_dropped_are_found_by_uuid(
+        aiida_profile_clean, tmp_path):
+    pot = tmp_path / 'MoS.sw'
+    pot.write_text('# potential\n', encoding='utf-8')
+    file = get_or_create_file(pot)
+    schema = get_or_create_schema({'block_schema': '1', 'family': 'afm', 'fields': {}})
+    file_sha = file.base.extras.get('friction2d_sha256')
+    schema_sha = schema.base.extras.get('friction2d_schema_hash')
+    for node in (file, schema):
+        node.base.extras.clear()
+
+    assert get_or_create_file(pot).pk == file.pk
+    assert get_or_create_schema({'block_schema': '1', 'family': 'afm', 'fields': {}}).pk == schema.pk
+    assert file.base.extras.get('friction2d_sha256') == file_sha
+    assert schema.base.extras.get('friction2d_schema_hash') == schema_sha
 
 
 def _stored_under(node, uuid, extras=None):

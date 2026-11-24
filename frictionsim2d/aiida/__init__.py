@@ -1,11 +1,9 @@
 """AiiDA integration for FrictionSim2D.
 
-This package intentionally keeps a thin root module and lazy-loads
-advanced symbols to reduce import-time coupling across AiiDA plugins.
+The root module stays thin; import the submodule you need.
 """
 
-from importlib import import_module
-from typing import Any, Dict, Tuple
+from typing import Any
 
 try:
     import aiida  # noqa: F401
@@ -18,21 +16,17 @@ if AIIDA_AVAILABLE:
 else:
     LOAD_PROFILE = None
 
-_LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
-    'Friction2DDB': (f'{__name__}.query', 'Friction2DDB'),
-    'import_root': (f'{__name__}.ingest', 'import_root'),
-    'export_results': (f'{__name__}.export', 'export_results'),
-    'rebuild_set': (f'{__name__}.export', 'rebuild_set'),
-    'export_archive': (f'{__name__}.export', 'export_archive'),
-    'import_archive': (f'{__name__}.export', 'import_archive'),
-    'list_simulation_sets': (f'{__name__}.query', 'list_simulation_sets'),
-    'delete_simulation_set': (f'{__name__}.steps', 'delete_simulation_set'),
-    'clear_all_nodes': (f'{__name__}.steps', 'clear_all_nodes'),
-    'LammpsFrictionCalcJob': (f'{__name__}.calcjob', 'LammpsFrictionCalcJob'),
-    'full_setup': (f'{__name__}.profile', 'full_setup'),
-}
+__all__ = ['AIIDA_AVAILABLE', 'aiida_setting', 'load_aiida_profile']
 
-__all__ = ['AIIDA_AVAILABLE', 'load_aiida_profile']
+
+def aiida_setting(name: str, default: Any = None, settings_file: Any = None) -> Any:
+    """``settings.aiida.<name>``, or ``default`` when it is unset or unreadable."""
+    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
+    try:
+        value = getattr(load_settings(settings_file=settings_file).aiida, name)
+    except (OSError, ValueError, AttributeError):
+        return default
+    return default if value is None else value
 
 
 def load_aiida_profile(profile=None):
@@ -65,26 +59,5 @@ def load_aiida_profile(profile=None):
     if LOAD_PROFILE is None:
         raise RuntimeError("AiiDA profile loader is unavailable")
     if profile is None:
-        try:
-            from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
-            profile = load_settings().aiida.profile or None
-        except (OSError, ValueError, AttributeError):
-            profile = None
+        profile = aiida_setting('profile', None) or None
     return LOAD_PROFILE(profile)
-
-
-def __getattr__(name: str) -> Any:
-    """Lazy-load optional AiiDA symbols exported at package root."""
-    if name not in _LAZY_EXPORTS:
-        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
-    if not AIIDA_AVAILABLE:
-        raise AttributeError(
-            f"AiiDA is unavailable; cannot access '{name}'. "
-            "Install with: pip install 'FrictionSim2D[aiida]'"
-        )
-
-    module_name, symbol_name = _LAZY_EXPORTS[name]
-    module = import_module(module_name)
-    value = getattr(module, symbol_name)
-    globals()[name] = value
-    return value

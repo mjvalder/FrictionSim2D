@@ -1,5 +1,4 @@
-"""The query layer over the CalcJob graph: `query`, `point_table`, `related`,
-`latest` (plan Task 8; critique C1a, C1b, I8).
+"""The query layer over the CalcJob graph: `query`, `point_table`, `related`, `latest`.
 
 `related(point, vary)` is point-level and field-level: two runs relate when
 their points agree on every requested field except those under `vary`,
@@ -432,3 +431,25 @@ def test_point_table_keeps_integers_beside_absent_cells(campaigns):
     table = point_table()
     column = next(c for c in table.columns if c.endswith('.slide_run_steps'))
     assert {type(v) for v in table[column]} == {int}
+
+
+# --- filters and vary names, without a store -----------------------------------
+
+@pytest.mark.parametrize('name', sorted(query_mod._EQ_FILTERS))   # pylint: disable=protected-access
+def test_each_equality_filter_keeps_only_matching_rows(name):
+    column = query_mod._EQ_FILTERS[name]                           # pylint: disable=protected-access
+    row = {column: 'a'}
+
+    assert query_mod._matches(row, {name: 'a'})                    # pylint: disable=protected-access
+    assert not query_mod._matches(row, {name: 'b'})                # pylint: disable=protected-access
+    assert query_mod._matches(row, {})                             # pylint: disable=protected-access
+
+
+def test_related_refuses_identity_columns_and_unknown_names():
+    vary_columns = query_mod._vary_columns                         # pylint: disable=protected-access
+
+    assert vary_columns(['load'], []) == {'load'}
+    with pytest.raises(ValueError, match="cannot vary 'family'"):
+        vary_columns(['family'], [])
+    with pytest.raises(ValueError, match="cannot vary 'nonsense'"):
+        vary_columns(['nonsense'], [])
