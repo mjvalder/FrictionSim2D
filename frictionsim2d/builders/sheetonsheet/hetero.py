@@ -13,7 +13,7 @@ from ...interfaces.ase import read_lammps_data
 from ..utils.z_vacuum import SHEET_VIRTUAL_ATOM_HEIGHT, VIRTUAL_ATOM_ROOM, ZBox
 from ..utils.interlayer import (check_interlayer_box, interlayer_style,
                                 interlayer_template_context)
-from ..utils.lammps_data import detect_atom_style
+from ...interfaces.lammps_monolayer import detect_atom_style
 from ..construction.hetero_stack import (
     build_hetero_structure,
     register_hetero_potentials,

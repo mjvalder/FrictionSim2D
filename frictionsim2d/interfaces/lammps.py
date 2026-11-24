@@ -1,66 +1,21 @@
-"""LAMMPS interface wrapper for FrictionSim2D.
-
-This module provides utilities for interacting with LAMMPS via its Python interface.
-"""
+"""LAMMPS Python-binding helpers."""
 
 import functools
 import importlib
 import logging
-import re
 import subprocess
-import sys
 import threading
-import time
+from pathlib import Path
 from typing import FrozenSet, Optional
 
 logger = logging.getLogger(__name__)
 _IMPORT_LOCK = threading.Lock()
 
 
-def _compat_strptime(value: str, fmt: str):
-    """Accept LAMMPS version strings with an extra numeric suffix.
-
-    Some packaged LAMMPS Python builds expose version strings like
-    ``2022.06.23.2.0`` while their import code still parses using
-    ``%Y.%m.%d``. This trims the trailing suffix only for that specific
-    format during import.
-    """
-    if fmt == "%Y.%m.%d":
-        match = re.match(r"^(\d{4}\.\d{1,2}\.\d{1,2})(?:\.\d+(?:\.\d+)*)?$", value)
-        if match:
-            value = match.group(1)
-    return _ORIGINAL_STRPTIME(value, fmt)
-
-
 def _import_lammps_module():
-    """Import the lammps module with a narrow compatibility fallback."""
+    """Import and return the ``lammps`` module."""
     with _IMPORT_LOCK:
-        module = sys.modules.get("lammps")
-        if module is not None:
-            return module
-
-        try:
-            return importlib.import_module("lammps")
-        except ValueError as exc:
-            if "unconverted data remains" not in str(exc):
-                raise
-
-            sys.modules.pop("lammps", None)
-            time.strptime = _compat_strptime
-            try:
-                return importlib.import_module("lammps")
-            finally:
-                time.strptime = _ORIGINAL_STRPTIME
-
-
-_ORIGINAL_STRPTIME = time.strptime
-
-# Preload the module so later direct imports elsewhere in the codebase reuse
-# the already-imported module and avoid repeating the failing import path.
-try:
-    _import_lammps_module()
-except (ImportError, OSError, ValueError):
-    logger.debug("LAMMPS preload skipped", exc_info=True)
+        return importlib.import_module("lammps")
 
 
 def create_lammps_instance():
@@ -87,6 +42,40 @@ def run_lammps_commands(commands: list[str]) -> None:
         raise
     finally:
         lmp.close()
+
+
+def run_on_data_file(
+    input_path: Path,
+    atom_style: str,
+    commands: list[str],
+    output_path: Path,
+) -> None:
+    """Read ``input_path`` in metal units, run ``commands``, write ``output_path``.
+
+    Args:
+        input_path: LAMMPS data file to read.
+        atom_style: ``atom_style`` used to read it.
+        commands: LAMMPS commands run between ``read_data`` and ``write_data``.
+        output_path: Data file to write.
+    """
+    run_lammps_commands([
+        "clear",
+        "units metal",
+        f"atom_style {atom_style}",
+        f'read_data "{input_path}"',
+        *commands,
+        f'write_data "{output_path}"',
+    ])
+
+
+def replicate_data_file(input_path: Path, output_path: Path, nx: int, ny: int, nz: int) -> None:
+    """Replicate a LAMMPS data file ``nx x ny x nz`` with native ``replicate``.
+
+    Atom type IDs are preserved. An existing ``output_path`` is overwritten.
+    """
+    if output_path.exists():
+        output_path.unlink()
+    run_on_data_file(input_path, "atomic", [f"replicate {nx} {ny} {nz}"], output_path)
 
 
 @functools.lru_cache(maxsize=1)

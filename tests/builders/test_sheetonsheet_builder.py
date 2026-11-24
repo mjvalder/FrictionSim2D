@@ -990,10 +990,8 @@ def test_kc_graphene_build_runs_the_stacking_with_molecule_ids(tmp_path, monkeyp
 def test_stack_layers_template_sets_molecule_ids():
     """common/stack_layers.lmp (the in-process stacking script) gets them too,
     before its `run 0`, and keeps them out of the written data file."""
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader("frictionsim2d.templates"),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     ctx = dict(box_xlo=0, box_xhi=10, box_ylo=0, box_yhi=10, box_zhi=30,
                total_types=4, atom_style="atomic", base_layer_path="base.lmp",
                n_layers=2, layer_shifts=[0, 6], layer_shifts_x=[0, 0],

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..builders.utils.lammps_data import (
+from ..interfaces.lammps_monolayer import (
     detect_atom_style, monolayer_to_atoms, read_monolayer, write_supercell,
 )
 from .matching import _max_strain, rotation_angle_between

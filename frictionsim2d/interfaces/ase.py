@@ -1,32 +1,7 @@
-"""Structure-file reading, with ASE's import cost deferred.
+"""Structure-file reading with ASE's import cost deferred into the function bodies.
 
-**Scope: this is not a general ASE facade.** It wraps the ASE calls whose
-result is immediately reduced to plain data -- reading a structure or a LAMMPS
-data file, looking up an element mass. The builders use ASE's object model
-directly (``Atoms``, ``make_supercell``, ``io.write``) and should keep doing
-so; funnelling that through here would be a pass-through layer that hides
-nothing. ``frictionsim2d.interfaces.jinja`` is the same shape: one ``PackageLoader``,
-not a Jinja2 facade.
-
-What it buys is import weight. ``ase.io`` costs ~355 ms and ``ase.data``
-~74 ms, and the import is deferred into the function body below, so ASE loads
-when a structure is actually read rather than when a module that might read
-one is imported. ``frictionsim2d.core.utils.structures`` is the only consumer.
-
-Modules that genuinely need ASE's object model -- constructing ``Atoms``,
-``make_supercell``, anything feeding ``ase.io.write`` -- import it directly and
-defer it into the functions that use it. After this split that is two files:
-``frictionsim2d/builders/components.py`` (the geometry engine) and
-``frictionsim2d/builders/hetero.py`` (structure building).
-
-.. warning::
-   This module is deliberately **absent** from ``frictionsim2d/interfaces/__init__.py``.
-   That ``__init__`` imports its adapters eagerly, and ``frictionsim2d.core.config`` --
-   which 66 modules import -- imports ``frictionsim2d.interfaces``. Registering this
-   module there would push ASE onto essentially the whole package and undo
-   the reason it was split out. ``tests/repo/test_import_weight.py`` pins this.
-
-   Import it as ``from ..interfaces.ase import read_structure``.
+Never register this module in ``interfaces/__init__.py``:
+``tests/repo/test_import_weight.py`` pins that ASE stays out of the hot imports.
 """
 
 from dataclasses import dataclass
@@ -69,9 +44,7 @@ class LammpsData:
     Attributes:
         cell: 3x3 cell matrix as a numpy array.
         positions: (N, 3) atom positions as a numpy array.
-        numbers: (N,) atomic numbers as a numpy array. LAMMPS data files carry
-            atom *types*, which ASE maps to elements via the Masses section, so
-            this is the mapped result rather than the raw type column.
+        numbers: (N,) atomic numbers, mapped from atom types via the Masses section.
     """
     cell: Any        # np.ndarray (3, 3)
     positions: Any   # np.ndarray (N, 3)
@@ -80,12 +53,6 @@ class LammpsData:
 
 def read_lammps_data(path: Union[str, Path]) -> LammpsData:
     """Read a LAMMPS data file and return its cell and positions.
-
-    Every caller of this in the builders read the file, took ``cell`` and
-    ``get_positions()``, and discarded the ``Atoms`` object -- nine sites
-    spelling the same operation slightly differently. Returning plain arrays
-    keeps ASE's object model from leaking into the builders that do not need
-    it, so hetero_slide.py and flake_slide.py touch ASE not at all.
 
     Args:
         path: Path to a LAMMPS data file.
@@ -110,16 +77,14 @@ def read_lammps_data(path: Union[str, Path]) -> LammpsData:
 def element_mass(symbol: str) -> float:
     """Standard atomic mass for an element symbol, in amu.
 
-    Wraps ``ase.data.atomic_masses[ase.data.atomic_numbers[symbol]]``, which
-    three call sites spelled out by hand. Raises the same ``KeyError`` that
-    indexing ``atomic_numbers`` would, so existing ``except (KeyError,
-    IndexError)`` handlers keep working unchanged.
-
     Args:
         symbol: Element symbol, e.g. ``'Mo'``.
 
     Returns:
         The element's standard atomic mass.
+
+    Raises:
+        KeyError: If ``symbol`` is not an element symbol.
     """
     from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
     # (deferred: ~74 ms)

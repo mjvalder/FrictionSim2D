@@ -4,37 +4,17 @@ from unittest.mock import patch
 import frictionsim2d.interfaces.lammps as lmp_mod
 
 import logging
-import sys
-import time
+import subprocess
 import types
+from pathlib import Path
 
 import pytest
 
 from frictionsim2d.interfaces import lammps as lmp_iface
 
+# The autouse conftest fixture replaces the module attribute; keep the real one.
+REAL_PAIR_STYLES = lmp_iface.lammps_pair_styles
 
-def test_import_fallback_restores_strptime():
-    fake_module = SimpleNamespace(lammps=object())
-
-    with patch.object(lmp_mod, "_ORIGINAL_STRPTIME", lmp_mod.time.strptime):
-        calls = {"n": 0}
-
-        def _fake_import(name):
-            assert name == "lammps"
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise ValueError("unconverted data remains: .2.0")
-            return fake_module
-
-        original = lmp_mod.time.strptime
-        with patch.dict(lmp_mod.sys.modules, dict(lmp_mod.sys.modules), clear=True):
-            lmp_mod.sys.modules.pop("lammps", None)
-            with patch.object(lmp_mod.importlib, "import_module", side_effect=_fake_import):
-                module = lmp_mod._import_lammps_module()
-
-        assert module is fake_module
-        assert calls["n"] == 2
-        assert lmp_mod.time.strptime is original
 
 
 def test_run_lammps_commands_executes_and_closes():
@@ -61,29 +41,7 @@ def test_run_lammps_commands_executes_and_closes():
     assert fake_lmp_instance.close_called is True
 
 
-def test_compat_strptime_trims_suffix_only_for_ymd_format():
-    assert lmp_iface._compat_strptime('2022.06.23.2.0', '%Y.%m.%d')[:3] == (2022, 6, 23)
 
-
-def test_compat_strptime_leaves_other_formats_alone():
-    with pytest.raises(ValueError):
-        lmp_iface._compat_strptime('2022.06.23.2.0', '%Y-%m-%d')
-
-
-def test_import_reuses_an_already_imported_module(monkeypatch):
-    fake = types.ModuleType('lammps')
-    monkeypatch.setitem(sys.modules, 'lammps', fake)
-    assert lmp_iface._import_lammps_module() is fake
-
-
-def test_import_reraises_unrelated_value_errors(monkeypatch):
-    monkeypatch.delitem(sys.modules, 'lammps', raising=False)
-    def bad_import(name):
-        raise ValueError('something else entirely')
-    monkeypatch.setattr(lmp_iface.importlib, 'import_module', bad_import)
-    with pytest.raises(ValueError, match='something else'):
-        lmp_iface._import_lammps_module()
-    assert time.strptime is lmp_iface._ORIGINAL_STRPTIME
 
 
 def test_run_lammps_commands_closes_and_reraises_on_failure(monkeypatch, caplog):
@@ -115,3 +73,54 @@ def test_create_lammps_instance_is_headless():
                       return_value=SimpleNamespace(lammps=_fake_lammps)):
         assert lmp_mod.create_lammps_instance() == "instance"
     assert seen["cmdargs"] == ["-log", "none", "-screen", "none", "-nocite"]
+
+
+def test_import_lammps_module_returns_the_lammps_module():
+    import lammps
+    assert lmp_iface._import_lammps_module() is lammps
+
+
+@pytest.fixture
+def fresh_pair_styles():
+    REAL_PAIR_STYLES.cache_clear()
+    yield
+    REAL_PAIR_STYLES.cache_clear()
+
+
+def test_pair_styles_none_when_lmp_missing(monkeypatch, fresh_pair_styles):
+    def missing(*a, **k):
+        raise FileNotFoundError('lmp')
+    monkeypatch.setattr(lmp_iface.subprocess, 'run', missing)
+    assert REAL_PAIR_STYLES() is None
+
+
+def test_pair_styles_none_when_lmp_exits_nonzero(monkeypatch, fresh_pair_styles):
+    def failing(*a, **k):
+        raise subprocess.CalledProcessError(1, 'lmp')
+    monkeypatch.setattr(lmp_iface.subprocess, 'run', failing)
+    assert REAL_PAIR_STYLES() is None
+
+
+def test_pair_styles_none_without_a_pair_styles_block(monkeypatch, fresh_pair_styles):
+    out = 'Fix styles:\n  nve  nvt\nBond styles:\n  harmonic\n'
+    monkeypatch.setattr(lmp_iface.subprocess, 'run',
+                        lambda *a, **k: types.SimpleNamespace(stdout=out))
+    assert REAL_PAIR_STYLES() is None
+
+
+def test_run_on_data_file_wraps_commands_between_read_and_write(monkeypatch):
+    seen = []
+    monkeypatch.setattr(lmp_iface, 'run_lammps_commands', seen.extend)
+    lmp_iface.run_on_data_file(Path('in.data'), 'atomic', ['replicate 2 2 1'], Path('out.data'))
+    assert seen == ['clear', 'units metal', 'atom_style atomic',
+                    'read_data "in.data"', 'replicate 2 2 1', 'write_data "out.data"']
+
+
+def test_replicate_data_file_replaces_an_existing_output(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(lmp_iface, 'run_lammps_commands', seen.extend)
+    out = tmp_path / 'out.data'
+    out.write_text('stale')
+    lmp_iface.replicate_data_file(tmp_path / 'in.data', out, 2, 3, 1)
+    assert not out.exists()
+    assert 'replicate 2 3 1' in seen and seen[-1] == f'write_data "{out}"'

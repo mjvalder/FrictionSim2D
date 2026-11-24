@@ -31,7 +31,7 @@ from frictionsim2d.builders.construction.hetero_stack import (
     build_matched_supercells,
     register_hetero_potentials,
 )
-from frictionsim2d.builders.utils.lammps_data import detect_atom_style
+from frictionsim2d.interfaces.lammps_monolayer import detect_atom_style
 from frictionsim2d.core.config import SheetConfig, SheetOnSheetSimulationConfig, load_settings
 from frictionsim2d.lattice.matching import find_coincidence_lattice
 

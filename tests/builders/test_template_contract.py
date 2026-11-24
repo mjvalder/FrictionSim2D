@@ -132,10 +132,8 @@ def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
     Only the has_internal_lj branch is under test; the non-strict env renders
     missing context keys empty, which is fine here.
     """
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     return env.get_template('sheetonsheet/slide.lmp').render(
         n_layers=n_layers, has_internal_lj=has_internal_lj,
         constraint_mode=constraint_mode, pot_type='sw' if not has_internal_lj else 'rebomos',
@@ -418,10 +416,8 @@ def _render_hetero_slide(n_layers: int, **extra) -> str:
     untouched by Task 15, never exercised by the real builder) does not
     itself define `v_e_int_il` the way sheetonsheet's does.
     """
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     return env.get_template('hetero/slide.lmp').render(
         n_layers=n_layers, has_internal_lj=False,
         layers=[{'idx': i, 'zlo': 3.0 * (i - 1), 'zhi': 3.0 * i}
@@ -546,10 +542,8 @@ SHEET_SLIDE_TEMPLATES = ('sheetonsheet/slide.lmp',
 
 
 def _template_source(name: str) -> str:
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     return env.loader.get_source(env, name)[0]
 
 
@@ -673,10 +667,8 @@ def _flake_obs_ctx(n_layers: int) -> dict:
 def _render_flake_slide(n_layers: int) -> str:
     """Render flake/slide.lmp, whose substrate layer groups come from z-bands
     (like hetero) and whose driven body is the flake, not a sheet layer_N."""
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     return env.get_template('flake/slide.lmp').render(
         n_layers=n_layers, has_internal_lj=True,
         sheet_layers=[{'idx': i, 'zlo': 3.0 * (i - 1), 'zhi': 3.0 * i}
@@ -757,10 +749,8 @@ def test_afm_window_fix_honours_results_frequency():
     """Regression: the macro hardcoded `1 1000 1000`, so
     settings.output.results_frequency was computed and discarded for every
     AFM slide build (afm/base.py passes it; the macro ignored it)."""
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     src = env.loader.get_source(env, 'common/observables.lmp')[0]
     assert 'ave/time 1 1000 1000' not in src
     assert 'obs_ctx.window_args' in src
@@ -770,10 +760,8 @@ def test_macro_emits_the_schema_marker_on_every_results_fix():
     """Interlock: a results file with no marker parses as schema 1, which
     triggers the frozen legacy correction and multiplies correctly-scaled
     nN data by 1.602176565. The macro had no title1 at all."""
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     src = env.loader.get_source(env, 'common/observables.lmp')[0]
     fixes = [l for l in src.split('\n')
              if l.startswith('fix') and 'ave/time' in l]
@@ -1251,10 +1239,8 @@ def test_hetero_and_flake_write_final_snapshot_after_halt_check(render, tmp_path
 
 
 def _render_raw(template, **ctx):
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     return env.get_template(template).render(**ctx)
 
 

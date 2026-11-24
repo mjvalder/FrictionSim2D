@@ -1,8 +1,4 @@
-"""Jinja2 template interface for FrictionSim2D.
-
-This module provides utilities for working with Jinja2 templates stored
-in package resources.
-"""
+"""Jinja2 environment and rendering over the packaged templates."""
 
 from importlib import resources
 from typing import Any, Dict, List
@@ -11,17 +7,10 @@ from jinja2 import BaseLoader, Environment, TemplateNotFound
 
 
 class PackageLoader(BaseLoader):
-    """
-    This loader enables Jinja2 to load templates from package resources,
-    which is essential for template distribution in installed packages.
-    """
+    """Jinja2 loader reading templates from package resources."""
 
     def __init__(self, package_name: str):
-        """Initialize the loader with a package name.
-        
-        Args:
-            package_name: Fully qualified package name (e.g., 'FrictionSim2D.templates').
-        """
+        """Load templates from the package ``package_name``."""
         self._package = resources.files(package_name)
 
     def get_source(self, environment, template):

@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from frictionsim2d.builders.utils.lammps_data import atomic2charge, atomic2molecular, charge2atom
-from frictionsim2d.builders.utils.lammps_data import detect_atom_style, get_model_dimensions
+from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
 from frictionsim2d.builders.utils.lammps_data import (
     _is_lammps_section_header, atom_count_and_z_extent, get_num_atom_types, shift_atoms_to_z_zero)
 
@@ -404,42 +404,6 @@ class TestAtomCountAndZExtent:
         assert atom_count_and_z_extent(f)[1] == pytest.approx(3.1)
 
 
-_DECK_WITH_MASSES = (
-    "t\n\n2 atoms\n3 atom types\n\n0 5 xlo xhi\n\nMasses\n\n1 1.0\n2 2.0\n\n"
-    "Atoms # atomic\n\n1 1 0 0 0\n2 2 1 1 1\n"
-)
-
-
-def test_restore_masses_section_replaces_existing_block(tmp_path):
-    from frictionsim2d.builders.utils.lammps_data import restore_masses_section
-    path = tmp_path / "d.lmp"
-    path.write_text(_DECK_WITH_MASSES)
-    restore_masses_section(path, {1: (95.95, "Mo"), 2: (32.06, "S"), 3: (1.0, "X")})
-    text = path.read_text()
-    assert text.count("Masses") == 1
-    assert "1 95.950000  # Mo\n2 32.060000  # S\n3 1.000000  # X\n" in text
-    assert text.index("Masses") < text.index("Atoms")
-
-
-def test_restore_masses_section_falls_back_to_the_placeholder_element(tmp_path):
-    from frictionsim2d.builders.utils.lammps_data import restore_masses_section
-    path = tmp_path / "d.lmp"
-    path.write_text(_DECK_WITH_MASSES)
-    restore_masses_section(path, {1: (95.95, "Mo")}, n_types=3)
-    lines = path.read_text().splitlines()
-    assert "1 95.950000  # Mo" in lines
-    assert any(line.endswith("# He") and line.startswith("2 4.002") for line in lines)
-    assert any(line.endswith("# Li") and line.startswith("3 6.9") for line in lines)
-
-
-def test_restore_masses_section_without_types_leaves_the_file(tmp_path):
-    from frictionsim2d.builders.utils.lammps_data import restore_masses_section
-    path = tmp_path / "d.lmp"
-    path.write_text(_DECK_WITH_MASSES)
-    restore_masses_section(path, {})
-    assert path.read_text() == _DECK_WITH_MASSES
-
-
 def test_atoms_section_start_reports_first_atom_line_and_style():
     from frictionsim2d.builders.utils.lammps_data import atoms_section_start
     lines = ["t", "", "Masses", "", "1 1.0", "", "Atoms # charge", "", "1 1 0.0 0 0 0"]
@@ -457,18 +421,3 @@ def test_snap_small_tilts_drops_only_negligible_tilts(tmp_path):
     snap_small_tilts(large)
     assert "xy xz yz" not in small.read_text()
     assert "xy xz yz" in large.read_text()
-
-
-# --- detect_atom_style ---
-
-@pytest.mark.parametrize('header, style', [
-    ('Atoms # charge', 'charge'), ('Atoms #', 'atomic'), ('Atoms', 'atomic'),
-])
-def test_detect_atom_style_reads_the_atoms_header_comment(tmp_path, header, style):
-    f = tmp_path / 'x.data'; f.write_text(f'LAMMPS data\n\n2 atoms\n\n{header}\n\n1 1 0 0 0\n')
-    assert detect_atom_style(str(f)) == style
-
-
-def test_detect_atom_style_defaults_to_atomic_without_an_atoms_section(tmp_path):
-    f = tmp_path / 'x.data'; f.write_text('LAMMPS data\n\n0 atoms\n')
-    assert detect_atom_style(str(f)) == 'atomic'

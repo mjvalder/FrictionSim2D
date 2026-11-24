@@ -75,7 +75,7 @@ def test_matched_substrate_single_cell_is_copied_not_replicated(tmp_path, monkey
     monkeypatch.setattr(
         "frictionsim2d.lattice.apply.strain_monolayer_to_cell",
         lambda src, dst, box: (shutil.copy(src, dst), strained.update(src=src)))
-    monkeypatch.setattr(components, "_duplicate_lammps_data",
+    monkeypatch.setattr(components, "replicate_data_file",
                         lambda *a, **k: pytest.fail("a 1x1x1 request must not replicate"))
     # thickness below one z-repeat rounds to dup_z == 1
     out = components.build_matched_crystalline_substrate(

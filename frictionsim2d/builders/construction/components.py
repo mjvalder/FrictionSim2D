@@ -31,7 +31,7 @@ from ...core.mlip import is_mlip
 from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import (
     atoms_section_start, atom_count_and_z_extent, atomic2charge, charge2atom, get_model_dimensions,
-    get_num_atom_types, parse_cell_atoms_masses, parse_lmp_atoms, restore_masses_section,
+    get_num_atom_types, parse_cell_atoms_masses, parse_lmp_atoms,
     shift_atoms_to_z_zero, snap_small_tilts, write_typed_atomic,
 )
 from ...core.utils.paths import get_material_path
@@ -39,8 +39,10 @@ from ...core.utils.structures import cifread
 from ...potentials.utils import (
     check_potential_cif_compatibility, get_potential_element_order
 )
+from ...interfaces.lammps_monolayer import restore_masses_section
 from ...interfaces.jinja import PackageLoader, render_lammps_commands
-from ...interfaces.lammps import create_lammps_instance, run_lammps_commands
+from ...interfaces.lammps import (
+    create_lammps_instance, replicate_data_file, run_lammps_commands, run_on_data_file)
 # No cycle: builders/utils/interlayer imports only frictionsim2d.potentials.interlayer.
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 from ...potentials.interlayer import CHALCOGENS, chalcogen_split_elements
@@ -679,16 +681,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
 
     if not has_tilt:
         # Orthogonal box: LAMMPS change_box approach
-        lmp = create_lammps_instance()
-        try:
-            lmp.command("clear")
-            lmp.command("units metal")
-            lmp.command("atom_style atomic")
-            lmp.command(f'read_data "{input_path}"')
-            lmp.command("change_box all ortho")
-            lmp.command(f'write_data "{output_path}"')
-        finally:
-            lmp.close()
+        run_on_data_file(input_path, "atomic", ["change_box all ortho"], output_path)
         return
 
     # Triclinic box: tile a minimum orthogonal supercell with ASE. Each LAMMPS
@@ -793,7 +786,7 @@ def _assign_pot_types_by_order(path: Path, order: List[str],
     # Map each current type-id to an element. Prefer the Masses ``# element``
     # comment, but fall back to the nearest atomic mass among the potential's
     # elements when it is missing: LAMMPS ``replicate``/``write_data`` (used by
-    # _duplicate_lammps_data just before this call) strips those comments. Without
+    # replicate_data_file just before this call) strips those comments. Without
     # the fallback every atom is left unmatched, its type is never reassigned, and
     # the potential's sublattice types collapse to one type per element.
     order_masses = {el: float(_am[_an[el]]) for el in order}
@@ -933,45 +926,12 @@ def split_chalcogen_sublayers(path: Path, elements: List[str],
     return split_ids
 
 
-def _duplicate_lammps_data(
-    input_path: Path,
-    output_path: Path,
-    nx: int,
-    ny: int,
-    nz: int
-) -> None:
-    """Duplicate a LAMMPS data file via native LAMMPS replicate.
-
-    This preserves existing atom type IDs, which is required after renumbering.
-
-    Args:
-        input_path: Input LAMMPS data path.
-        output_path: Duplicated output path.
-        nx: X multiplier.
-        ny: Y multiplier.
-        nz: Z multiplier.
-    """
-    if output_path.exists():
-        output_path.unlink()
-
-    lmp = create_lammps_instance()
-    try:
-        lmp.command("clear")
-        lmp.command("units metal")
-        lmp.command("atom_style atomic")
-        lmp.command(f'read_data "{input_path}"')
-        lmp.command(f"replicate {nx} {ny} {nz}")
-        lmp.command(f'write_data "{output_path}"')
-    finally:
-        lmp.close()
-
-
 def _replicate_or_copy(src: Path, dst: Path, nx: int, ny: int, nz: int) -> None:
     """Replicate ``src`` ``nx x ny x nz`` into ``dst``; a 1x1x1 request is a plain copy."""
     if nx == 1 and ny == 1 and nz == 1:
         shutil.copy(src, dst)
     else:
-        _duplicate_lammps_data(src, dst, nx, ny, nz)
+        replicate_data_file(src, dst, nx, ny, nz)
 
 
 def calculate_layer_shifts(
@@ -1055,7 +1015,7 @@ def create_orthogonal_slab(
 
     cif_data = cifread(cif_path)
     _write_cif_as_lammps_atomic(cif_path, unit_cell, specorder=cif_data['elements'])
-    _duplicate_lammps_data(unit_cell, predup_cell, 2, 2, 1)
+    replicate_data_file(unit_cell, predup_cell, 2, 2, 1)
     _orthogonalize_lammps_data(predup_cell, ortho_cell)
     unit_cell.unlink()
     predup_cell.unlink()
@@ -2114,7 +2074,7 @@ def build_monolayer(
                     dup_factor_y = factor // factor_candidate
                     break
             dup_ortho = _tmp_path(config.mat, "dup")
-            _duplicate_lammps_data(ortho_cell, dup_ortho, dup_factor_x, dup_factor_y, 1)
+            replicate_data_file(ortho_cell, dup_ortho, dup_factor_x, dup_factor_y, 1)
             ortho_cell.unlink()
             ortho_cell = dup_ortho
             _assign_pot_types_by_order(ortho_cell, pot_element_order, pot_counts)

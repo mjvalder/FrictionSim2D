@@ -7,7 +7,7 @@ structure-reading code pays it: ``paths`` and ``tokens`` are cheap, and so is
 
 That split is easy to undo by accident. Adding a convenience re-export to
 ``frictionsim2d/core/utils/__init__.py``, or registering ``frictionsim2d.interfaces.ase`` in
-``frictionsim2d/interfaces/__init__.py`` (which imports its adapters eagerly), silently
+``frictionsim2d/interfaces/__init__.py``, silently
 hands ASE back to all 66 importers of ``frictionsim2d.core.config``. Nothing else in the
 suite would fail. These tests would.
 
@@ -28,6 +28,9 @@ ASE_FREE_MODULES = [
     "frictionsim2d.core.utils.paths",
     "frictionsim2d.core.utils.tokens",
     "frictionsim2d.builders.utils.lammps_data",
+    "frictionsim2d.interfaces.lammps_monolayer",
+    "frictionsim2d.lattice.apply",
+    "frictionsim2d.lattice.matching",
     "frictionsim2d.core.__init__",
     "frictionsim2d.interfaces",
     "frictionsim2d.interfaces.ase",   # the adapter itself defers the import into the call
@@ -154,3 +157,22 @@ def test_module_does_not_import_pydantic_ai(module):
     if module.startswith('frictionsim2d.gui'):
         pytest.importorskip('PySide6')
     assert not _loaded_after_importing(module, 'pydantic_ai')
+
+
+@pytest.mark.parametrize("module", ["frictionsim2d.core.config", "frictionsim2d.interfaces"])
+@pytest.mark.parametrize("banned", ["jinja2", "lammps"])
+def test_config_and_interfaces_package_do_not_import_jinja_or_lammps(module, banned):
+    """``interfaces/__init__.py`` stays empty: its adapters load on demand."""
+    assert not _loaded_after_importing(module, banned)
+
+
+def test_lattice_imports_nothing_from_builders_at_module_level():
+    """lattice depends on core and interfaces only."""
+    code = (
+        "import sys\n"
+        "import frictionsim2d.lattice.apply, frictionsim2d.lattice.matching\n"
+        "print(any(m == 'frictionsim2d.builders' or m.startswith('frictionsim2d.builders.')"
+        " for m in sys.modules))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"

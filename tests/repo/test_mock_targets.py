@@ -66,7 +66,7 @@ KNOWN_VIOLATIONS = {
         # patched with `wraps=` (the real function still executes; only
         # call-count is observed) as a regression guard that the native
         # pipeline -- not Atomsk -- is what ran.
-        "frictionsim2d.builders.components._duplicate_lammps_data",
+        "frictionsim2d.builders.components.replicate_data_file",
         "frictionsim2d.builders.components._orthogonalize_lammps_data",
         "frictionsim2d.builders.components._write_cif_as_lammps_atomic",
         "frictionsim2d.builders.components.apply_sheet_edge_types",

@@ -35,7 +35,7 @@ from ..utils.interlayer import (check_interlayer_box_from_data, interlayer_style
 from ..utils.z_vacuum import VIRTUAL_ATOM_ROOM, ZBox
 from ..construction.hetero_stack import (
     build_hetero_flake_component, box_region_cmd, run_lammps)
-from ..utils.lammps_data import detect_atom_style
+from ...interfaces.lammps_monolayer import detect_atom_style
 from ...interfaces.ase import read_lammps_data
 
 logger = logging.getLogger(__name__)

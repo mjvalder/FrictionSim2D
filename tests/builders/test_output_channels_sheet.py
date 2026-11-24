@@ -21,10 +21,10 @@ not-yet-converted templates is gone along with the last template that needed
 it; see `_render_flake` below for the real-`obs_ctx` replacement.
 """
 import pytest
-from jinja2 import Environment, meta
+from jinja2 import meta
 
 from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
-from frictionsim2d.interfaces.jinja import PackageLoader
+from frictionsim2d.interfaces.jinja import template_environment
 
 
 def _fix_emitted(rendered: str, name: str) -> bool:
@@ -46,8 +46,7 @@ def _render_sheetonsheet(**channels) -> str:
     rather than a bare `channels` dict.
     """
     template = 'sheetonsheet/slide.lmp'
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    env = template_environment()
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
     # The MLIP keys are iterated/tested by name, so the 0 stub cannot stand in.
@@ -81,8 +80,7 @@ def _render_hetero(**channels) -> str:
     same as the real builder.
     """
     template = 'hetero/slide.lmp'
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    env = template_environment()
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
     # The MLIP keys are iterated/tested by name, so the 0 stub cannot stand in.
@@ -122,8 +120,7 @@ def _render_flake(**channels) -> str:
     is already empty -- there is nothing for a filter to drop.
     """
     template = 'flake/slide.lmp'
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    env = template_environment()
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
     # The MLIP keys are iterated/tested by name, so the 0 stub cannot stand in.

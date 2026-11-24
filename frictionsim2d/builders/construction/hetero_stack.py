@@ -27,7 +27,7 @@ strained with an affine ``set_cell(scale_atoms=True)`` while still co-oriented,
 then written. They then share one in-plane cell and one canonicalizing rotation,
 so their on-disk boxes coincide and the relative A/B registry survives.
 Per-atom metadata (charges, masses, atom_style) round-trips through
-:func:`~frictionsim2d.builders.utils.lammps_data.write_supercell`.
+:func:`~frictionsim2d.interfaces.lammps_monolayer.write_supercell`.
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ from .components import (
     apply_sheet_edge_types, build_monolayer, calculate_layer_shifts, carve_flake)
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 from ...interfaces.ase import read_lammps_data
-from ..utils.lammps_data import (
+from ...interfaces.lammps_monolayer import (
     detect_atom_style, monolayer_to_atoms, read_monolayer, write_supercell,
 )
 

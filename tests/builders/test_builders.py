@@ -250,8 +250,8 @@ def test_build_monolayer_avoids_atomsk_convert_orthogonalize_duplicate(tmp_path:
                wraps=components._write_cif_as_lammps_atomic) as mock_convert, \
          patch("frictionsim2d.builders.components._orthogonalize_lammps_data",
                wraps=components._orthogonalize_lammps_data) as mock_ortho, \
-         patch("frictionsim2d.builders.components._duplicate_lammps_data",
-               wraps=components._duplicate_lammps_data) as mock_dup:
+         patch("frictionsim2d.builders.components.replicate_data_file",
+               wraps=components.replicate_data_file) as mock_dup:
         out_path, out_dims, _pot_counts, total_types, _supercell_dims = \
             components.build_monolayer(config)
 
@@ -272,8 +272,8 @@ def test_create_orthogonal_slab_avoids_atomsk_cli(tmp_path: Path) -> None:
 
     with patch("frictionsim2d.builders.components._write_cif_as_lammps_atomic",
                wraps=components._write_cif_as_lammps_atomic) as mock_convert, \
-         patch("frictionsim2d.builders.components._duplicate_lammps_data",
-               wraps=components._duplicate_lammps_data) as mock_dup, \
+         patch("frictionsim2d.builders.components.replicate_data_file",
+               wraps=components.replicate_data_file) as mock_dup, \
          patch("frictionsim2d.builders.components._orthogonalize_lammps_data",
                wraps=components._orthogonalize_lammps_data) as mock_ortho:
         _, out_dims, duplication = components.create_orthogonal_slab(
@@ -282,7 +282,7 @@ def test_create_orthogonal_slab_avoids_atomsk_cli(tmp_path: Path) -> None:
             # 12.0 rounds to the same single (2x2 predup) Si cell in x/y
             # (round(12.0 / 5.4437 / 2.0) == 1) and target_z=None skips z
             # replication -- so duplication == [1, 1, 1] and
-            # _duplicate_lammps_data is called only for the initial 2x2
+            # replicate_data_file is called only for the initial 2x2
             # predup step (the "dup==1,1,1" copy branch skips a second call).
             target_x=12.0,
             target_y=12.0,
@@ -584,7 +584,7 @@ def test_tmp_path_format_and_uniqueness() -> None:
 def test_replicate_or_copy_replicates_only_above_one(tmp_path: Path) -> None:
     src = tmp_path / "src.lmp"
     src.write_text("data")
-    with patch("frictionsim2d.builders.components._duplicate_lammps_data") as dup:
+    with patch("frictionsim2d.builders.components.replicate_data_file") as dup:
         components._replicate_or_copy(src, tmp_path / "same.lmp", 1, 1, 1)
         dup.assert_not_called()
         assert (tmp_path / "same.lmp").read_text() == "data"

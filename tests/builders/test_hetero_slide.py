@@ -227,11 +227,10 @@ def _render_hetero_slide_for_test(context):
     Same shape as `tests/builders/test_template_contract.py`'s own
     `_render_hetero_slide`, which has always built its obs_ctx this way.
     """
-    from jinja2 import Environment
 
     from frictionsim2d.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
     from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
-    from frictionsim2d.interfaces.jinja import PackageLoader
+    from frictionsim2d.interfaces.jinja import template_environment
 
     if "obs_ctx" not in context:
         interlayer = {"E_int_interlayer", "n_contact_il"}
@@ -249,8 +248,7 @@ def _render_hetero_slide_for_test(context):
             interface_layers=(n_layers // 2, n_layers // 2 + 1),
             extra_filter=lambda ob: ob.name not in interlayer,
         )}
-    env = Environment(loader=PackageLoader("frictionsim2d.templates"),
-                      trim_blocks=True, lstrip_blocks=True)
+    env = template_environment()
     return env.get_template("hetero/slide.lmp").render(context)
 
 

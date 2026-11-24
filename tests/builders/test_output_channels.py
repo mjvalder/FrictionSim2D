@@ -5,16 +5,14 @@ postprocessing ingests them today (read_data's filename patterns are anchored
 on the ``friction_`` prefix). They stay on by default so existing campaigns are
 unaffected; these tests pin the opt-out.
 """
-from jinja2 import Environment
 
 from frictionsim2d.core.config import OutputSettings
-from frictionsim2d.interfaces.jinja import PackageLoader
+from frictionsim2d.interfaces.jinja import template_environment
 
 
 def _render_fixes(**flags) -> str:
     """Render emit_output_fixes with the given tier flags."""
-    env = Environment(loader=PackageLoader('frictionsim2d.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
+    env = template_environment()
     macros = env.get_template('common/observables.lmp').module
     ctx = {
         'emit_window': True, 'emit_raw': True, 'emit_peratom': True,

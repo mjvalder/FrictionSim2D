@@ -18,7 +18,7 @@ from frictionsim2d.builders.construction.hetero_stack import (
     box_region_cmd,
     detect_inplane_repeat,
 )
-from frictionsim2d.builders.utils.lammps_data import monolayer_to_atoms, read_monolayer
+from frictionsim2d.interfaces.lammps_monolayer import monolayer_to_atoms, read_monolayer
 
 
 def _write_data(path: Path, atoms: Atoms, style: str = "atomic") -> Path:

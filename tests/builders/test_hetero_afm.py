@@ -1233,10 +1233,8 @@ def test_hetero_afm_flake_with_ilp_is_refused(tmp_path, monkeypatch):
 
 def test_molecule_id_band_entries_render():
     """common/molecule_ids.lmp's z-band form: types inside the band only."""
-    from jinja2 import Environment
-    from frictionsim2d.interfaces.jinja import PackageLoader
-    env = Environment(loader=PackageLoader("frictionsim2d.templates"),
-                      trim_blocks=True, lstrip_blocks=True)
+    from frictionsim2d.interfaces.jinja import template_environment
+    env = template_environment()
     out = env.from_string(
         "{% import 'common/molecule_ids.lmp' as m %}{{ m.emit_molecule_ids(g) }}"
     ).render(g=[{"name": "mol_layer_1", "types": "7 8 9", "zlo": 1.0, "zhi": 2.5}])
