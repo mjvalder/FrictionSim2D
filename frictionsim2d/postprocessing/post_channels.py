@@ -3,8 +3,7 @@
 The registry declares four channels with ``stream='post'`` and no
 ``lammps_compute``: ``gap_min``/``deflect_max`` (afm, indent) and
 ``gap_min_il``/``corrugation_max`` (sheetonsheet, hetero, flake). They are
-DERIVED, not emitted -- and until now nothing derived them, so ``role_key``,
-``units`` and the whole post stream had no consumer at all.
+derived from the final state, not emitted.
 
 The ingredient is the ``data/final_*.data`` file the slide templates write
 (``frictionsim2d/templates/afm/slide.lmp``, ``frictionsim2d/templates/sheetonsheet/slide.lmp``)
@@ -12,11 +11,8 @@ plus the run's ``provenance.json``: ``layer_type_map`` says which atom types
 are which sheet layer, ``unloaded_reference_z`` says where each layer sat
 before the load was applied.
 
-The atom reader lives here rather than in ``builders/utils/lammps_data.py``:
-that module holds style conversion and box dimensions, not per-atom
-coordinates, and it is a BUILDER utility -- ``frictionsim2d/postprocessing/`` reaching
-into ``frictionsim2d/builders/`` for one twenty-line parser is a worse edge than owning
-the parser.
+The atom reader lives here, not in the builder utility ``lammps_data``, so
+postprocessing does not import from builders.
 """
 from __future__ import annotations
 

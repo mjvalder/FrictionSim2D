@@ -126,12 +126,8 @@ def is_lj_branch(lfx, sx) -> bool:
 def correct_legacy_lf_schema1(df, filepath, family: str):
     """Rescale a pre-``schema=2`` sheet frame's lateral force to nN.
 
-    FROZEN legacy path, moved verbatim from
-    `DataReader._correct_legacy_lf_schema1`. The ONLY change is the
-    vocabulary: the old `if sim_type != 'sheet'` becomes
-    `if family not in SHEET_LIKE`, so a hetero or flake file is corrected
-    too -- under the old traversal vocabulary they arrived as `'sheet'` and
-    were, which is the behaviour being preserved, not extended.
+    Frozen legacy path: every sheet-stack family (hetero and flake included)
+    is corrected, as the old `'sheet'` traversal vocabulary did.
     """
     if df.attrs.get('lf_corrected'):
         # Re-entry guard: scaling twice gives 1.602^2.
@@ -181,11 +177,8 @@ def tier_of(filename: str) -> str:
             else 'window')
 
 
-#: Filename patterns (moved out of `DataReader`; the class below keeps
-#: aliases, same as `parse_lf_schema`/`LF_SCHEMA1_CORRECTION` above). This is
-#: the ONE parser for slide-results filenames (R29/U7): `frictionsim2d.aiida.ingest.
-#: load_points` imports these rather than re-implementing them, so grouping
-#: can never accept a filename the DataReader itself would refuse.
+#: Slide-results filename patterns; `frictionsim2d.aiida.ingest` groups load
+#: points with them (the reader itself uses `_RESULTS_RE`/`parse_results_name`).
 FILE_PATTERN_TIP = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
 # New AFM tip naming written by the current builder, e.g.
 # ``friction_f30_a0.0_s2_layer2.txt``. Groups match FILE_PATTERN_TIP:
@@ -343,15 +336,8 @@ def parse_results_name(name: str) -> Optional[LoadPoint]:
 class RunFrames:
     """One load point of one run: its tiers, flat.
 
-    Replaces the eight-deep `full_data_nested` dict, which had no dimension for
-    the potential or the temperature -- two runs differing only in those
-    collapsed onto one leaf and the last one walked won.
-
-    `locator` is a `RunLocator`, not the `RunTokens` the spec's sketch named:
-    tokens alone cannot find a file, and `post_channels_for` needs `data_dir`,
-    the tier reader needs `results_dir` and `read_provenance` needs
-    `provenance_file` -- all already on the locator `discover_runs` built.
-    Carrying tokens and re-deriving the paths would be a second path parser.
+    `locator` is the `RunLocator` `discover_runs` built: it carries `data_dir`,
+    `results_dir` and `provenance_file`, which `RunTokens` alone cannot.
 
     `status` is one of `run_status.STATUSES`; a point that never wrote a file
     (`no_output`/`not_reached`) or whose window failed to parse (`unreadable`)
@@ -388,6 +374,7 @@ class RunFrames:
 
     @property
     def family(self) -> str:
+        """The run's family token (`afm`, `sheetonsheet`, ...)."""
         return self.locator.tokens.family
 
     @property
