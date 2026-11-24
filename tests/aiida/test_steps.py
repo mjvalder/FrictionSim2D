@@ -252,7 +252,7 @@ def test_sheet_summary_matches_the_datareader(aiida_profile_clean, no_profile_sw
     points = _points(import_root(tmp_path, label='camp'))
     _assert_parity(points, tmp_path, 'sheetonsheet')
     (summary,) = _summaries(points[1.0])
-    assert summary['units']['slip_amplitude_mean'] == 'nN'
+    assert summary['units']['slide_distance'] == 'angstrom'
 
 
 def test_a_code_version_bump_adds_summaries_beside_the_old(aiida_profile_clean,

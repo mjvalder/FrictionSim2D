@@ -313,16 +313,6 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
         summary.extras.update(
             {k: _finite(v) for k, v in retract_features(retract).items()})
 
-    raw = frames_by_tier.get('raw')
-    if raw is not None and 'raw_lfx' in getattr(raw, 'columns', ()):
-        from ..postprocessing.slip_analysis import detect_slips  # pylint: disable=import-outside-toplevel
-        # Through `_finite`: slip_mean_interval_samples is nan for <2 events,
-        # size<3 or a flat trace, and AiiDA's clean_value raises on nan, which
-        # would abort Node.store() rather than record a missing number.
-        summary.extras.update(
-            {k: _finite(v)
-             for k, v in detect_slips(raw, channel='raw_lfx').summary().items()})
-
     if post:
         summary.extras.update({k: float(v) for k, v in post.items()})
 

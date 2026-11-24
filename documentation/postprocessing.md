@@ -197,7 +197,7 @@ One row per load point. Column order:
    time_series_hash, is_complete`. Here `is_complete` is `status == "complete"` **and**
    `summarise_run`'s own check (non-empty window, role columns resolved), so a point
    tagged `complete` can still read `False`.
-3. **Family-specific extras** — `slip_*` for any run with a raw tier, `pes_*` for a PES
+3. **Family-specific extras** — `pes_*` for a PES
    run, the retract features for `indent`, the slide distance and driven-COM drift for a
    slide family. The header therefore differs between families *by design*; the frame
    does not. Two campaigns of the same family concatenate directly, and two of different

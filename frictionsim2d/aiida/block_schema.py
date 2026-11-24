@@ -438,7 +438,8 @@ _SUMMARY_BASE: Dict[str, str] = {
 _SUMMARY_DRIVEN = {'slide_distance': _A, 'driven_com_z_mean': _A,
                    'driven_com_z_drift': _A}
 
-#: ``slip_analysis.SlipEvents.summary`` over ``raw_lfx`` (nN).
+#: Read-only: no longer written, kept so a stored summary that carries these extras
+#: still loads and validates.
 _SUMMARY_SLIP = {'slip_n_events': 'count', 'slip_amplitude_mean': _NN,
                  'slip_amplitude_std': _NN, 'slip_mean_interval_samples': 'samples'}
 

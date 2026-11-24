@@ -165,3 +165,12 @@ def test_every_registry_unit_normalises_into_the_schema_vocabulary():
     assert set(OBSERVABLE_UNIT_ALIASES.values()) <= schema | {'eV/angstrom'}
     known = schema | {'eV/angstrom', 'step'}
     assert {normalise_unit(u) for u in _registry_units().values()} <= known
+
+
+@pytest.mark.parametrize('family', ['afm', 'indent', 'sheetonsheet', 'hetero', 'flake'])
+def test_a_stored_summary_with_the_old_slip_extras_still_validates(family):
+    old = {'slip_n_events': 3.0, 'slip_amplitude_mean': 1.2, 'slip_amplitude_std': 0.1,
+           'slip_mean_interval_samples': None}
+    assert summary_units(family, old) == {
+        'slip_n_events': 'count', 'slip_amplitude_mean': 'nN', 'slip_amplitude_std': 'nN',
+        'slip_mean_interval_samples': 'samples'}
