@@ -12,7 +12,7 @@ import numpy as np
 from ..interfaces.lammps_monolayer import (
     detect_atom_style, monolayer_to_atoms, read_monolayer, write_supercell,
 )
-from .matching import max_strain, rotation_angle_between
+from .matching import max_strain
 
 _TILT_EPS = 1e-9
 
@@ -104,45 +104,6 @@ def strain_monolayer_to_cell(input_data_path: str,
         lmp.close()
 
     return max_strain(target, source_2x2)
-
-
-def rotate_layer_to_angle(mono_path: str,
-                          angle_deg: float,
-                          out_path: str) -> float:
-    """Rigidly reorient a monolayer's atoms and cell about z by ``angle_deg``.
-
-    A rigid rotation of a periodic cell is a lattice symmetry, so the on-disk
-    box matches the input's after re-canonicalisation; the twist is carried by
-    the supercell matrices of the layer (see
-    :func:`~frictionsim2d.builders.construction.hetero_stack.build_twisted_supercells`).
-    Types, masses, charges and ``atom_style`` are preserved.
-
-    Args:
-        mono_path: Path to the source monolayer LAMMPS data file.
-        angle_deg: In-plane rotation about z (degrees, CCW positive).
-        out_path: Path to write the reoriented monolayer data file.
-
-    Returns:
-        The applied in-plane rotation (deg), measured off the reoriented
-        lattice vectors before the LAMMPS-frame canonicalisation.
-    """
-    mono = read_monolayer(Path(mono_path))
-    atoms = monolayer_to_atoms(mono)
-
-    cell_in = np.array(atoms.cell)[:2, :2].copy()
-    atoms.rotate(angle_deg, "z", rotate_cell=True)
-    cell_rot = np.array(atoms.cell)[:2, :2].copy()
-
-    write_supercell(
-        atoms,
-        Path(out_path),
-        atom_style=str(mono["atom_style"]),
-        n_types=int(mono["n_types"]),
-        masses=mono["masses"],  # type: ignore[arg-type]
-    )
-
-    # Applied rotation carrying the input cell onto the reoriented cell.
-    return rotation_angle_between(cell_in, cell_rot)
 
 
 def rotate_flake_in_plane(flake_path: str | Path, angle_deg: float) -> None:

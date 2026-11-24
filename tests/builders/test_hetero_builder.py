@@ -619,6 +619,23 @@ def test_build_twisted_supercells_shares_one_orthorhombic_box(tmp_path):
     assert abs(ca[1, 0]) < 1e-3 * abs(ca[0, 0])                                # orthorhombic
 
 
+def test_emitted_layers_are_twisted_by_the_achieved_angle(tmp_path):
+    """The relative lattice orientation of the two emitted files equals twist_angle_achieved."""
+    from frictionsim2d.builders.construction.hetero_stack import build_twisted_supercells
+    from tests.helpers.lattice import _flake_lattice_orientation
+    mono_a = _build_small_monolayer("h-MoS2", MOS2_CIF, MOS2_POT)
+    mono_b = _build_small_monolayer("h-WS2", WS2_CIF, WS2_POT)
+    ms = build_twisted_supercells(mono_a, mono_b, workdir=tmp_path, twist_angle=21.8,
+                                  angle_tol=3.0, strain_tol=0.03, max_supercell=12)
+    assert not (tmp_path / "b_twist_rotated.lmp").exists()
+    rel = (_flake_lattice_orientation(read(str(ms.supercell_b), format="lammps-data"))
+           - _flake_lattice_orientation(read(str(ms.supercell_a), format="lammps-data"))) % 60.0
+    rel = min(rel, 60.0 - rel)                      # hexagonal lattice: fold into [0, 30]
+    expected = ms.twist_angle_achieved % 60.0
+    expected = min(expected, 60.0 - expected)
+    assert abs(rel - expected) < 0.3, (rel, expected)
+
+
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_same_material_twist_synthesises_two_sheets(tmp_path):
     raw = {  # a SINGLE [2D] material + twist -> same-material moiré

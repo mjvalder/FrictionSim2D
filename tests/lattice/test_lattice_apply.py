@@ -101,39 +101,6 @@ def test_strain_hex_cell_with_xy_tilt_preserves_z_and_returns_strain(tmp_path):
     assert np.allclose(got_cell[:2, :2], target, atol=1e-6)  # box now equals the tilted target
 
 
-# --- D3: rotate_layer_to_angle (ASE rotate-in-cell + canonicalise) ---
-
-def _build_mos2_monolayer():
-    from frictionsim2d.builders import components
-    from frictionsim2d.core.config import SheetConfig
-    cfg = SheetConfig(mat="h-MoS2", pot_type="sw",
-                      pot_path="examples/potentials/sw/MoS2_wen.sw",
-                      cif_path="examples/materials/h-MoS2.cif",
-                      x=4.0, y=4.0, layers=[1])
-    path, *_ = components.build_monolayer(cfg)
-    return path
-
-
-def test_rotate_layer_to_angle_produces_intended_rotation(tmp_path):
-    from frictionsim2d.lattice.apply import rotate_layer_to_angle
-    src = _build_mos2_monolayer()
-    out = tmp_path / "rot.data"
-    achieved = rotate_layer_to_angle(src, 12.0, str(out))
-    # The applied in-plane rotation is measured off the reoriented cell (a rigid
-    # rotation of a periodic cell canonicalises to a no-op on disk, so the
-    # *applied* angle is what is reported and later realised as a relative twist).
-    assert abs(achieved - 12.0) < 1e-3
-    a_in = read(str(src), format="lammps-data")
-    a_out = read(str(out), format="lammps-data")
-    assert len(a_in) == len(a_out)                       # atoms conserved
-    assert np.allclose(sorted(a_in.get_masses()), sorted(a_out.get_masses()))  # metadata intact
-    # The reoriented layer stays periodic with the SAME cell geometry (lengths +
-    # in-plane angle preserved -- a pure reorientation, no strain).
-    c_in = np.array(a_in.cell)[:2, :2]
-    c_out = np.array(a_out.cell)[:2, :2]
-    assert abs(np.linalg.det(c_in) - np.linalg.det(c_out)) < 1e-6
-
-
 # --- D3b: rotate_flake_in_plane (finite-flake atoms-only twist, cell fixed) ---
 
 def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):

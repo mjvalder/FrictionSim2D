@@ -385,10 +385,9 @@ class TwistMatch:
     """A commensurate twisted-moiré approximant emitted on an orthorhombic box.
 
     Produced by :func:`find_commensurate_twist`. The two integer supercell
-    matrices tile each layer's monolayer into the shared moiré cell; the layer B
-    monolayer is then physically rotated by ``achieved_angle_deg`` (via
-    :func:`~frictionsim2d.lattice.apply.rotate_layer_to_angle`) so the two tilings
-    coincide up to ``residual_strain``.
+    matrices tile each layer's monolayer into the shared moiré cell; layer B's
+    matrix selects the sublattice rotated by ``achieved_angle_deg``, so the two
+    tilings coincide up to ``residual_strain``.
 
     Commensurate moiré cells are generically rhombic (60°/120°), but downstream
     postprocessing/AiiDA/HPC/plotting all assume an **orthogonal** simulation

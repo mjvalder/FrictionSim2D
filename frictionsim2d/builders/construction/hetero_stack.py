@@ -41,7 +41,6 @@ import numpy as np
 
 from ...core.config import (
     FlakeConfig, GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig)
-from ...lattice.apply import rotate_layer_to_angle
 from ...lattice.matching import (
     MatchResult,
     max_strain,
@@ -628,10 +627,8 @@ def build_twisted_supercells(
     the single canonical orthorhombic ``moire_cell`` with an affine
     ``set_cell(scale_atoms=True)`` (which also closes the residual strain)
     realises the relative twist in the atomic positions while emitting one
-    shared orthogonal box. Layer B is first passed through
-    :func:`~frictionsim2d.lattice.apply.rotate_layer_to_angle` (the reorientation
-    primitive); it leaves the on-disk cell unchanged (it reorders the atoms), so
-    the twist is carried by the commensurate tiling, not by that write.
+    shared orthogonal box. The twist is carried entirely by the commensurate
+    tiling (``supercell_b``); layer B's monolayer is tiled as read.
 
     Args:
         mono_a_path: LAMMPS data file for layer A's monolayer.
@@ -678,32 +675,24 @@ def build_twisted_supercells(
     achieved = twist.achieved_angle_deg
     ortho = np.asarray(twist.moire_cell, dtype=float)   # canonical, xy tilt 0
 
-    # 2. Reorient layer B by the achieved angle (the reorientation primitive; a
-    #    rigid rotation leaves the on-disk cell and fractional coordinates
-    #    unchanged but reorders the atoms; the twist is carried by supercell_b
-    #    below, and the rotated file is the tiling input).
-    mono_b_rot_path = workdir / "b_twist_rotated.lmp"
-    rotate_layer_to_angle(str(mono_b_path), achieved, str(mono_b_rot_path))
-    mono_b_rot = read_monolayer(mono_b_rot_path)
-
-    # 3. Tile each monolayer into its moiré supercell with the integer matrices.
+    # 2. Tile each monolayer into its moiré supercell with the integer matrices.
     atoms = {
         "a": monolayer_to_atoms(mono_a),
-        "b": monolayer_to_atoms(mono_b_rot),
+        "b": monolayer_to_atoms(mono_b),
     }
     matrices = {"a": twist.supercell_a, "b": twist.supercell_b}
     sc_atoms = {
         lbl: make_supercell(atoms[lbl], _embed_3x3(matrices[lbl])) for lbl in ("a", "b")
     }
 
-    # 4. Map BOTH supercells onto the single canonical orthorhombic moiré box
+    # 3. Map BOTH supercells onto the single canonical orthorhombic moiré box
     #    (affine remap: closes residual strain AND, because the two tiled boxes
     #    are rotated by the achieved angle relative to each other, realises the
     #    relative twist in the atoms). Both end with the identical in-plane cell,
     #    so ASE canonicalizes them identically -> on-disk boxes coincide exactly.
     strains: Dict[str, float] = {}
     outputs: Dict[str, Path] = {}
-    for lbl, mono in (("a", mono_a), ("b", mono_b_rot)):
+    for lbl, mono in (("a", mono_a), ("b", mono_b)):
         at = sc_atoms[lbl]
         sc_cell = np.array(at.cell)[:2, :2]
         # Residual strain to close this layer onto the ortho box (rotation-
