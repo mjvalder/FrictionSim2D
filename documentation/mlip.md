@@ -172,9 +172,6 @@ Two further constraints on an MLIP cell:
   time — LAMMPS maps those types to the model's first N elements and returns a
   plausible, wrong energy (E7).
 
-See `docs/superpowers/specs/2026-09-03-mlip-multicomponent-fullcell-design.md`
-(v6), which closes v4 §6 and implements v5 §8.
-
 ### Drive method and constraint modes
 
 **Virtual-atom drive** (`drive_method = virtual_atom`, the project's preferred
@@ -228,7 +225,7 @@ spec §5. Delete the line from any old config; do not translate it.
 
 | Rule | Where it is enforced |
 |---|---|
-| `mlip_interlayer` present at all → `ValidationError` naming spec §5 | `SheetConfig.reject_removed_mlip_keys` |
+| `mlip_interlayer` present at all → `ValidationError` pointing at this page | `SheetConfig.reject_removed_mlip_keys` |
 | `dispersion` requires an MLIP `pot_type` | `SheetConfig.validate_mlip_capability_rules` |
 | MLIP `pot_type` requires an explicit `lat_c` | `SheetConfig.validate_mlip_capability_rules` |
 | Model extension must match the framework (`.pb`/`.pth` DeePMD; `.json` MACE, extracted by `symmetrix_extract_mace`) | `ComponentConfig.validate_mlip_model_extension` |
@@ -239,8 +236,13 @@ spec §5. Delete the line from any old config; do not translate it.
 | Every instance of one framework in a cell must name the **same** model file | `mlip.validate_mlip_cell` |
 | `constraint_mode` in {`atom_bonds`, `com_spring`} rejected with an MLIP sheet | `mlip.validate_mlip_cell` |
 
-Every message names the rule it enforces and points at the spec section, so a
-rejected config is self-diagnosing.
+Every message names the rule it enforces and points at the section of this
+page, so a rejected config is self-diagnosing.
+
+`dispersion` and `allow_unbound` are properties of the whole cell: in a hetero
+(`[2D-N]`) or flake (`[Flake-N]`) config set them identically in every sheet
+section. `SheetOnSheetSimulationConfig` / `AFMSimulationConfig` refuse a
+disagreement and name the sections.
 
 ### `lat_c` is the INTERLAYER distance
 
@@ -264,7 +266,7 @@ JSON is the in-plane lattice constant and does **not** go into a config's
 ```yaml
 potential:
   d3_functional: pbe    # DFT functional whose D3 parameters are used
-  d3_damping: bj        # canonical name, enum-validated: original | bj | zerom | bjm
+  d3_damping: bj        # enum-validated, emitted verbatim: original | bj | zerom | bjm
   d3_cutoff: 16.0       # Angstrom  (rthr)   -- D3 pair cutoff
   d3_cn_cutoff: 8.0     # Angstrom  (cn_thr) -- coordination-number cutoff
 ```
@@ -292,8 +294,7 @@ truncation inherited as a default, not a measured optimum. Two consequences:
   either shrink the cutoff or grow the footprint — but on a small screening
   cell, shrinking the cutoff is a physics decision, not a formality.
 
-`d3_damping` is a **canonical** name that `frictionsim2d/core/mlip.py::d3_style_token`
-turns into the token a given build accepts. See §5 for the verified argument
+`d3_damping` is emitted verbatim by `frictionsim2d/core/mlip.py::d3_style_token`. See §5 for the verified argument
 order.
 
 ### Output directories
@@ -518,28 +519,36 @@ pair_style deepmd <model>
 pair_coeff * * Mo Mo Mo S S S # sheet
 ```
 
-**Full-cell DeePMD with a virtual drive atom** (type 7). The `hybrid` wrapper
-appears because the drive atom needs its own `lj/cut`, but the deepmd map is
-still `* *` with one element per type — E3 forbids any type-range form — and the
-virtual type takes the framework's placeholder element:
+**Full-cell DeePMD with a virtual drive atom** (type 7). Still no `hybrid`
+wrapper and no `lj/cut`: the `* *` map already spans the virtual type (one
+element per type — E3 forbids any type-range form), which takes the
+framework's placeholder element, and `neigh_modify exclude` keeps it inert:
 
 ```
-pair_style hybrid deepmd <model> lj/cut 11.0
-pair_coeff * * deepmd Mo Mo Mo S S S Mo # sheet
+pair_style deepmd <model>
+pair_coeff * * Mo Mo Mo S S S Mo # sheet
 ```
 
 **Full-cell + D3 + a virtual drive atom** (shown for MACE, whose model path
 lives in `pair_coeff` rather than `pair_style`):
 
 ```
-pair_style hybrid/overlay symmetrix/mace dispersion/d3 bj pbe 16.0 8.0 lj/cut 11.0
-pair_coeff * * mace <model> Mo Mo Mo S S S Mo # sheet
+pair_style hybrid/overlay symmetrix/mace dispersion/d3 bj pbe 16.0 8.0
+pair_coeff * * symmetrix/mace <model> Mo Mo Mo S S S Mo # sheet
 pair_coeff * * dispersion/d3 Mo Mo Mo S S S Mo
-pair_coeff * 7 lj/cut 1e-100 1e-100
 neigh_modify exclude type 7 1
 neigh_modify exclude type 7 2
 ...
 neigh_modify exclude type 7 7
+```
+
+**A lone MACE sheet, no D3** (`dispersion = none` is a supported control: the
+bare MACE model binds). Non-hybrid, so the style token is dropped and the model
+path stays in the `pair_coeff` line:
+
+```
+pair_style symmetrix/mace
+pair_coeff * * <model> Mo Mo Mo S S S # sheet
 ```
 
 **No `NULL` appears in any emitted line, ever.** The per-layer and NULL-padded
@@ -591,7 +600,7 @@ dispersion/d3 <damping> <functional> <rthr> <cn_thr>
 
 `units metal` is required, both cutoffs are squared internally, and the accepted
 damping tokens are `original | zero | zerom | bj | bjm` (`original` and `zero`
-are synonyms). **This matches what `frictionsim2d/core/mlip.py::d3_style_token` emits** —
+are synonyms; the `d3_damping` setting accepts `original | bj | zerom | bjm`). **This matches what `frictionsim2d/core/mlip.py::d3_style_token` emits** —
 verified by reading `PairDispersionD3::settings` and by executing the exact
 emitted string (`pair_style dispersion/d3 bj pbe 16.0 8.0`, 24-atom bilayer,
 `E_pair = -8.7249526 eV`). No change is needed and no hedging is warranted for
@@ -601,7 +610,7 @@ The one remaining caveat is per-build, not per-argument. The MACE stack is
 LAMMPS `patch_10Sep2025`, where `dispersion/d3` is native mainline; the
 DeePMD+D3 stack is a *backport* into a 29 Aug 2024 tree, whose d3 term was
 verified bit-identical to upstream 2025. Both accept the order above today.
-`d3_damping` remains a canonical name the registry translates, and the emitted
+`d3_damping` is emitted verbatim, and the emitted
 line is golden-tested per build, so a future divergence surfaces as a failure. `d3_style_token` is the
 **single** place the order is written; if a build ever needs a different
 spelling, change it there and only there.
@@ -625,7 +634,9 @@ component (§1).
 | AFM sliding | `run afm` | **Yes** (v6) | tip + sheet + substrate, all on ONE model. An SW tip beside an MLIP sheet is still refused (E2/E3). Needs `[sub] amorph = c, match = true`. Force-controlled (nN). See `examples/mlip/afm_mlip_full.ini`. |
 | Tip PES scan | `run pes-tip` | **Yes** (v6) | Same AFM stack, inherited for free. |
 | Indentation | `run indent` | **Yes** (v6) | Same component structure as AFM. |
-| Freestanding / flake | `run afm` variants | **Yes** (v6) | The flake is simply one more component in the same instance's type map. |
+| Hetero AFM | `run afm` with `[2D-1]`/`[2D-2]` | **Yes** | The hetero cell plus tip and substrate, all on ONE model; needs `[sub] amorph = c, match = true`. |
+| Freestanding tip scan | `run afm` variants | **Yes** (v6) | The freestanding sheet is one more component in the same instance's type map. |
+| Flake slide | `run sheetonsheet` with `[Flake]` | **Yes** (v6) | The flake is simply one more component in the same instance's type map. |
 
 The rejections are raised by `validate_mlip_cell` (`frictionsim2d/core/mlip.py`), called
 from `frictionsim2d/builders/sheetonsheet/base.py`, `sheetonsheet/flake_slide.py`,
@@ -1085,8 +1096,6 @@ Documented, not implemented:
   sheet beside a classical tip/substrate) — but it is real surgery: the model receives all atoms,
   so masking types means rebuilding the coord/type arrays and mapping forces
   back. Documented, not attempted (spec §7).
-- **Building the MACE stack on this machine**, and with it MACE full-cell and
-  MACE + D3 (spec §7).
 - MACE partial-cell via the ML-IAP unified interface (`pair_style mliap
   unified`, undocumented hybrid/NULL behaviour) or a maintained fork of
   `pair_mace`. `build_lammps_mace.sh` already enables ML-IAP + ML-SNAP + PYTHON
