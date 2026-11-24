@@ -1,22 +1,8 @@
-"""Sweep expansion, material preflight, and build counting.
-
-Split out of frictionsim2d/core/run.py. Turns one raw config into the list of configs a
-sweep expands to, validates the material/template surface before any build
-runs, and predicts how many builds and run scripts a config will produce.
-"""
+"""Sweep expansion, material preflight, and build counting."""
 # pylint: disable=cyclic-import
-# The lazy import of frictionsim2d.run.simulate below (in _builder_cls_for_count) closes
-# a real import cycle with frictionsim2d.run.simulate: this module needs its two
-# builder-class selectors to predict which builder a config would route to,
-# and simulate.py imports this module (expand_config_sweeps,
-# _validate_runtime_sweep_ordering, outer_loop_conflict) to expand a config
-# before routing it. The cycle is broken at runtime (the import is deferred
-# into the function body), so it never actually hangs; pylint's cyclic-import
-# check only sees the module graph, not the deferral, and reports it on
-# whichever module pylint analyses first. A line-level pragma on the lazy
-# import cannot silence it (pylint attributes the message to the
-# first-analysed module, not the import site), so the disable lives here at
-# module scope instead.
+# The builder selectors live in simulate.py, which imports this module;
+# _builder_cls_for_count imports them lazily, and pylint reports the cycle
+# on whichever module it analyses first, so the disable sits here.
 from dataclasses import dataclass, field as dataclass_field
 import itertools
 import logging
@@ -38,8 +24,10 @@ from .naming import (
     AFM_LIKE_MODELS,
     LAMMPS_LOOP_PARAMS,
     SHEET_LIKE_MODELS,
+    _flake_section,
     _numbered_keys,
     loopability,
+    output_dir_for,
     primary_sheet,
 )
 
@@ -47,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 def _as_float_list(value: Any) -> List[float]:
+    """``value`` as a list of floats (None -> empty, scalar -> one element)."""
     if value is None:
         return []
     if isinstance(value, list):
@@ -55,10 +44,12 @@ def _as_float_list(value: Any) -> List[float]:
 
 
 def _is_ascending(values: List[float]) -> bool:
+    """True when ``values`` never decreases."""
     return all(values[i] <= values[i + 1] for i in range(len(values) - 1))
 
 
 def _is_subsequence(subseq: List[float], seq: List[float], tol: float = 1.0e-12) -> bool:
+    """True when ``subseq`` appears in ``seq`` in order (within ``tol``)."""
     if not subseq:
         return True
     idx = 0
@@ -100,31 +91,15 @@ def read_material_entries(path: Union[str, Path],
                           ) -> List[Tuple[str, ...]]:
     """Read a material list file as ordered entries -- singles or pairs.
 
-    Same line reading as the old single-material ``read_material_list``:
-    blank lines, surrounding whitespace, ``#`` comments (whole-line or
-    trailing) all handled. A comma-separated line is still multiple single
-    materials (``'MoS2, WS2'`` -> ``('MoS2',), ('WS2',)``) -- that behaviour
-    is pinned by ``tests/run/test_material_list_robustness.py`` and predates
-    heterostructure pairs, so it is untouched here. A ``'+'`` line is new: it
-    names one ORDERED pair for a two-sheet sweep (``'h-MoS2 + h-WS2'`` ->
-    ``('h-MoS2', 'h-WS2')``) -- order is never normalised, since sheet 1 and
-    sheet 2 are different positions in the stack, not a set.
-
-    A line cannot mix the two separators (a comma implies multiple single
-    entries; a pair is exactly one entry, so a comma on a ``'+'`` line is
-    ambiguous) and a ``'+'`` line naming more than two materials has no
-    ``[2D-N]`` section to hold the extra members. Both raise ``ValueError``
-    naming the offending line.
+    Blank lines, whitespace and ``#`` comments (whole-line or trailing) are
+    ignored. A comma-separated line is several single materials
+    (``'MoS2, WS2'`` -> ``('MoS2',), ('WS2',)``); a ``'+'`` line is one ordered
+    pair (``'h-MoS2 + h-WS2'`` -> ``('h-MoS2', 'h-WS2')``), whose order is never
+    normalised. Duplicates dedupe in order; a duplicated pair also warns.
 
     Args:
         path: Path to the list file.
         base_dir: Directory to resolve a relative ``path`` against.
-
-    Returns:
-        Entries in file order. Duplicates dedupe order-preservingly, matching
-        the old single-material behaviour; a duplicated pair also logs a
-        warning, since two pair lines colliding is more likely to be a
-        copy-paste mistake than a duplicated single name is.
 
     Raises:
         FileNotFoundError: If the file does not exist.
@@ -185,12 +160,6 @@ def read_material_list(path: Union[str, Path],
                        base_dir: Optional[Union[str, Path]] = None) -> List[str]:
     """Read a material list file of single materials only.
 
-    A thin wrapper over :func:`read_material_entries` that keeps the original
-    ``List[str]`` contract (and its comma-means-multiple-singles behaviour)
-    unchanged for callers that do not know about ordered pairs. A ``'+'``
-    pair line is not a single material, so it raises rather than silently
-    collapsing to one of its members.
-
     Raises:
         FileNotFoundError: If the file does not exist.
         OSError: If the file cannot be read.
@@ -221,6 +190,7 @@ class MaterialPreflight:
     skipped: List[Tuple[Any, str]] = dataclass_field(default_factory=list)
 
     def summary(self) -> str:
+        """One line: how many resolved and, if any, which were skipped and why."""
         if not self.skipped:
             return f"{len(self.usable)} material(s) resolved"
         detail = "; ".join(f"{mat} ({reason})" for mat, reason in self.skipped)
@@ -343,17 +313,10 @@ def _pair_template_fault(section: Optional[Dict[str, Any]],
                          pinned: str) -> Optional[str]:
     """Why this sheet cannot take its member of an ordered pair, or None.
 
-    Two faults, reported separately because they mislead differently. A
-    section carrying no marker is pinned to its literal value for every member
-    of the sweep. A section carrying the *other* sheet's marker does vary --
-    it just varies with the wrong member, so both sheets build one material
-    while the directory is still named after the pair that was asked for.
-
-    The wrong marker is a fault even when the right one is also present,
-    because the markers are per *key*, not per section. The realistic mistake
-    is a ``[2D-2]`` pasted from ``[2D-1]`` whose ``mat`` was updated to
-    ``{mat2}`` while its ``cif_path``/``pot_path`` still read ``{mat1}``: the
-    section holds ``{mat2}``, yet both sheets load the first material's files.
+    Two faults: no marker at all (the sheet is pinned to its literal value for
+    every member), or a marker naming the other sheet's material (both sheets
+    would build one material). Markers are checked per key, so a stray wrong
+    marker is a fault even when the right one is also present.
     """
     found = _section_markers(section)
     wrong = [marker for marker in found if marker not in accepted]
@@ -376,18 +339,11 @@ def resolve_lj_override_file(section: Dict[str, Any],
                              base_dir: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """Merge a shared LJ-override table into an ``[lj_override]`` section.
 
-    ``file`` names a plain-text table of ``pair  epsilon  sigma`` rows (comma
-    or whitespace separated, ``#`` comments and blank lines allowed) meant to
-    cover a whole material sweep: its keys are element pairs, not materials,
-    so pairs whose elements are absent from a given run are simply unused.
-    Inline keys already in ``section`` win over the file, so a single run can
-    still override one pair without editing the shared table. The file is
-    resolved and the ``'file'`` key dropped either way -- the rest of the
-    pipeline (``PotentialManager.set_lj_overrides``) never sees it.
-
-    Missing or unreadable files are skipped silently, same as
-    ``materials_list``: a half-typed path is worked on more often than it is
-    finished, and this is advisory convenience, not a required input.
+    ``file`` names a table of ``pair  epsilon  sigma`` rows (comma or whitespace
+    separated, ``#`` comments allowed) covering a whole material sweep; pairs
+    whose elements are absent from a run are unused. Inline keys win over the
+    file. The ``'file'`` key is dropped either way, and a missing or unreadable
+    file is skipped with a warning.
     """
     result = dict(section)
     file_path = result.pop('file', None)
@@ -426,12 +382,7 @@ def resolve_lj_override_file(section: Dict[str, Any],
 
 def _resolve_lj_override_files(configs: List[Dict[str, Any]],
                                base_dir: Optional[Union[str, Path]]) -> List[Dict[str, Any]]:
-    """Apply `resolve_lj_override_file` to every config's [lj_override].
-
-    A shared list, not a per-config check for `'file' in section`: this has
-    to run on every config `expand_config_sweeps` returns, including the
-    no-sweep early return below, which is the common case.
-    """
+    """Apply `resolve_lj_override_file` to every config's [lj_override]."""
     for config in configs:
         section = config.get('lj_override')
         if isinstance(section, dict):
@@ -441,29 +392,27 @@ def _resolve_lj_override_files(configs: List[Dict[str, Any]],
 
 def expand_config_sweeps(base_config: Dict[str, Any],
                          base_dir: Optional[Union[str, Path]] = None,
-                         notes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+                         notes: Optional[List[str]] = None,
+                         model: Optional[str] = None) -> List[Dict[str, Any]]:
     """Expand config with material lists and parameter sweeps.
 
     Args:
         base_config: Raw config mapping.
         base_dir: Directory to resolve relative material-list and component
-            paths against. Optional; without it, resolution is relative to the
-            current working directory as before.
+            paths against (default: the current working directory).
         notes: Optional list to collect informational messages about expansion
             decisions (e.g., when a materials_list file is ignored).
+        model: Simulation model. When given, a sweep whose members would build
+            into one output directory is rejected.
 
     Raises:
         ValueError: If a material list was given but none of its materials can
-            be resolved -- silently generating nothing is worse than failing.
+            be resolved, or (with ``model``) if swept values collide on one
+            output directory. The message names the colliding parameter.
     """
     sweep_params = {}
 
-    # The primary sheet section: plain '2D', else the first numbered '2D-N'
-    # (mirrors primary_sheet(), but this runs on the raw dict before any
-    # model exists, and needs the *key* to write expanded values back under,
-    # not just the section). A numbered-only config used to be silently
-    # skipped here -- only a plain '2D' was ever checked -- so its
-    # materials_list never expanded into a sweep at all.
+    # The primary sheet key: plain '2D', else the first numbered '2D-N'.
     if '2D' in base_config:
         primary_key: Optional[str] = '2D'
     else:
@@ -514,8 +463,17 @@ def expand_config_sweeps(base_config: Dict[str, Any],
             )
         ]
 
+        single_fault = _pair_template_fault(
+            section_config, PRIMARY_PAIR_MARKERS, '{mat}',
+            'every run would build the same material')
+
         for entry in entries:
             is_pair = len(entry) == 2
+            if not is_pair and not has_second_sheet and single_fault is not None:
+                raise ValueError(
+                    f"[{primary_key}] materials_list '{mat_list_path}' lists "
+                    f"'{entry[0]}', but the [{primary_key}] section {single_fault}."
+                )
             if is_pair and not has_second_sheet:
                 raise ValueError(
                     f"Material list '{mat_list_path}' line "
@@ -582,19 +540,6 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                 continue
             kind = loopability('general', key)
             if kind != 'sweep':
-                # naming.LOOPABILITY is the sole authority on which keys may
-                # be swept -- it (via output_dir_for) is what keeps expanded
-                # configs from colliding on the same directory. A key it
-                # marks 'scalar', or does not mention at all (loopability()
-                # defaults to 'scalar' either way -- the two are
-                # indistinguishable here by design), must not silently fall
-                # through to a sweep: every value would build to the
-                # identical output directory and overwrite the last build,
-                # the same bug class as R-3/finding 17
-                # (docs/superpowers/reviews/run.md). Classify the key in
-                # LOOPABILITY (as 'sweep' if it should change the output
-                # directory, or 'in_file' if a LAMMPS script already loops
-                # over it) before sweeping it.
                 raise ValueError(
                     f"[general] {key} is a list, but naming.LOOPABILITY does "
                     f"not classify it as sweepable (got {kind!r}). Add "
@@ -609,40 +554,35 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     f"[general] interlayer_style lists a style twice: {val}")
             sweep_params[('general', key)] = val
 
-    # Potential sweep (spec §13): a pot_path LIST on the primary sheet sweeps
-    # into separate runs, one directory per member (pot_ token appended by
-    # output_dir_for — the LOOPABILITY rule). Homogeneous sheets only: two
-    # distinct 2D materials or a flake make a single potential axis ambiguous.
+    # A pot_path list on the primary sheet sweeps into one run per member
+    # (homogeneous sheets only).
     if primary_key is not None:
         pot_val = base_config.get(primary_key, {}).get('pot_path')
         if isinstance(pot_val, list):
             hetero_markers = [k for k in base_config
                               if k.startswith('2D-') and k != primary_key]
-            has_flake = any(k == 'flake' or k.startswith('flake-')
+            has_flake = any(k.lower() == 'flake' or k.lower().startswith('flake-')
                             for k in base_config)
             if hetero_markers or has_flake:
                 raise ValueError(
                     "potential sweep is not supported on heterostructure or "
-                    "flake configs (spec §13.2): a pot_path list needs a "
+                    "flake configs: a pot_path list needs a "
                     "single homogeneous 2D material"
                 )
             from ..potentials.utils import resolve_pot_type  # pylint: disable=import-outside-toplevel
-            # deferred: potentials.utils imports the UFF table; only sweeps that use it pay for it
+            # deferred: potentials.utils imports the UFF table
             resolved = [resolve_pot_type(entry) for entry in pot_val]
             sweep_params[(primary_key, '_pot_expand')] = resolved
 
     if not sweep_params:
         return _resolve_lj_override_files([base_config], base_dir)
 
-    keys, values = zip(*sweep_params.items())
-    permutations = [dict(zip(keys, v)) for v in itertools.product(*values)]
-
-    expanded_configs = []
-    for perm in permutations:
+    def build(perm: Dict[Tuple[str, str], Any]) -> Dict[str, Any]:
+        perm = dict(perm)
         new_conf = deepcopy(base_config)
 
         mat_entry = (perm.pop((primary_key, '_material_expand'), None)
-                    if primary_key is not None else None)
+                     if primary_key is not None else None)
         if mat_entry and primary_key in new_conf:
             mat1 = mat_entry[0]
             mat2 = mat_entry[1] if len(mat_entry) > 1 else None
@@ -659,21 +599,71 @@ def expand_config_sweeps(base_config: Dict[str, Any],
 
         for (section, key), val in perm.items():
             new_conf[section][key] = val
+        return new_conf
 
-        expanded_configs.append(new_conf)
+    if model is not None:
+        _reject_colliding_sweeps(sweep_params, build, model)
 
+    keys, values = zip(*sweep_params.items())
+    expanded_configs = [build(dict(zip(keys, v))) for v in itertools.product(*values)]
     return _resolve_lj_override_files(expanded_configs, base_dir)
+
+
+#: Why each swept key can collide, appended to the error naming it.
+_COLLISION_HINTS = {
+    'temp': "the directory token is the whole kelvin (K<int(temp)>), so "
+            "temperatures must differ by at least 1 K",
+    '_material_expand': "the directory is named after the sheet's mat, so mat "
+                        "(not only a path) must carry a '{mat}' marker",
+    '_pot_expand': "the directory token is pot_<type>_<file stem>, so each entry "
+                   "needs a distinct type or file name",
+    'interlayer_style': "the directory token is il-<style> with '_' dropped",
+}
+
+
+def _describe_sweep_value(value: Any) -> str:
+    if isinstance(value, tuple):
+        return ' + '.join(value)
+    return str(getattr(value, 'path', value))
+
+
+def _reject_colliding_sweeps(sweep_params: Dict[Tuple[str, str], List[Any]],
+                             build, model: str) -> None:
+    """Raise when two values of one swept parameter map to the same output directory.
+
+    Each swept parameter is varied alone, the others held at their first value;
+    a directory name is the join of independent per-parameter tokens, so a
+    collision between combinations needs a collision on one axis.
+    """
+    first = {axis: values[0] for axis, values in sweep_params.items()}
+    for axis, values in sweep_params.items():
+        if len(values) < 2:
+            continue
+        section, key = axis
+        seen: Dict[Path, Any] = {}
+        for value in values:
+            try:
+                out = output_dir_for(build({**first, axis: value}), model)
+            except KeyError:
+                return  # a partial config the naming rules cannot read
+            if out in seen:
+                label = 'materials_list' if key == '_material_expand' else (
+                    'pot_path' if key == '_pot_expand' else key)
+                raise ValueError(
+                    f"[{section}] {label}: {_describe_sweep_value(seen[out])} and "
+                    f"{_describe_sweep_value(value)} would both build into "
+                    f"'{out}' and overwrite each other; "
+                    f"{_COLLISION_HINTS.get(key, 'give each value a distinct directory name')}."
+                )
+            seen[out] = value
 
 
 @dataclass
 class ExpansionSummary:
     """How much work a config will produce.
 
-    Three different numbers, all of which have been mistaken for each other:
-
-        configs  separate configs, each with its own output directory
-        builds   configs x layer counts -- the L{n} trees actually written
-        jobs     run scripts, i.e. HPC array entries
+    ``configs`` are separate output directories, ``builds`` is configs x layer
+    counts (the ``L{n}`` trees written), ``jobs`` is run scripts (HPC array entries).
     """
 
     configs: int
@@ -682,10 +672,12 @@ class ExpansionSummary:
     notes: List[str] = dataclass_field(default_factory=list)
 
     def render(self) -> str:
+        """``'N config(s) -> M build(s) -> K job(s)'``."""
         return f"{self.configs} config(s) -> {self.builds} build(s) -> {self.jobs} job(s)"
 
 
 def _as_list(value: Any) -> List[Any]:
+    """``value`` as a list (None -> empty, scalar -> one element)."""
     if value is None:
         return []
     return list(value) if isinstance(value, (list, tuple)) else [value]
@@ -719,20 +711,17 @@ def _routing_view(config: Dict[str, Any], model: str) -> SimpleNamespace:
     configs that are perfectly countable -- so they are handed this view
     instead.
 
-    Only the *fields* are mirrored here (the ``2D-N`` folding of
-    ``_fold_sheet_sections``, and the ``flake``/``Flake`` section alias, which
-    differs between the two families). The routing *rules* stay in the two
-    selector functions, so there is exactly one copy of them.
+    Only the fields are mirrored (the ``2D-N`` folding and the ``flake``/``Flake``
+    alias); the routing rules stay in the two selector functions.
     """
     general = config.get('general', {}) or {}
     numbered = [k for k in config if isinstance(k, str) and k.startswith('2D-')]
     sheets = numbered or (['2D'] if '2D' in config else [])
-    flake_key = 'flake' if model in AFM_LIKE_MODELS else 'Flake'
     twist = general.get('twist_angle')
     return SimpleNamespace(
         sub=config.get('sub'),
         sheets=sheets,
-        flake=config.get(flake_key),
+        flake=_flake_section(config, model),
         general=SimpleNamespace(
             # A blank value is an unset key, not a twist of nothing: configparser
             # gives None, but a half-typed GUI field or a JSON config can hand
@@ -744,17 +733,10 @@ def _routing_view(config: Dict[str, Any], model: str) -> SimpleNamespace:
 
 
 def _builder_cls_for_count(config: Dict[str, Any], model: str) -> Optional[type]:
-    """The builder class a raw config would route to, or None if undecidable.
-
-    None means "route it like the model's default builder": an unroutable
-    config (e.g. a substrate-free AFM, which raises
-    :class:`FreestandingConfigError`) has no build to predict anyway, so the
-    caller keeps its previous, model-only answer rather than inventing one.
+    """The builder class a raw config would route to, or None if unroutable
+    (e.g. a substrate-free AFM), in which case callers keep a model-only answer.
     """
-    # Lazy: simulate.py imports this module for expand_config_sweeps, so a
-    # module-level import here would close the loop. The selectors are the
-    # runner's, not the counter's -- the counter merely asks them what the
-    # runner would have chosen.
+    # deferred: simulate.py imports this module
     from .simulate import (  # pylint: disable=import-outside-toplevel
         _select_afm_builder_cls,
         _select_sheet_builder_cls,
@@ -774,28 +756,11 @@ def _builder_cls_for_count(config: Dict[str, Any], model: str) -> Optional[type]
 def outer_loop_conflict(config: Dict[str, Any], model: str) -> Optional[str]:
     """Why this config's ``outer_loop`` cannot be honoured, or None.
 
-    One conflict today: ``outer_loop='scan_angle'`` with ``scan_angle_force``.
-    The selector restricts which force/pressure value(s) the ``scan_angle``
-    list applies to (the templates' angle_loop gate), but a per-angle script
-    applies its one fixed angle to every force in it -- so the selector would
-    be silently dropped, changing what a gated scan means.
-
-    Routing-aware, and it has to be: the conflict exists only where the split
-    exists. The indent, both PES scans and the hetero/flake slides never split
-    by angle (``SPLIT_OUTER_LOOPS``), and the hetero/flake slide templates
-    genuinely honour the in-script gate -- so for them a stray ``outer_loop``
-    beside a real gate is inert, and rejecting it would fail a config that
-    builds and runs correctly. Only a config whose selected builder really
-    splits is a conflict, and only with more than one angle (a single angle
-    falls through to the in-script loop, which honours the gate).
-
-    An unroutable config reports nothing: it has no build to protect, and the
-    builder-side raises remain the backstop.
-
-    Called before anything is built -- by :func:`run_simulations` (which
-    raises) and by the GUI's validation panel (which lists it) -- because the
-    builders only raise from ``write_inputs``, by which point the geometry is
-    built and a partially written tree is on disk.
+    The one conflict is ``outer_loop='scan_angle'`` with ``scan_angle_force``,
+    and only for a builder that splits by angle (``SPLIT_OUTER_LOOPS``): each
+    per-angle script applies its angle to every force, dropping the selector.
+    An unroutable config reports nothing. Called before anything is built, by
+    :func:`run_simulations` (which raises) and the GUI validation panel.
     """
     general = config.get('general', {}) or {}
     if general.get('outer_loop') != 'scan_angle':
@@ -822,21 +787,10 @@ def outer_loop_conflict(config: Dict[str, Any], model: str) -> Optional[str]:
 def missing_pressure(config: Dict[str, Any], model: str) -> Optional[str]:
     """Why this config's loaded slide cannot run without a pressure, or None.
 
-    Every sheet-on-sheet slide (plain, hetero, flake) loads the moving body
-    with ``[general] pressure`` (GPa). Left unset, they used to run at 0 GPa
-    (or, for the plain single-script slide, crash in LAMMPS on
-    ``pressure equal None``) and a 0 GPa run reports a meaningless COF
-    (friction over no load), so a config routed to a builder declaring
-    ``REQUIRES_PRESSURE`` must set one.
-
-    Routing-aware, like :func:`outer_loop_conflict` and for the same reason:
-    the same ``[general]`` is valid for ``run pes-sheet`` (a static scan, no
-    load) and needs a pressure only through ``run sheetonsheet``,
-    so a pydantic model -- which does not know the model name -- cannot decide
-    it. An unroutable config reports nothing (no build to protect).
-
-    Called before anything is built, by :func:`run_simulations` (which raises)
-    and by the GUI's validation panel (which lists it on ``pressure``).
+    Applies to builders declaring ``REQUIRES_PRESSURE`` (every sheet-on-sheet
+    slide): without a load the run reports a meaningless COF. Routing-aware
+    because ``run pes-sheet`` needs no pressure. An unroutable config reports
+    nothing. Called by :func:`run_simulations` (which raises) and the GUI.
     """
     general = config.get('general', {}) or {}
     pressure = general.get('pressure')
@@ -858,12 +812,9 @@ def missing_pressure(config: Dict[str, Any], model: str) -> Optional[str]:
 def _run_scripts_per_build(config: Dict[str, Any], model: str) -> Tuple[int, List[str]]:
     """How many run scripts one built directory will contain.
 
-    Asks the builder the config actually routes to: ``outer_loop`` promotes one
-    in-file loop to separate ``slide_*.in`` files only when that builder
-    declares the parameter in ``SPLIT_OUTER_LOOPS`` (the indent's hold+retract
-    and the hetero/flake/PES builders write a single run script whatever
-    ``outer_loop`` says), and a PES sheet scan adds a refinement script. Pinned
-    against real generated trees by ``test_expansion_count``.
+    ``outer_loop`` splits one in-file loop into separate ``slide_*.in`` files
+    only for builders that declare it in ``SPLIT_OUTER_LOOPS``; a PES sheet scan
+    adds a refinement script.
     """
     general = config.get('general', {}) or {}
     outer_loop = general.get('outer_loop')
@@ -908,7 +859,7 @@ def count_expansion(base_config: Dict[str, Any],
         An :class:`ExpansionSummary`.
     """
     notes: List[str] = []
-    expanded = expand_config_sweeps(base_config, base_dir, notes)
+    expanded = expand_config_sweeps(base_config, base_dir, notes, model)
     configs = len(expanded)
 
     builds = 0

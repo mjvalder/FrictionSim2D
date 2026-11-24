@@ -128,3 +128,11 @@ def test_mlip_extensions_are_not_in_the_inference_map():
     from frictionsim2d.core.mlip import MLIP_MODEL_EXTENSIONS  # pylint: disable=import-outside-toplevel
     from frictionsim2d.potentials.utils import EXTENSION_MAP  # pylint: disable=import-outside-toplevel
     assert MLIP_MODEL_EXTENSIONS and not set(MLIP_MODEL_EXTENSIONS) & set(EXTENSION_MAP)
+
+
+@pytest.mark.parametrize('flake_key', ['flake', 'Flake', 'flake-1', 'Flake-2'])
+def test_flake_sweep_rejected_for_either_casing(flake_key):
+    base = _minimal_afm_dict(['sw/a.sw', 'sw/b.sw'])
+    base[flake_key] = {'mat': 'h-MoS2'}
+    with pytest.raises(ValueError, match='flake'):
+        expand_config_sweeps(base, base_dir=ROOT)

@@ -215,7 +215,7 @@ def run_simulations(
     if ensure_hpc_settings is not None and generate_hpc:
         ensure_hpc_settings(defaults.hpc)
 
-    configs_to_run = expand_config_sweeps(base_dict)
+    configs_to_run = expand_config_sweeps(base_dict, model=model)
 
     for run_dict in configs_to_run:
         _validate_runtime_sweep_ordering(run_dict.get('general', {}))
