@@ -1,5 +1,0 @@
-# LAMMPS Minimization Template
-
-min_style       {{ min_style }}
-{{ minimization_command }}
-timestep        {{ timestep }}

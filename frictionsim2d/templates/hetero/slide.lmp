@@ -127,13 +127,7 @@ variable        comx_top equal c_COM_top[1]
 variable        comy_top equal c_COM_top[2]
 variable        comz_top equal c_COM_top[3]
 
-{# COM_ctop/COM_cbot/COM_bot were exact aliases of layer-resolved COM
-   (com{x,y,z}_L{il_top}, L{il_bot}, L1) and are deleted as duplicates
-   (spec 4.2), same as Task 14's sheetonsheet conversion. The registry's
-   layer_channels(n_layers), plus etotal/pe/ke, now supply everything that
-   block used to compute by hand. Unlike sheetonsheet at the time of its own
-   conversion, hetero never had a separate hand-written per-layer COM_L{i}
-   for-loop to fold in here -- this is a pure alias removal. #}
+{# Channels come from the observables registry: layer_channels(n_layers) plus etotal/pe/ke. #}
 {{ obs.emit_observables(obs_ctx) }}
 
 # Apply Uniform Pressure

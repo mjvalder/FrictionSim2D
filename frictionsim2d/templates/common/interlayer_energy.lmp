@@ -1,4 +1,4 @@
-{# Interlayer energy under the reaction-force branch (spec 2026-11-11 §7).
+{# Interlayer energy under the reaction-force branch.
 
    `compute pair <substyle>` isolates the interlayer term only where it has a
    pair sub-style of its own (ilp/tmd, ilp/graphene/hbn,

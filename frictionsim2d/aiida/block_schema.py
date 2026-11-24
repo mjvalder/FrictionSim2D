@@ -352,11 +352,11 @@ UNITS: Dict[str, str] = {
     # settings.simulation
     'settings.simulation.timestep': 'ps',  # afm/slide.lmp:44 timestep (metal: ps)
     'settings.simulation.thermo': 'steps',  # afm/slide.lmp:45 thermo N
-    'settings.simulation.neighbor_list': _A,  # common/init.lmp:10 neighbor skin (A)
+    'settings.simulation.neighbor_list': _A,  # afm/system_init.lmp neighbor skin (A)
     'settings.simulation.slide_run_steps': 'steps',  # afm/base.py:859 run_steps
     'settings.simulation.sheet_hold_steps': 'steps',  # sheetonsheet/base.py:827 hold_steps
     'settings.simulation.halt_temperature_factor': '1',  # simulation_base.py:55 x target T
-    'settings.simulation.ramp_max_iterations': '1',  # afm/system_init.lmp:161 loop count
+    'settings.simulation.ramp_max_iterations': '1',  # afm/system_init.lmp loop count
     # settings.quench
     'settings.quench.quench_slab_dims': _A,  # overrides.py:623; components.py:1727 vs target_x (A)
     # K/s; construction/components.py computes nsteps = dT / (rate * dt * 1e-12),
@@ -397,7 +397,7 @@ UNITS: Dict[str, str] = {
     'derived.tip_group_sizes': '1',  # atom counts
     'derived.interlayer.g_meV': 'meV',  # potentials/manager.py:1135 g_meV values
     # points
-    'point.load.force': 'nN',  # overrides.py:343; afm/system_init.lmp:140 / ev_a_to_nn
+    'point.load.force': 'nN',  # overrides.py:343; afm/system_init.lmp / ev_a_to_nn
     'point.load.pressure': 'GPa',  # overrides.py:353; sheetonsheet/slide.lmp:131 / ev_a3_to_gpa
     'point.angle': 'deg',  # overrides.py:372; afm/slide.lmp:129 cos(a*PI/180)
     'point.speed': 'm/s',  # overrides.py:367; afm/slide.lmp:131 speed/100 -> A/ps
