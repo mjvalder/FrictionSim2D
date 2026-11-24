@@ -166,3 +166,32 @@ def test_mlip_interface_spacing_is_the_larger_lat_c(tmp_path, monkeypatch):
     settings = SimpleNamespace(geometry=SimpleNamespace(lat_c_default=6.0))
     stack = assemble_hetero_stack(matched, sheets, spine, "grouped", settings, tmp_path / "work")
     assert stack.interface_spacing == 6.6
+
+
+def test_mlip_assembly_writes_nocoeff(tmp_path, monkeypatch):
+    """``pair zero`` serialises ``Pair Coeffs`` the run decks cannot read back."""
+    from frictionsim2d.builders.construction import hetero_stack
+    matched, sheets, spine = _stack_inputs(tmp_path)
+    for sheet in sheets:
+        sheet.pot_type = "deepmd"
+        sheet.lat_c = 6.1
+    spine.pm.has_mlip = lambda: True
+    spine.pm.write_surrogate_file = lambda path: path
+    monkeypatch.setattr(
+        hetero_stack, "run_lammps",
+        lambda workdir, script: (Path(workdir) / "hetero.data").write_text("x"))
+    settings = SimpleNamespace(geometry=SimpleNamespace(lat_c_default=6.0))
+    assemble_hetero_stack(matched, sheets, spine, "grouped", settings, tmp_path / "work")
+    script = (tmp_path / "work" / "stack_hetero.lmp").read_text(encoding="utf-8")
+    write = next(l for l in script.splitlines() if l.startswith("write_data"))
+    assert write.endswith(" nocoeff")
+
+
+def test_classical_assembly_template_keeps_the_plain_write_data():
+    from frictionsim2d.interfaces.jinja import render_template
+    ctx = {"atom_style": "atomic", "box_region": "r", "total_types": 2, "layers": [],
+           "masses_block": "", "settings_path": "s", "output_path": "hetero.data"}
+    write = lambda c: next(l for l in render_template("hetero/stack_hetero.lmp", c).splitlines()
+                           if l.startswith("write_data"))
+    assert "nocoeff" not in write({**ctx, "nocoeff": False})
+    assert write({**ctx, "nocoeff": True}).endswith(" nocoeff")

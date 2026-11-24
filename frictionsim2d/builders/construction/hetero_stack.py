@@ -1169,7 +1169,10 @@ def assemble_hetero_stack(
     # write_data), so for an MLIP cell the zero surrogate stands in for the real
     # settings — otherwise generating inputs would need an MLIP-enabled LAMMPS
     # The REAL settings path is still what the run scripts include.
-    if hetero_potentials.pm.has_mlip():
+    # ``pair zero`` serialises a ``Pair Coeffs`` block that the run decks cannot
+    # read back before their pair_style, so an MLIP cell writes ``nocoeff``.
+    mlip_cell = hetero_potentials.pm.has_mlip()
+    if mlip_cell:
         include_path = hetero_potentials.pm.write_surrogate_file(
             workdir / "stack_hetero.in.settings")
     else:
@@ -1197,6 +1200,7 @@ def assemble_hetero_stack(
         "masses_block": masses_block,
         "settings_path": str(include_path),
         "output_path": str(output_path),
+        "nocoeff": mlip_cell,
     }
     script_path = workdir / "stack_hetero.lmp"
     script_path.write_text(render_template("hetero/stack_hetero.lmp", context), encoding="utf-8")

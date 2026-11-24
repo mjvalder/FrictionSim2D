@@ -38,4 +38,4 @@ displace_atoms  {{ layer.group }} move {{ "%.6f"|format(layer.shift_x) }} {{ "%.
 include         {{ settings_path }}
 
 run             0
-write_data      {{ output_path }}
+write_data      {{ output_path }}{% if nocoeff %} nocoeff{% endif %}

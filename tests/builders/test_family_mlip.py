@@ -95,6 +95,18 @@ def _build(builder_cls, config, tmp_path):
     return '\n'.join(p.read_text(encoding='utf-8') for p in written)
 
 
+def _assert_no_pair_coeffs(tmp_path, pattern):
+    """Every data file matching ``pattern`` is written without a coeff block.
+
+    ``pair zero`` (the MLIP assembly surrogate) serialises ``Pair Coeffs``,
+    which the run decks cannot read before their pair_style.
+    """
+    files = sorted((tmp_path / 'root').rglob(pattern))
+    assert files, f'no {pattern} was written'
+    for path in files:
+        assert 'Pair Coeffs' not in path.read_text(encoding='utf-8'), path
+
+
 # ---------------------------------------------------------------------------
 # Single-component sheet families: the supported topology
 # ---------------------------------------------------------------------------
@@ -249,6 +261,7 @@ def test_hetero_sheetonsheet_deepmd_builds_as_one_full_cell(tmp_path):
     assert 'NULL' not in text
     assert 'lj/cut' not in text
     assert 'deepmd 1' not in text
+    _assert_no_pair_coeffs(tmp_path, 'hetero.data')
 
 
 @needs_lmp
@@ -298,6 +311,7 @@ def test_flake_slide_deepmd_builds_as_one_full_cell(tmp_path):
     # placeholder element.
     assert coeffs[0] == 'pair_coeff * * deepmd Mo Mo S S Mo Mo S S Mo # sheet, flake'
     assert 'pair_style hybrid/overlay deepmd' in text
+    _assert_no_pair_coeffs(tmp_path, 'flake_slide.data')
     assert 'dispersion/d3' in text
     assert 'NULL' not in text
     assert 'lj/cut' not in text

@@ -752,9 +752,13 @@ class FlakeSlideSimulation(SimulationBase):
         # `run 0` computes nothing the result depends on. For an MLIP cell the
         # real settings would demand an MLIP-enabled LAMMPS just to *generate*
         # inputs, so include the zero surrogate instead (spec §3.3).
+        mlip_nocoeff = ""
         if pm.has_mlip():
             settings_path = pm.write_surrogate_file(
                 self.output_dir / "assemble_flake_slide.in.settings")
+            # pair zero would serialise a `Pair Coeffs` block that
+            # slide.lmp cannot read before its pair_style.
+            mlip_nocoeff = " nocoeff"
 
         script = f"""clear
 units           metal
@@ -771,7 +775,7 @@ read_data       {flake_path} add append shift {dx:.6f} {dy:.6f} {dz:.6f} group g
 {masses_block}
 include         {settings_path}
 {mol_setup}run             0
-write_data      {combined_path}{mol_nofix}
+write_data      {combined_path}{mlip_nocoeff}{mol_nofix}
 """
         script_path = self.output_dir / "assemble_flake_slide.lmp"
         script_path.write_text(script, encoding="utf-8")
