@@ -23,12 +23,12 @@ from frictionsim2d.postprocessing.plot_tables import load_table  # noqa: E402
 from tests.analysis.test_store import no_profile_switch, probe, store  # noqa: E402,F401
 
 
-def test_table_source_resolves_an_analysis(store, probe, tmp_path):  # noqa: F811
+def test_table_source_resolves_an_analysis(store, probe):  # noqa: F811
     table = pd.DataFrame({'material': ['A', 'B'], 'eligible': [True, False],
                           'value': [0.1 + 0.2, 1.0 / 3.0]})
     store_result(probe, 'paper', {}, table, dropped=[])
 
-    got = load_table(TableSource(analysis='probe', dataset='paper'), tmp_path,
+    got = load_table(TableSource(analysis='probe', dataset='paper'),
                      required=['material', 'value'])
     pd.testing.assert_frame_equal(got, table)
 
@@ -37,14 +37,14 @@ def test_table_source_resolves_an_analysis(store, probe, tmp_path):  # noqa: F81
         TableSource(analysis='probe', dataset='paper').model_dump())
     assert list(eligible.index) == ['A']
     with pytest.raises(PlotDataError, match='analyse run probe paper'):
-        load_table(TableSource(analysis='probe', dataset='paper', version='9'), tmp_path)
+        load_table(TableSource(analysis='probe', dataset='paper', version='9'))
 
 
 def test_missing_analysis_names_the_command(store, tmp_path):  # noqa: F811
     with pytest.raises(PlotDataError,
                        match='no stored cof_ranking over paper; run: '
                              'FrictionSim2D analyse run cof_ranking paper'):
-        load_table(TableSource(analysis='cof_ranking', dataset='paper'), tmp_path)
+        load_table(TableSource(analysis='cof_ranking', dataset='paper'))
 
 
 def test_analysis_data_source_feeds_summary_rows(store, tmp_path):  # noqa: F811
@@ -71,23 +71,20 @@ def _probe_table(value):
     return pd.DataFrame({'material': ['A'], 'eligible': [True], 'value': [value]})
 
 
-def test_table_source_selects_by_params(store, probe, tmp_path):  # noqa: F811
+def test_table_source_selects_by_params(store, probe):  # noqa: F811
     store_result(probe, 'paper', {}, _probe_table(1.0), dropped=[])
     store_result(probe, 'paper', {'scale': 2.0}, _probe_table(2.0), dropped=[])   # newest
 
-    default = load_table(TableSource(analysis='probe', dataset='paper'), tmp_path)
-    scaled = load_table({'analysis': 'probe', 'dataset': 'paper', 'params': {'scale': 2}},
-                        tmp_path)
+    default = load_table(TableSource(analysis='probe', dataset='paper'))
+    scaled = load_table({'analysis': 'probe', 'dataset': 'paper', 'params': {'scale': 2}})
     assert list(default['value']) == [1.0]
     assert list(scaled['value']) == [2.0]
-    with pytest.raises(ValueError, match='params'):
-        TableSource(file='x.csv', params={'scale': 2})
 
 
 def test_table_source_refuses_when_only_other_params_are_stored(store, probe, tmp_path):  # noqa: F811,E501
     store_result(probe, 'paper', {'scale': 2.0}, _probe_table(2.0), dropped=[])
     with pytest.raises(PlotDataError, match=r'scale.*2\.0'):
-        load_table(TableSource(analysis='probe', dataset='paper'), tmp_path)
+        load_table(TableSource(analysis='probe', dataset='paper'))
 
 
 def test_analysis_uri_carries_params(store, tmp_path):  # noqa: F811
