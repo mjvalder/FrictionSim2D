@@ -1348,6 +1348,46 @@ def analyse_export(name: str, dataset: str, out: Path, params: Tuple[str, ...],
     click.echo(f"wrote {out}")
 
 
+# =============================================================================
+# FETCH COMMANDS
+# =============================================================================
+
+@cli.group('fetch')
+def fetch_group():
+    """Download published add-ons: the assistant's fine-tuned models."""
+
+
+@fetch_group.command('model')
+@click.argument('tag', required=False)
+@click.option('--remove', is_flag=True,
+              help='Uninstall TAG from Ollama and delete its downloaded bundle.')
+def fetch_model_cmd(tag: Optional[str], remove: bool):
+    """Install the published assistant model TAG into Ollama as fs2d-assistant:TAG.
+
+    Without TAG, lists the published tags and whether each is installed.
+    Ollama is started first when it does not answer, as the Assistant pane
+    does; a server started here stops again when the command ends.
+
+    \b
+    Examples:
+        FrictionSim2D fetch model
+        FrictionSim2D fetch model qwen3.5-4b
+        FrictionSim2D fetch model qwen3.5-4b --remove
+    """
+    from .agent import _AGENT_AVAILABLE  # noqa: PLC0415
+    if not _AGENT_AVAILABLE:
+        click.echo("The assistant extra is not installed. Install with:", err=True)
+        click.echo('   pip install -e ".[agent]"', err=True)
+        raise click.Abort()
+    if remove and tag is None:
+        raise click.UsageError('--remove needs a TAG')
+    from .agent.fetch import FetchError, fetch_command  # noqa: PLC0415
+    try:
+        fetch_command(tag, remove, click.echo)
+    except FetchError as exc:
+        _raise_abort(f"❌ {exc}", exc)
+
+
 def main():
     try:
         cli()

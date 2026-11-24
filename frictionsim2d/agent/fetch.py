@@ -7,7 +7,8 @@
    bundle into ``MODELS_DIR/<tag>/``, `bundles.verify`, then ``ollama create``
    from its Modelfile.
 
-Ollama must be running. Blocking: run it off the GUI thread.
+Ollama must be running (`fetch_command`, the CLI's, starts it first). Blocking:
+run it off the GUI thread.
 """
 from __future__ import annotations
 
@@ -16,13 +17,13 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 from . import bundles
 from .bundles import BUNDLE_FILES, PUBLISHED, model_name, read_manifest, verify
 from .providers import model_installed, ollama_binary, ollama_models
-from .settings import AgentSettings
+from .settings import AgentSettings, load_agent_settings
 
 #: Modelfile lines the fine-tunes are served with, as ``ollama show --modelfile`` prints them.
 SERVING = ('RENDERER qwen3.5', 'PARSER qwen3.5', 'PARAMETER temperature 0',
@@ -220,3 +221,45 @@ def remove_model(tag: str, *, settings: Optional[AgentSettings] = None,
     if code != 0 and 'not found' not in text.lower():
         raise FetchError(text.strip() or f'ollama rm failed (exit {code})')
     shutil.rmtree((models_dir or bundles.models_dir()) / tag, ignore_errors=True)
+
+
+def _listing_line(tag: str, row: Mapping[str, Any]) -> str:
+    size = f"{row['size'] / 1e9:.1f} GB downloaded" if row['size'] else 'not downloaded'
+    return (f"{tag}  {row['repo']}  "
+            f"{'installed' if row['installed'] else 'not installed'}  {size}")
+
+
+def fetch_command(tag: Optional[str], remove: bool, echo: Callable[[str], None], *,
+                  settings: Optional[AgentSettings] = None, server=None,
+                  models_fn: Callable = ollama_models, fetch: Callable = fetch_model,
+                  remove_fn: Callable = remove_model, listing: Callable = available) -> None:
+    """``FrictionSim2D fetch model``: list the published tags (no ``tag``),
+    else install ``tag`` (with ``remove``: uninstall it).
+
+    Ollama is started first when it does not answer, as the Assistant pane
+    does (`OllamaServer.ensure_running`; a server started here stops when the
+    process exits). One that answers is left alone, so a server another
+    session started is never adopted, and stopped, by this command.
+
+    Raises:
+        FetchError: an unknown tag, Ollama could not be started, or the
+            install or removal failed.
+    """
+    settings = settings or load_agent_settings()
+    if tag is None:
+        for name, row in listing(settings).items():
+            echo(_listing_line(name, row))
+        return
+    _published(tag)
+    if models_fn(settings) is None:
+        if server is None:
+            from .ollama_server import OllamaServer  # pylint: disable=import-outside-toplevel
+            server = OllamaServer()
+        ok, message = server.ensure_running(settings)
+        if not ok:
+            raise FetchError(message)
+    if remove:
+        remove_fn(tag, settings=settings)
+        echo(f"Removed {model_name(tag)}")
+    else:
+        echo(f"Installed {fetch(tag, echo, settings=settings)}")

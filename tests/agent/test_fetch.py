@@ -304,3 +304,43 @@ def test_nothing_is_fetched_or_removed_while_ollama_is_down(tmp_path):
         remove_model(TAG, popen=ollama, binary='ollama', models_dir=tmp_path,
                      models_fn=lambda s: None)
     assert ollama.calls == [] and hub.calls == [] and (tmp_path / TAG).exists()
+
+
+class _Server:
+    def __init__(self, ok=True, message='Ollama started.'):
+        self.calls, self.result = 0, (ok, message)
+
+    def ensure_running(self, settings):
+        self.calls += 1
+        return self.result
+
+
+def test_fetch_command_lists_without_a_tag():
+    from frictionsim2d.agent.fetch import fetch_command
+    lines = []
+    fetch_command(None, False, lines.append, settings=AgentSettings(), listing=lambda s: {
+        TAG: {'repo': REPO, 'installed': True, 'size': 2_600_000_000}})
+    assert lines == [f'{TAG}  {REPO}  installed  2.6 GB downloaded']
+
+
+def test_fetch_command_starts_ollama_only_when_it_is_down():
+    from frictionsim2d.agent.fetch import fetch_command
+    lines, server, seen = [], _Server(), []
+    fetch = lambda tag, progress, settings: seen.append(tag) or NAME  # noqa: E731
+    fetch_command(TAG, False, lines.append, settings=AgentSettings(), server=server,
+                  models_fn=lambda s: None, fetch=fetch)
+    assert server.calls == 1 and seen == [TAG] and lines == [f'Installed {NAME}']
+    fetch_command(TAG, True, lines.append, settings=AgentSettings(), server=server,
+                  models_fn=_up, remove_fn=lambda tag, settings: seen.append(('rm', tag)))
+    assert server.calls == 1 and seen[-1] == ('rm', TAG) and lines[-1] == f'Removed {NAME}'
+
+
+def test_fetch_command_refuses_an_unknown_tag_or_a_server_that_will_not_start():
+    from frictionsim2d.agent.fetch import fetch_command
+    server = _Server(ok=False, message='Ollama is not installed')
+    with pytest.raises(FetchError, match='unknown model'):
+        fetch_command('nope', False, print, settings=AgentSettings(), server=server)
+    assert server.calls == 0
+    with pytest.raises(FetchError, match='Ollama is not installed'):
+        fetch_command(TAG, False, print, settings=AgentSettings(), server=server,
+                      models_fn=lambda s: None)

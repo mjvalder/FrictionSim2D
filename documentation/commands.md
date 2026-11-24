@@ -714,6 +714,22 @@ directory counts as a sidecar only when it is, or holds, a `.params` directory
 with its `schema-*.json`; anything else is looked up in the store, so a local
 folder that shares a set's name never shadows the set.
 
+## fetch
+
+### fetch model
+
+Install a published assistant fine-tune into Ollama as `fs2d-assistant:<tag>`
+(needs the `agent` extra):
+
+```bash
+FrictionSim2D fetch model                         # list the tags and what is installed
+FrictionSim2D fetch model qwen3.5-4b              # install
+FrictionSim2D fetch model qwen3.5-4b --remove     # uninstall, delete the bundle
+```
+
+A local Ollama that does not answer is started first, as the Assistant pane
+does, and stopped again when the command ends. See [assistant.md](assistant.md).
+
 ## db and api (removed)
 
 The `db` and `api` command groups, the central PostgreSQL database and the REST
