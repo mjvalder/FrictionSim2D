@@ -299,8 +299,8 @@ class TestMaterialsPathPicker:
         # Nothing has been scanned: the orphan-scan guard must still see
         # this as "nothing usable", not as a real (empty) selection.
         assert not editor.has_usable_names()
-        assert '2' in editor.summary_text()
-        assert 'choose' in editor.summary_text().lower()
+        assert '2' in editor.summary.text()
+        assert 'choose' in editor.summary.text().lower()
         assert set(editor.listed_names()) == {'h-MoS2', 't-MoS2'}
 
         # Once the user actually picks both directories, the curated names
@@ -357,7 +357,7 @@ class TestMaterialsPathPicker:
         form.commit()
         assert curated.read_text(encoding='utf-8') == original
         # And the widget says why, rather than looking like nothing happened.
-        assert 'pair' in editor.summary_text().lower()
+        assert 'pair' in editor.summary.text().lower()
 
         # One scan later is still too late to lose it: the cleared selection
         # is a deliberate empty one, so a rescan must not read it as "nobody
@@ -445,7 +445,7 @@ class TestMaterialsPathPicker:
         assert editor.selected_pairs() == []
         form.commit()
         assert curated.read_text(encoding='utf-8') == original
-        assert 'pair' in editor.summary_text().lower()
+        assert 'pair' in editor.summary.text().lower()
         form.deleteLater()
 
 
@@ -846,7 +846,7 @@ class TestMaterialListEditor:
 
     def test_the_summary_counts_usable_against_listed(self, editor):
         """3 of the 5 names across the two directories have both files."""
-        assert '3 of 5' in editor.summary_text()
+        assert '3 of 5' in editor.summary.text()
 
     def test_a_path_value_switches_it_into_sweeping(self, editor):
         editor.set_value('material_list.txt')
@@ -1085,7 +1085,7 @@ class TestPairTable:
     def test_the_summary_counts_pairs_while_pairing(self, editor):
         pair_mode(editor)
         editor.set_selected_pairs([('h-MoS2', 't-MoS2'), ('t-MoS2', 'b-AlSb')])
-        assert '2 pair' in editor.summary_text()
+        assert '2 pair' in editor.summary.text()
 
 
 class TestPairSweepCommit:

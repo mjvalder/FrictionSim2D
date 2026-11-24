@@ -171,7 +171,7 @@ class TestLangevinBands:
 
     def test_editing_one_cell_changes_only_that_number(self, editor):
         editor.set_value(DEFAULT_BANDS)
-        editor.set_cell('tip', 'fix', 0, 4.5)
+        editor._cells[('tip', 'fix', 0)].setText('4.5')  # pylint: disable=protected-access
         result = editor.value()
         assert result['tip']['fix'] == [4.5, 0.0]
         assert result['sub'] == DEFAULT_BANDS['sub']
@@ -179,7 +179,8 @@ class TestLangevinBands:
     def test_the_two_unit_systems_are_stated(self, editor):
         """Tip bands are absolute Angstrom from the top; substrate bands are a
         fraction of thickness from the bottom. Nothing said so before."""
-        text = editor.describe()
+        from PySide6.QtWidgets import QLabel
+        text = ' '.join(label.text() for label in editor.findChildren(QLabel))
         assert 'Å' in text
         assert 'fraction' in text.lower()
 
@@ -187,8 +188,8 @@ class TestLangevinBands:
         editor.set_value(DEFAULT_BANDS)
         for band in ('fix', 'thermo'):
             for index in (0, 1):
-                editor.set_cell('tip', band, index, '')
-                editor.set_cell('sub', band, index, '')
+                for component in ('tip', 'sub'):
+                    editor._cells[(component, band, index)].clear()  # pylint: disable=protected-access
         assert editor.value() is None
         assert editor.warning() is not None
 
@@ -450,12 +451,12 @@ class TestAssistantHighlight:
         ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT, required=False))
         ed.set_base_tooltip('help text')
         ed.set_highlight('None → 5.0')
-        assert ed.highlight() == 'None → 5.0'
+        assert ed._highlight == 'None → 5.0'
         assert ed.toolTip().startswith('Set by assistant: None → 5.0')
         assert 'help text' in ed.toolTip()
         assert HIGHLIGHT_COLOR in ed.edit.styleSheet()
         ed.set_highlight(None)
-        assert ed.highlight() is None and ed.toolTip() == 'help text'
+        assert ed._highlight is None and ed.toolTip() == 'help text'
         assert HIGHLIGHT_COLOR not in ed.edit.styleSheet()
 
     def test_error_and_highlight_combine(self, qt_app):
@@ -534,3 +535,50 @@ class TestPotTypeEditor:
         editor = self._editor()
         editor.set_value(None)
         assert editor.value() is None
+
+
+class TestPlainEditorsRoundTrip:
+    """The generic list, scalar-or-list and JSON dict editors return what they
+    were given. (A one-item scalar-or-list reads back as the scalar, as
+    test_gui_assistant_integration's `force == 7` pins.)"""
+
+    @pytest.mark.parametrize('value', [5, 2.5, [1, 2, 3]])
+    def test_scalar_or_list_keeps_its_arity(self, qt_app, value):
+        from frictionsim2d.gui.widgets.fields import build_editor
+
+        kind = FieldKind.INT if isinstance(value, int) or (
+            isinstance(value, list) and isinstance(value[0], int)) else FieldKind.FLOAT
+        editor = build_editor(_spec(key='force', kind=FieldKind.SCALAR_OR_LIST,
+                                    item_kind=kind))
+        editor.set_value(value)
+        assert editor.value() == value
+
+    def test_scalar_or_list_empty_is_none(self, qt_app):
+        from frictionsim2d.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(key='force', kind=FieldKind.SCALAR_OR_LIST))
+        editor.set_value(None)
+        assert editor.value() is None
+
+    @pytest.mark.parametrize('value', [{'a': 1, 'b': [1, 2]}, {'k': 'v'}])
+    def test_dict_round_trips(self, qt_app, value):
+        from frictionsim2d.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(key='d', kind=FieldKind.DICT))
+        editor.set_value(value)
+        assert editor.value() == value
+
+    def test_dict_with_dict_default_empties_to_empty_dict(self, qt_app):
+        from frictionsim2d.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(key='d', kind=FieldKind.DICT, default={}))
+        editor.set_value({})
+        assert editor.value() == {}
+
+    def test_list_round_trips(self, qt_app):
+        from frictionsim2d.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(key='layers', kind=FieldKind.LIST,
+                                    item_kind=FieldKind.INT))
+        editor.set_value([1, 2])
+        assert editor.value() == [1, 2]

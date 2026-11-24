@@ -295,13 +295,6 @@ class DatabasePane(QWidget):
             for button in self.download_buttons.values():
                 button.setEnabled(False)
 
-    def clear_results(self) -> None:
-        """Drop the rows, the detail and everything measured from them."""
-        self.model.set_records([])
-        self.detail.clear()
-        self.set_sizes = {}
-        self.last_detail_bytes = None
-
     def set_records(self, records: Sequence[Dict[str, Any]]) -> None:
         self.model.set_records(records)
         self.detail.clear()

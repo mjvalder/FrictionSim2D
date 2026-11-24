@@ -1176,9 +1176,9 @@ class TestCollapsibleSections:
 
     def test_collapse_all_and_expand_all(self, form):
         form.set_all_collapsed(True)
-        assert len(form.collapsed_sections()) == len(form.sections)
+        assert all(f.is_collapsed() for f in form.sections.values())
         form.set_all_collapsed(False)
-        assert form.collapsed_sections() == []
+        assert not any(f.is_collapsed() for f in form.sections.values())
 
     def test_fold_state_survives_a_rebuild(self, form):
         """Switching mode should not reopen everything just tidied away."""

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QToolButton,
     QToolTip,
@@ -393,8 +394,6 @@ class SectionForm(QGroupBox):
         -- because a prompt on every Remove is how a real warning becomes one
         nobody reads.
         """
-        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
-
         planner = getattr(self.document, 'pair_list_collapse_plan', None)
         plan = planner() if planner is not None else None
         if plan is None:
@@ -425,9 +424,7 @@ class SectionForm(QGroupBox):
         ) == QMessageBox.Yes
 
     def _warn(self, title: str, text: str) -> None:
-        """A modal warning. Local import, like every other dialog here."""
-        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
-
+        """A modal warning."""
         QMessageBox.warning(self, title, text)
 
     def _build_stacking_proxy(self) -> None:
@@ -823,7 +820,7 @@ class SectionForm(QGroupBox):
         if index >= 0:
             self.stacking_box.setCurrentIndex(index)
 
-    def _gate_is_open(self, key: str) -> bool:
+    def gate_is_open(self, key: str) -> bool:
         """Whether `key`'s row is currently visible, i.e. not hidden behind
         an unticked gate checkbox or a false `visible_if`. A field with
         neither (the common case) is always open."""
@@ -895,20 +892,9 @@ class SectionForm(QGroupBox):
     def _prefill_required(self) -> None:
         """Fill every starred-but-empty editor with its spec default.
 
-        A starred field left empty has no way to show the user what will
-        actually be built without pre-filling it: unlike the ghost
-        placeholder on an optional field, a required field's blank box
-        blocks Render entirely, so the default has to actually land in
-        the control (and, on commit, the document) rather than just be
-        suggested. Run after `_load_gates()` so `_gate_is_open` sees each
-        gate's real, just-loaded state.
-
-        Skips a gated-but-invisible field: prefilling into a hidden editor
-        would only have `commit()` pop it right back out (the gate is off),
-        while `missing_required` still reported it as blocking with no
-        visible row for the user to fix it on. Not reachable by any gated
-        field today -- none is also `required=True` -- but cheap to guard
-        against a future one that is.
+        A blank required box blocks Render, so the default must land in the
+        control, not only as a placeholder. Run after `_load_gates()`; a field
+        behind a closed gate is skipped (commit would pop it straight back out).
         """
         specs = self.section.field_map()
         for key, editor in self.editors.items():
@@ -917,7 +903,7 @@ class SectionForm(QGroupBox):
                 continue
             if not self.effective_required(key):
                 continue
-            if not self._gate_is_open(key):
+            if not self.gate_is_open(key):
                 continue
             if editor.value() in (None, '', []):
                 editor.set_value(spec.default)
@@ -1171,8 +1157,6 @@ class SectionForm(QGroupBox):
         class in here rather than routing a message through a new signal
         keeps the fix contained to the one place that needs it.
         """
-        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
-
         QMessageBox.warning(
             self, 'Material list not saved',
             'This configuration has not been saved yet and no workspace is '
@@ -1639,13 +1623,8 @@ class ConfigForm(QWidget):
     def document(self, document: ConfigDocument) -> None:
         """Point the form at another config.
 
-        A property purely so a *swap* is observable. `app._open_config`
-        assigns here and then calls `rebuild()`, which carries a ticked sweep
-        box across -- and that tick belongs to the config being closed. Left
-        standing on the config being opened it turned a `{mat}`-templated
-        config with no `materials_list` into a full sweep on the `_validate()`
-        of the very next line: a `.txt` written beside a file the user had
-        only just opened, with no action of theirs at all.
+        A property so a swap is observable: `rebuild()` carries a ticked sweep
+        box across only within one document, never into a newly opened one.
         """
         if document is not self._document:
             self._document_swapped = True
@@ -1653,13 +1632,8 @@ class ConfigForm(QWidget):
 
     def rebuild(self) -> None:
         """Recreate every section form, e.g. after the model changed."""
-        # Read before anything is torn down: a ticked sweep box that has not
-        # been configured yet writes nothing to the document, so the rebuilt
-        # form has nothing to restore it from. Adding a second material is
-        # precisely when that happens -- the button rebuilds the form -- and
-        # the sweep silently switching itself off there took the two
-        # directories picked next down with it, saving them as literal paths.
-        # Only within one document, though: see the `document` setter.
+        # Read before teardown: an unconfigured ticked sweep box writes nothing
+        # to the document, so the rebuilt form could not restore it otherwise.
         sweeping = self._material_sweep_state() and not self._document_swapped
         self._document_swapped = False
         self.setUpdatesEnabled(False)
@@ -1904,9 +1878,6 @@ class ConfigForm(QWidget):
         for form in self.sections.values():
             form.set_collapsed(collapsed)
 
-    def collapsed_sections(self) -> List[str]:
-        return sorted(k for k, f in self.sections.items() if f.is_collapsed())
-
     def commit(self) -> None:
         """Commit every section, `[2D]` first.
 
@@ -1998,7 +1969,7 @@ class ConfigForm(QWidget):
             for key, spec in field_map.items():
                 if key not in form.editors or not form.effective_required(key):
                     continue
-                if not form._gate_is_open(key):
+                if not form.gate_is_open(key):
                     continue
                 if self.document.get(section_key, key) not in (None, '', []):
                     continue

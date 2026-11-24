@@ -9,8 +9,8 @@ halves do not mean the same thing:
 * **substrate** bands are a *fraction of the substrate thickness* measured *up
   from the bottom* (``f_zlo = fix[0] * thickness``).
 
-See :func:`frictionsim2d.builders.construction.components.apply_langevin_regions`. Nothing stated this
-anywhere, so the table states it.
+See :func:`frictionsim2d.builders.construction.components.apply_langevin_regions`;
+the table states it.
 """
 
 from __future__ import annotations
@@ -87,20 +87,8 @@ class LangevinBoundaryEditor(FieldEditor):
         self._cells[(component, band, index)] = edit
         return edit
 
-    def describe(self) -> str:
-        """The units, as shown. Used by tests and by the tooltip."""
-        return '; '.join(f"{title}: {note}" for _, title, note, _ in _BLOCKS)
-
-    def set_cell(self, component: str, band: str, index: int, value: Any) -> None:
-        """Set one number, leaving every other cell alone."""
-        cell = self._cells.get((component, band, index))
-        if cell is not None:
-            cell.setText(str(value))
-
     def value(self) -> Any:
-        result: Dict[str, Any] = {
-            key: val for key, val in self._passthrough.items()
-        }
+        result: Dict[str, Any] = dict(self._passthrough)
         for component, _title, _note, _unit in _BLOCKS:
             bands: Dict[str, List[Any]] = {}
             for band, _label in _BANDS:

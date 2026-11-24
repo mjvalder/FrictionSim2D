@@ -35,6 +35,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -48,6 +49,7 @@ from PySide6.QtWidgets import (
 
 from ..style import CAPTION_SMALL, WARNING
 from ...core.utils.tokens import normalize_element_symbol
+from ...run.expand import resolve_lj_override_file
 
 __all__ = ['PairOverrideEditor']
 
@@ -321,8 +323,6 @@ class PairOverrideEditor(QWidget):
             self._loading = was_loading
 
     def _browse_file(self) -> None:
-        from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
-
         chosen, _ = QFileDialog.getOpenFileName(self, 'Select overrides file')
         if chosen:
             self.set_file(chosen)
@@ -341,7 +341,6 @@ class PairOverrideEditor(QWidget):
         path = self.file_edit.text().strip()
         if not path:
             return
-        from ...run.expand import resolve_lj_override_file  # noqa: PLC0415
 
         try:
             merged = resolve_lj_override_file(

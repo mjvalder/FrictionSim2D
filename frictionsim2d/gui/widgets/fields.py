@@ -11,20 +11,21 @@ reader reads back as ``None``) rather than an empty string.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QWidget,
 )
 
+from ...potentials.utils import KNOWN_TYPES
 from ..schema.introspect import FieldKind, FieldSpec
 
 __all__ = ['FieldEditor', 'build_editor', 'EDITOR_REGISTRY', 'register_editor',
@@ -104,10 +105,6 @@ class FieldEditor(QWidget):
         self._highlight = text
         self.setToolTip(self._tooltip())
         self._apply_style(bool(self._error))
-
-    def highlight(self) -> Optional[str]:
-        """The "before → after" text of an assistant change shown here, if any."""
-        return self._highlight
 
     def error(self) -> Optional[str]:
         """The validation message currently shown against this field, if any."""
@@ -395,8 +392,6 @@ class _PotTypeEditor(FieldEditor):
 
     def __init__(self, spec: FieldSpec, parent=None) -> None:
         super().__init__(spec, parent)
-        # pylint: disable=import-outside-toplevel
-        from ...potentials.utils import KNOWN_TYPES
         self._was_string = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -480,17 +475,9 @@ class _ListEditor(FieldEditor):
     def value(self) -> Any:
         text = self.edit.text().strip()
         if not text:
-            # An empty list must round-trip as an empty list. `set_value([])`
-            # writes '' here, and reading that back as None made
-            # `settings_form.commit()` change `output.optional_channels` from
-            # [] to None on a form nobody had touched -- which dirtied a fresh
-            # SettingsDocument, so pressing Generate wrote a settings.yaml the
-            # user never asked for, carrying `optional_channels: null`.
-            #
-            # Keyed on an EMPTY-LIST default, not on "is None allowed": a
-            # required list (`[2D] layers`) or one with a non-empty default
-            # (`quench_slab_dims`) is genuinely unset when the box is cleared,
-            # and returning [] there would invent a zero-layer sheet.
+            # [] round-trips as [] only when the default is [] (else an
+            # untouched form dirties the settings); a required or non-empty-
+            # default list is genuinely unset when cleared.
             return [] if self.spec.default == [] else None
         items = [part.strip() for part in text.strip('[]').split(',')
                  if part.strip()]
@@ -569,8 +556,6 @@ class _PathEditor(FieldEditor):
             'Browse for a directory' if directory else 'Browse for a file')
 
     def _browse(self) -> None:
-        from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
-
         if self._directory_mode:
             chosen = QFileDialog.getExistingDirectory(self, f'Select {self.spec.key}')
         else:

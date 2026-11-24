@@ -30,6 +30,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -239,7 +242,7 @@ class MaterialListEditor(FieldEditor):
         wanted = set(names)
         for index in range(self.listing.count()):
             item = self.listing.item(index)
-            if not (item.flags() & Qt.ItemIsUserCheckable):
+            if not item.flags() & Qt.ItemIsUserCheckable:
                 continue
             item.setCheckState(
                 Qt.Checked if item.data(Qt.UserRole) in wanted else Qt.Unchecked)
@@ -249,9 +252,6 @@ class MaterialListEditor(FieldEditor):
 
     def select_none(self) -> None:
         self.set_selected([])
-
-    def summary_text(self) -> str:
-        return self.summary.text()
 
     # ------------------------------------------------------------ pair mode
 
@@ -414,14 +414,7 @@ class MaterialListEditor(FieldEditor):
         self.changed.emit()
 
     def _open_generate_dialog(self) -> None:
-        """Ask for the two options, then build the pairs.
-
-        Local import, like `_browse_list`'s QFileDialog: the dialog is only
-        ever needed when the button is actually pressed.
-        """
-        from PySide6.QtWidgets import (  # noqa: PLC0415
-            QDialog, QDialogButtonBox,
-        )
+        """Ask for the two options, then build the pairs."""
 
         pool = self.pair_pool()
         dialog = QDialog(self.list_panel)
@@ -572,8 +565,6 @@ class MaterialListEditor(FieldEditor):
     # ------------------------------------------------------------- .txt path
 
     def _browse_list(self) -> None:
-        from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
-
         chosen, _ = QFileDialog.getOpenFileName(
             self.list_panel, 'Select a materials list',
             filter='Text files (*.txt);;All files (*)')

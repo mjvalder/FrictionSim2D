@@ -11,7 +11,6 @@ not, and module-level imports here would be one refactor away from reaching it.
 """
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -26,8 +25,6 @@ from ...controllers.plots import PlotController, PlotFigure, PlotRequest
 from ...datasets import DATASETS_DIRNAME, discover_datasets
 from ...workspace import Workspace
 from ..form import ConfigForm
-
-logger = logging.getLogger(__name__)
 
 __all__ = ['PlotsPane', 'discover_datasets', 'DATASETS_DIRNAME']
 

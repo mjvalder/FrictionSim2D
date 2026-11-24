@@ -323,7 +323,7 @@ def test_direct_apply_changes_document_and_highlights_exactly_those_fields(windo
     assert window.document.get('general', 'temp') == 250
     assert window.top_tabs.currentIndex() == 2  # stays where the user is
     marked = [(s, k) for s, f in window.form.sections.items()
-              for k, e in f.editors.items() if e.highlight()]
+              for k, e in f.editors.items() if e._highlight]
     assert sorted(marked) == [('general', 'force'), ('general', 'temp')]
     tip = _editor(window.form, 'general', 'temp').toolTip()
     assert tip.startswith(f'Set by assistant: {before_temp!r} → 250')
@@ -338,7 +338,7 @@ def test_direct_highlights_survive_rebuild_and_clear_on_user_edit(window):
     pane.receive_proposal(change)
     window.form.rebuild()
     editor = _editor(window.form, 'general', 'temp')
-    assert editor.highlight() is not None
+    assert editor._highlight is not None
     editor.edit.setText('260')
     editor.edit.textEdited.emit('260')
     assert set(window.form.highlights()) == {('general', 'force')}
@@ -680,7 +680,7 @@ def test_undo_of_a_second_change_restores_the_first_highlight(window):
     pane.receive_proposal(build_changeset(window.assistant_deps(), 'b',
                                           [Op('set', 'general', 'temp', 260)]))
     editor = _editor(window.form, 'general', 'temp')
-    assert editor.highlight() == f'{temp!r} → 260'
+    assert editor._highlight == f'{temp!r} → 260'
     window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
     assert window.form.highlights()[('general', 'temp')] == f'{temp!r} → 250'
 
