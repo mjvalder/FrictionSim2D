@@ -21,10 +21,10 @@ from ..core.observables import EV_A_TO_NN  # noqa: F401  # pylint: disable=unuse
 # ---------------------------------------------------------------------------
 
 #: eV/Å³ → GigaPascal (pressure conversion).  = EV_A_TO_NN × 100.
-EV_A3_TO_GPA: float = 160.2176565
+EV_A3_TO_GPA: float = 160.2176634
 
 #: Newton/metre → eV/Å² (spring constant conversion).  = EV_A_TO_NN × 10.
-NM_TO_EV_A2: float = 16.02176565
+NM_TO_EV_A2: float = 16.02176634
 
 
 # ---------------------------------------------------------------------------

@@ -635,7 +635,7 @@ def test_the_file_level_parser_survives():
 
     assert callable(rd.DataReader._read_dataframe)
     assert callable(rd.DataReader._registry_sim_type)
-    assert rd.LF_SCHEMA1_CORRECTION == 1.602176565
+    assert rd.LF_SCHEMA1_CORRECTION == 1.602176634
 
 
 # --- status column / complete_only ---------------------------------------

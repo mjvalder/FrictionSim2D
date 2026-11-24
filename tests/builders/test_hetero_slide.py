@@ -206,8 +206,8 @@ def _minimal_slide_context(layers):
         "driving_spring_ev": 3.121,
         "bond_spring_ev": 4.994,
         "lat_c": 3.16,
-        "ev_a_to_nn": 160.2176565,
-        "ev_a3_to_gpa": 160.2176565,
+        "ev_a_to_nn": 160.2176634,
+        "ev_a3_to_gpa": 160.2176634,
         "layers": layers,
     }
 

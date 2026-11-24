@@ -94,15 +94,15 @@ variable        comz_tip equal c_COM_tip[3]
 run             0
 
 # Re-apply the target normal load (nN -> eV/A per atom) and hold it.
-variable        Ftotal equal -v_find/1.602176565
+variable        Ftotal equal -v_find/1.602176634
 variable        n equal v_Ftotal/count(tip_fix)
 fix             forcetip tip_fix aveforce 0.0 0.0 $n
 
 # nf = felt normal force; aveforce stores the pre-constraint group force in
 # f_forcetip[1..3], so [3] is the normal channel and [1]/[2] the lateral reaction.
-variable        fz_tip equal f_forcetip[3]*1.602176565
-variable        fx_spr equal f_forcetip[1]*1.602176565
-variable        fy_spr equal f_forcetip[2]*1.602176565
+variable        fz_tip equal f_forcetip[3]*1.602176634
+variable        fx_spr equal f_forcetip[1]*1.602176634
+variable        fy_spr equal f_forcetip[2]*1.602176634
 
 # --- observable registry channels (spec §3) ---------------------------------
 compute T_sheet 2D_all temp
@@ -147,7 +147,7 @@ fix             fc_pa all ave/time 1000 1 1000 v_e_int v_pe_tip_all v_pe_sub_all
 
 # Viscous damping auto-set to zeta = 0.0 of critical so the tip
 # settles quasi-statically within the hold (leave [tip] dspring blank to enable).
-fix             damp tip_fix viscous $(0.0*2.0*sqrt(3.12075467163009*mass(tip_fix))/(count(tip_fix)*sqrt(9648.5009)))
+fix             damp tip_fix viscous $(0.0*2.0*sqrt(3.1207545372303813*mass(tip_fix))/(count(tip_fix)*sqrt(9648.5009)))
 
 # --- quasi-static damped hold at the target load (no sliding) ---------------------
 run             10000
@@ -191,9 +191,9 @@ minimize 0.0 1.0e-6 10000 100000
 
 compute         COM_tip_r tip_all com
 variable        ztip equal c_COM_tip_r[3]
-variable        fztip equal f_tip_hold[3]*1.602176565
-variable        fxtip equal f_tip_hold[1]*1.602176565
-variable        fytip equal f_tip_hold[2]*1.602176565
+variable        fztip equal f_tip_hold[3]*1.602176634
+variable        fxtip equal f_tip_hold[1]*1.602176634
+variable        fytip equal f_tip_hold[2]*1.602176634
 variable        pe_now equal pe
 
 run             0

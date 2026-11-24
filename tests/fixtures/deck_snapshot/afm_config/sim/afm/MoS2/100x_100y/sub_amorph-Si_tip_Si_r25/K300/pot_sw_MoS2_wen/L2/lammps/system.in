@@ -105,7 +105,7 @@ variable        i loop ${num_floads}
 label           loop_load
 
 variable        f equal ${f}+${fincr}
-variable        n equal -v_f/(count(tip_fix)*1.602176565)
+variable        n equal -v_f/(count(tip_fix)*1.602176634)
 fix             forcetip tip_fix aveforce 0.0 0.0 $n
 run             100
 if              "$(v_halt_T) > 3000.0" then &
@@ -165,7 +165,7 @@ label           hold_start
 # --- Instrumented constant-load hold (spec §6): channel_role=diagnostic,
 # forbidden as ML features (same run as the COF label). Self-contained
 # variables: v_fz_tip/v_comz live only in slide.lmp.
-variable        hold_fz   equal f_forcetip[3]*1.602176565
+variable        hold_fz   equal f_forcetip[3]*1.602176634
 variable        hold_tipz equal xcm(tip_all,z)
 variable        hold_shz  equal xcm(2D_all,z)
 fix             hold_ave all ave/time 1 1000 1000 v_hold_fz v_hold_tipz v_hold_shz file afm/MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS2_wen/L2/data/hold_$(v_find)N.txt

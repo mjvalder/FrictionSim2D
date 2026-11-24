@@ -153,9 +153,9 @@ def test_legacy_lj_file_is_corrected_and_flagged(tmp_path, caplog):
         df = _reader()._read_dataframe(p, 'sheet')
     assert df.attrs['lf_schema'] == 1
     assert df.attrs['lf_corrected'] is True
-    assert df['lfx'].iloc[0] == pytest.approx(2.0 * 1.602176565)
-    assert df['lfy'].iloc[0] == pytest.approx(1.0 * 1.602176565)
-    assert any('1.602176565' in r.getMessage() for r in caplog.records)
+    assert df['lfx'].iloc[0] == pytest.approx(2.0 * 1.602176634)
+    assert df['lfy'].iloc[0] == pytest.approx(1.0 * 1.602176634)
+    assert any('1.602176634' in r.getMessage() for r in caplog.records)
 
 
 def test_legacy_many_body_file_is_not_corrected(tmp_path):
@@ -233,7 +233,7 @@ def test_no_lateral_column_is_not_warned_about(tmp_path, caplog):
     with caplog.at_level('WARNING'):
         df = _reader()._read_dataframe(p, 'sheet')
     assert df.attrs['lf_corrected'] is False
-    assert not [r for r in caplog.records if '1.602176565' in r.getMessage()]
+    assert not [r for r in caplog.records if '1.602176634' in r.getMessage()]
 
 
 def test_correction_provenance_survives_json_export():
@@ -263,7 +263,7 @@ def test_ev_a_to_nn_matches_the_corrector_constant():
 def test_legacy_lj_file_still_corrects_after_react_x_rename(tmp_path):
     """Declaring react_x with rename_to='v_sx' renames away the column the
     frozen correction uses to tell the LJ branch from the many-body one.
-    Without this, 7,166 retained files silently lose the x1.602176565
+    Without this, 7,166 retained files silently lose the x1.602176634
     correction -- reproduced during the 2026-08-28 review, where lfx reverted
     from 0.01287 to 0.00803 and lf_corrected flipped True -> False.
 

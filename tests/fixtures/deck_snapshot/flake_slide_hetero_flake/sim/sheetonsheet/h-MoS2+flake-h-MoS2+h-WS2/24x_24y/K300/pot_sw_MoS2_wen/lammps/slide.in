@@ -61,7 +61,7 @@ minimize 1e-4 1e-8 1000000 1000000
 #   hexagon (circumradius R): 3 sqrt(3)/2 R^2, the regular hexagon
 #   components._in_hexagon carves (see flake_projected_area).
 # Rotation/twist-invariant. A = 64.9519 A^2 here.
-# 1 eV/A^3 = 160.2176565 GPa; total load P*A (eV/A) split equally per
+# 1 eV/A^3 = 160.2176634 GPa; total load P*A (eV/A) split equally per
 # flake atom, pointing down onto the sheet -- sheetonsheet/slide.lmp's
 # conversion with the flake area in place of the box area.
 # fix addforce, NOT aveforce: aveforce replaces every atom's force by the group
@@ -72,10 +72,10 @@ minimize 1e-4 1e-8 1000000 1000000
 # interaction alone; its time mean balances the load, so v_fz = +P*A in steady
 # sliding and is the COF denominator, in nN like the lateral channels.
 variable        A equal 64.9519052838329
-variable        p equal v_pressure/160.2176565
+variable        p equal v_pressure/160.2176634
 variable        f equal -v_p*v_A/(count(flake))
 fix             force flake addforce 0.0 0.0 $f
-variable        fz equal f_force[3]*1.602176565
+variable        fz equal f_force[3]*1.602176634
 
 # Thermostat: the substrate-sheet interior (layer 2 .. 2) + the flake.
 group           center union layer_2 flake
@@ -128,9 +128,9 @@ variable comz_L2 equal c_COM_L2[3]
 
 
 # Friction proxy: bottom-sheet reaction force.
-variable        sx equal f_fsbot[1]*1.602176565
-variable        sy equal f_fsbot[2]*1.602176565
-variable        sz equal f_fsbot[3]*1.602176565
+variable        sx equal f_fsbot[1]*1.602176634
+variable        sy equal f_fsbot[2]*1.602176634
+variable        sz equal f_fsbot[3]*1.602176634
 
 # Many-body potential (sw): compute group/group not supported.
 # Using bottom-sheet reaction forces as lateral friction proxy.
@@ -151,7 +151,7 @@ create_atoms    33 single $(xcm(flake,x)) $(xcm(flake,y)) $(xcm(flake,z)+6.0) un
 group           virtual type 33
 velocity        virtual set 0.0 0.0 0.0
 
-fix             spr flake spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
+fix             spr flake spring couple virtual 3.1207545372303813 0.0 0.0 NULL 0
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 
 # Single sampling tier (spec §4): flake declares no raw- or peratom-tier

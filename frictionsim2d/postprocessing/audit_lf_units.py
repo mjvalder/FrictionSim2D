@@ -3,7 +3,7 @@
 
 A pre-schema-2 sheet run on the LJ branch emitted ``xfrict`` as ``compute
 group/group``'s force in eV/A, while the load it is divided by was already nN.
-Its COF is therefore a factor 1.602176565 too SMALL. The many-body branch
+Its COF is therefore a factor 1.602176634 too SMALL. The many-body branch
 defined ``xfrict`` AS ``v_sx``, so those two columns are bit-identical there
 and the file is unaffected. That exact equality is the discriminator.
 

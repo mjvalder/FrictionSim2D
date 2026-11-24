@@ -61,7 +61,7 @@ def _indent_context(**overrides):
         "thermostat_type": "langevin",
         "temp": 300,
         "layer_group": "2D_all",
-        "ev_a_to_nn": 1.602176565,
+        "ev_a_to_nn": 1.602176634,
         "results_freq": 1000,
         "results_file_pattern": "indent/.../results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt",
         "damp_ev": None,
@@ -309,7 +309,7 @@ def _system_init_context(**overrides):
         "finite_sheet_enabled": False, "finite_sheet_edge_mode": "none",
         "finite_sheet_edge_spring_k": 10.0, "timestep": 0.001, "thermo": 1000,
         "tip_fix_group": "tip_fix", "temp": 300, "thermostat_type": "langevin",
-        "forces": [10, 30], "ev_a_to_nn": 1.602176565, "output_dir": "L1/data",
+        "forces": [10, 30], "ev_a_to_nn": 1.602176634, "output_dir": "L1/data",
         "velocity_seed": None,
     }
     ctx.update(overrides)

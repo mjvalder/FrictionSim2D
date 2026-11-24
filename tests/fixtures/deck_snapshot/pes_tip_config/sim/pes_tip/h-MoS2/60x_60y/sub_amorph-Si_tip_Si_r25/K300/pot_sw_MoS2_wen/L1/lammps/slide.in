@@ -64,9 +64,9 @@ minimize 0.0 1.0e-6 10000 100000
 # load the tip carries at this fixed contact gap (positive = repulsive/pushing the
 # tip up). It is not a setpoint here, but recording it tells us what load the
 # fixed-gap contact actually corresponds to, per material and per grid point.
-variable        fx equal f_tip_hold[1]*1.602176565
-variable        fy equal f_tip_hold[2]*1.602176565
-variable        fz equal f_tip_hold[3]*1.602176565
+variable        fx equal f_tip_hold[1]*1.602176634
+variable        fy equal f_tip_hold[2]*1.602176634
+variable        fz equal f_tip_hold[3]*1.602176634
 
 # --- lateral scan grid over one surface unit cell ---------------------------------
 variable        Nx     equal 12

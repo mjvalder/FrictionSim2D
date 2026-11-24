@@ -154,7 +154,7 @@ def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
         min_style='cg', minimization_command='minimize 1e-6 1e-8 1000 10000',
         timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
         results_file_pattern='results/friction.txt',
-        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565,
+        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176634,
         driving_spring_ev=3.0, **extra,
     )
 
@@ -339,10 +339,10 @@ def test_seed_channels_are_distinct_and_recorded(tmp_path):
 
 def test_sheet_lj_branch_lateral_force_is_scaled_to_nN():
     # compute group/group's VECTOR is a force in eV/A; nf is nN. Dividing one
-    # by the other gave a COF 1.602176565x too SMALL for the whole SW set.
+    # by the other gave a COF 1.602176634x too SMALL for the whole SW set.
     text = _render_sheet_slide(has_internal_lj=False)
-    assert 'variable        xfrict equal c_frict[1]*1.602176565' in text
-    assert 'variable        yfrict equal c_frict[2]*1.602176565' in text
+    assert 'variable        xfrict equal c_frict[1]*1.602176634' in text
+    assert 'variable        yfrict equal c_frict[2]*1.602176634' in text
 
 
 def test_sheet_many_body_branch_stays_unscaled_at_source():
@@ -435,7 +435,7 @@ def _render_hetero_slide(n_layers: int, **extra) -> str:
         min_style='cg', minimization_command='minimize 1e-6 1e-8 1000 10000',
         timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
         results_file_pattern='results/friction.txt',
-        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565, driving_spring_ev=3.0,
+        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176634, driving_spring_ev=3.0,
         **extra,
     )
 
@@ -550,7 +550,7 @@ def _template_source(name: str) -> str:
 @pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
 def test_lj_branch_lateral_force_scaled_to_nN(template):
     # compute group/group's VECTOR is a force in eV/A. nf is nN. Unscaled,
-    # COF came out a factor 1.602176565 too SMALL for the entire SW set.
+    # COF came out a factor 1.602176634 too SMALL for the entire SW set.
     src = _template_source(template)
     assert 'c_frict[1]*{{ ev_a_to_nn }}' in src, template
     assert 'c_frict[2]*{{ ev_a_to_nn }}' in src, template
@@ -686,7 +686,7 @@ def _render_flake_slide(n_layers: int) -> str:
         min_style='cg', minimization_command='minimize 1e-6 1e-8 1000 10000',
         timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
         results_file_pattern='results/friction.txt',
-        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565, driving_spring_ev=3.0,
+        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176634, driving_spring_ev=3.0,
         bond_spring_ev=3.0, flake_group_types='5 6', flake_corner_types='6',
         flake_corner_k=10.0, corner_hold=True, virtual_offset=3.16,
         reserve_virtual_type=False, flake_area=64.95, flake_shape='hexagon',
@@ -759,7 +759,7 @@ def test_afm_window_fix_honours_results_frequency():
 def test_macro_emits_the_schema_marker_on_every_results_fix():
     """Interlock: a results file with no marker parses as schema 1, which
     triggers the frozen legacy correction and multiplies correctly-scaled
-    nN data by 1.602176565. The macro had no title1 at all."""
+    nN data by 1.602176634. The macro had no title1 at all."""
     from frictionsim2d.interfaces.jinja import template_environment
     env = template_environment()
     src = env.loader.get_source(env, 'common/observables.lmp')[0]

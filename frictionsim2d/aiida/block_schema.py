@@ -699,7 +699,7 @@ SPRING_METHODS = frozenset({'smd', 'virtual_atom'})
 
 
 #: The N/m -> eV/A^2 factor AFM builds used before ``b501bf5`` (a literal
-#: ``/ 16.02`` in ``afm/base.py``; exact is NM_TO_EV_A2 = 16.02176565). Their
+#: ``/ 16.02`` in ``afm/base.py``; exact is NM_TO_EV_A2 = 16.02176634). Their
 #: ``drive_k`` is 1.1e-4 relative off the exact constant, so the cross-check
 #: accepts it for legacy AFM-family records only (:func:`_legacy_afm_spring`).
 LEGACY_AFM_SPRING_FACTOR = 16.02

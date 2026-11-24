@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from ..core.observables import EV_A_TO_NN
 from .base import Analysis, register
 from .source import NO_WINDOW
 from .periods import (PeriodParams, TaxlibParams, _spring, drive_step, geometry_depends,
@@ -51,8 +52,6 @@ __all__ = ['SlidingPhysics', 'SlidingPhysicsParams', 'ageing', 'block_se', 'body
 
 #: Boltzmann constant, eV/K.
 KB_EV = 8.617333262e-5
-#: 1 eV/A = 1.602 nN; 1 eV = 1.602 nN A.
-EV_TO_NN_A = 1.602176634
 #: Sign of the thermostat work in the energy balance.
 THERMO_SIGN = 1.0
 #: Below this stretch range (A) the spring fit is unidentifiable.
@@ -118,12 +117,12 @@ def sigma_th(k: float, temperature: float) -> float:
     """Thermal force noise sqrt(K kB T), nN: K nN/A, T K."""
     if not np.isfinite(k):
         return NAN
-    return float(np.sqrt(k * KB_EV * temperature * EV_TO_NN_A))
+    return float(np.sqrt(k * KB_EV * temperature * EV_A_TO_NN))
 
 
 def friction_work(lfx: np.ndarray, length: float) -> float:
     """``mean(lfx) * L`` in eV: lfx nN, L A."""
-    return float(np.mean(lfx)) * length / EV_TO_NN_A
+    return float(np.mean(lfx)) * length / EV_A_TO_NN
 
 
 # --------------------------------------------------------------------------
@@ -141,11 +140,11 @@ def energy_residual(w: pd.DataFrame, f_n: float, dx: float, w_fric: float,
     e = w['etotal'].to_numpy(float)
     wth = (w['w_thermostat_tip'] + w['w_thermostat_sub']).to_numpy(float)
     lf = w['lfx'].to_numpy(float)
-    w_drive = np.cumsum(lf) * dx / EV_TO_NN_A
+    w_drive = np.cumsum(lf) * dx / EV_A_TO_NN
     tz = w['tipz'].to_numpy(float)
-    w_load = f_n * (tz[0] - tz) / EV_TO_NN_A
+    w_load = f_n * (tz[0] - tz) / EV_A_TO_NN
     # the drive spring's 1/2 K s^2 = F^2 / (2K) is not in etotal
-    e_spring = (lf ** 2 - lf[0] ** 2) / (2 * k) / EV_TO_NN_A if np.isfinite(k) and k > 0 else 0.0
+    e_spring = (lf ** 2 - lf[0] ** 2) / (2 * k) / EV_A_TO_NN if np.isfinite(k) and k > 0 else 0.0
     r = (e - e[0]) - w_drive - w_load + THERMO_SIGN * (wth - wth[0]) + e_spring
     return float(r[-1] / scale)
 
@@ -232,7 +231,7 @@ def ageing(lf: np.ndarray, sigma: float) -> float:
 def e_int_rel(e_int: np.ndarray, f_n: float, a: float) -> float:
     """Mean tip-sheet interaction energy / (F_N a), 1:
     E eV, F_N nN, a A."""
-    return float(np.mean(e_int)) * EV_TO_NN_A / (f_n * a)
+    return float(np.mean(e_int)) * EV_A_TO_NN / (f_n * a)
 
 
 def shear_strength_gpa(lf: float, area: float) -> float:
@@ -326,7 +325,7 @@ def run_values(family: str, frames: Dict[str, pd.DataFrame], row: Any,
                  if 'tipx' in w and np.isfinite(dx) else (NAN, NAN))
     out.put('K_fit', ('tipx',), lambda: k_fit)
     out.put('K_fit_r2', ('tipx',), lambda: r2)
-    k, k_src = pick_k(_spring(fields, family), k_fit)
+    k, k_src = pick_k(_spring(fields), k_fit)
     sig = sigma_th(k, temperature)
     w_fric = friction_work(lfx, length)
     n_skip = settle_skip(lfx, k, dx)
@@ -339,7 +338,7 @@ def run_values(family: str, frames: Dict[str, pd.DataFrame], row: Any,
     out.put('spring_K_ratio', ('tipx',),
             lambda: k_fit / k if np.isfinite(k_fit) and k else NAN)
     out.put('energy_resid_rel', ('tipz', *ENERGY_COLS),
-            lambda: energy_residual(w, f_n, dx, w_fric, sig * length / EV_TO_NN_A, k), no_f)
+            lambda: energy_residual(w, f_n, dx, w_fric, sig * length / EV_A_TO_NN, k), no_f)
     out.put('cof_mean', (), lambda: float(lf.mean()) / f_n, no_f)
     out.put('cof_se', (), lambda: block_se(lf, f_n), no_f)
     out.values['superlubric_margin'] = superlubric_margin(lf)

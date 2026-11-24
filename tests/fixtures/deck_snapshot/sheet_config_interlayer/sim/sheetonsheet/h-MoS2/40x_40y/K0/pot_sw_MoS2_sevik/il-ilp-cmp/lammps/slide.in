@@ -87,19 +87,19 @@ variable comz_L3 equal c_COM_L3[3]
 
 
 # Apply Uniform Pressure
-# 1 eV/Å³ = 160.2176565 GPa
+# 1 eV/Å³ = 160.2176634 GPa
 variable        A equal (41.392864040904996-0.0)*(38.60475424057-0.0)
-variable        p equal v_pressure/160.2176565
+variable        p equal v_pressure/160.2176634
 variable        f equal -v_p*v_A/(count(layer_3))
 
 fix             force layer_3 aveforce 0.0 0.0 $f
 
-variable        fx equal f_force[1]*1.602176565
-variable        fy equal f_force[2]*1.602176565
-variable        fz equal f_force[3]*1.602176565
-variable        sx equal f_fsbot[1]*1.602176565
-variable        sy equal f_fsbot[2]*1.602176565
-variable        sz equal f_fsbot[3]*1.602176565
+variable        fx equal f_force[1]*1.602176634
+variable        fy equal f_force[2]*1.602176634
+variable        fz equal f_force[3]*1.602176634
+variable        sx equal f_fsbot[1]*1.602176634
+variable        sy equal f_fsbot[2]*1.602176634
+variable        sz equal f_fsbot[3]*1.602176634
 
 # Interlayer style without compute group/group (LJ-G/ILP/KC, or comparison mode):
 # bottom-layer reaction forces as the lateral friction proxy, in nN.
@@ -132,7 +132,7 @@ create_atoms    10 single $(xcm(layer_3,x)) $(xcm(layer_3,y)) $(xcm(layer_3,z)+1
 group           virtual type 10
 velocity        virtual set 0.0 0.0 0.0
 
-fix             spr layer_3 spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
+fix             spr layer_3 spring couple virtual 3.1207545372303813 0.0 0.0 NULL 0
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 
 # Three sampling tiers (spec §4). Column order is registry-driven (Task 14).

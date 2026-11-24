@@ -138,14 +138,14 @@ variable syy_2d equal c_syy
 
 run             0
 
-variable        Ftotal equal -v_find/1.602176565
+variable        Ftotal equal -v_find/1.602176634
 variable        n equal v_Ftotal/count(tip_fix)
 fix             forcetip tip_fix aveforce 0.0 0.0 $n
 
-variable        fz_tip equal f_forcetip[3]*1.602176565
+variable        fz_tip equal f_forcetip[3]*1.602176634
 
-variable        fx_spr equal f_spr[1]*1.602176565
-variable        fy_spr equal f_spr[2]*1.602176565
+variable        fx_spr equal f_spr[1]*1.602176634
+variable        fy_spr equal f_spr[2]*1.602176634
 
 fix             damp tip_fix viscous 6.25
 
@@ -163,7 +163,7 @@ create_atoms    3 single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
 group           virtual type 3
 velocity        virtual set 0.0 0.0 0.0
 
-fix             spr tip_fix spring couple virtual 3.12075467163009 0.0 0.0 NULL 30.0
+fix             spr tip_fix spring couple virtual 3.1207545372303813 0.0 0.0 NULL 30.0
 fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 
 # Output fixes AFTER the drive block: fix spr must exist before any tier can

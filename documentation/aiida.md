@@ -248,7 +248,7 @@ node after an archive import.
 
 **Unit check at import.** The import refuses a run whose `derived.drive_k` is
 not its requested `driving_spring` (N/m) divided by the exact factor
-`NM_TO_EV_A2 = 16.02176565` (a spring recorded in N/m, or converted twice).
+`NM_TO_EV_A2 = 16.02176634` (a spring recorded in N/m, or converted twice).
 AFM builds before provenance schema 2.2.0, and stamped legacy runs, divided by
 a rounded `16.02`; for those the check also accepts that factor.
 

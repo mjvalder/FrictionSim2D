@@ -87,8 +87,8 @@ def _minimal_flake_slide_context():
         "driving_spring_ev": 3.121,
         "bond_spring_ev": 4.994,
         "lat_c": 3.16,
-        "ev_a_to_nn": 1.602176565,
-        "ev_a3_to_gpa": 160.2176565,
+        "ev_a_to_nn": 1.602176634,
+        "ev_a3_to_gpa": 160.2176634,
         "sheet_layers": sheet_layers,
         "flake_group_types": "5 6",
         "flake_corner_types": "6",
@@ -928,14 +928,14 @@ def test_flake_slide_applies_the_pressure_over_the_flake_area():
     script = _render_flake_slide_for_test(_loaded_ctx())
 
     assert re.search(r"variable\s+A equal 64\.951905\b", script)
-    assert re.search(r"variable\s+p equal v_pressure/160\.2176565", script)
+    assert re.search(r"variable\s+p equal v_pressure/160\.2176634", script)
     assert re.search(r"variable\s+f equal -v_p\*v_A/\(count\(flake\)\)", script)
     # the flake (the driven body) receives the load, as a per-atom addforce --
     # not aveforce, which would average away the deformable flake's forces
     assert re.search(r"fix\s+force flake addforce 0\.0 0\.0 \$f", script)
     assert not re.search(r"^fix\s+\S+\s+\S+\s+aveforce", script, re.M)
-    # nN, not GPa: 1 eV/A = 1.602176565 nN (the GPa factor is 100x that)
-    assert re.search(r"variable\s+fz equal f_force\[3\]\*1\.602176565\b", script)
+    # nN, not GPa: 1 eV/A = 1.602176634 nN (the GPa factor is 100x that)
+    assert re.search(r"variable\s+fz equal f_force\[3\]\*1\.602176634\b", script)
 
 
 def test_flake_slide_emits_the_normal_force_in_the_results_file():

@@ -473,7 +473,7 @@ class TestDescribeSection:
 
 @pytest.mark.parametrize('field', ['bond_spring', 'driving_spring'])
 def test_the_spring_help_quotes_the_exact_conversion_factor(field):
-    """The builders divide by NM_TO_EV_A2 = 16.02176565, not the old 16.02."""
+    """The builders divide by NM_TO_EV_A2 = 16.02176634, not the old 16.02."""
     from frictionsim2d.data.models import NM_TO_EV_A2
 
     detail = overrides_for('sheetonsheet')['general'].fields[field].detail

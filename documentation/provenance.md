@@ -186,7 +186,7 @@ units, kinds and defaults of a family are stored with each deck as its
 `schema` node, so a reader always gets the units the run was stored with.
 
 The import checks one convention: `drive_k` must be the requested
-`driving_spring` divided by `NM_TO_EV_A2 = 16.02176565`. Every builder now
+`driving_spring` divided by `NM_TO_EV_A2 = 16.02176634`. Every builder now
 uses that exact factor; AFM builds before schema 2.2.0 divided by `16.02`, and
 for those records (and stamped ones) the import also accepts the rounded
 factor.

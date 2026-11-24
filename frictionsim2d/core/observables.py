@@ -45,9 +45,9 @@ AFM_HOLD_STEPS: int = 10000
 #: derived for them.
 SLIDE_FAMILIES: Tuple[str, ...] = ('afm', 'sheetonsheet', 'hetero', 'flake')
 
-#: eV/Å → nanoNewton (force conversion).  1 eV = 1.602176565e-19 J,
-#: 1 Å = 1e-10 m  ⇒  1 eV/Å = 1.602176565 nN.
-EV_A_TO_NN: float = 1.602176565
+#: eV/Å → nanoNewton (force conversion).  1 eV = 1.602176634e-19 J (CODATA 2018,
+#: exact), 1 Å = 1e-10 m  ⇒  1 eV/Å = 1.602176634 nN.
+EV_A_TO_NN: float = 1.602176634
 
 #: The static potential-energy-surface scan families: one grid evaluation per run.
 PES_FAMILIES: Tuple[str, ...] = ('pes_tip', 'pes_sheet')

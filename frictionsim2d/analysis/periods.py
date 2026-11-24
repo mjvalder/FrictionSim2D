@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, field_validator
 
+from ..core.observables import EV_A_TO_NN
 from .base import Analysis, register
 from .source import material_names
 
@@ -35,9 +36,6 @@ __all__ = ['GEOMETRY', 'NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'WINDOW', 'Peri
            'geometry_depends', 'json_before', 'parse_loads', 'period_map', 'run_periods',
            'settle_skip', 'summary_spelling', 'whole_periods', 'window_rows']
 
-#: 1 eV/A in nN, per family: taxlib's (AFM) and the sheet
-#: converter's. They differ in the 8th figure; each is kept.
-EV_PER_A_TO_NN = {'afm': 1.602176634, 'sheetonsheet': 1.602176565}
 #: 1 N/m in eV/A^2 (ingest_v2): a run without a recorded
 #: ``drive_k`` takes its ``driving_spring`` through it.
 N_PER_M_TO_EV_PER_A2 = 0.06241509
@@ -129,16 +127,16 @@ def _number(fields: Dict[str, Any], key: str) -> float:
     return float('nan') if value is None else float(value)
 
 
-def _spring(fields: Dict[str, Any], family: str) -> float:
+def _spring(fields: Dict[str, Any]) -> float:
     """K in nN/A: ``derived.drive_k`` (eV/A^2), else ``driving_spring`` (N/m)
-    in eV/A^2, times the family's eV/A -> nN."""
+    in eV/A^2, times eV/A -> nN."""
     drive_k = fields.get('derived.drive_k')
     if drive_k is None:
         spring = fields.get('general.driving_spring')
         if spring is None:
             return float('nan')
         drive_k = float(spring) * N_PER_M_TO_EV_PER_A2
-    return float(drive_k) * EV_PER_A_TO_NN[family]
+    return float(drive_k) * EV_A_TO_NN
 
 
 def drive_step(window: pd.DataFrame, speed: float, fields: Dict[str, Any]) -> Tuple[float, float]:
@@ -163,7 +161,7 @@ def run_periods(family: str, frames: Dict[str, pd.DataFrame], speed: float,
     lf, nf, cof = _forces(family, window)
     n = len(cof)
     a_per_step, dx = drive_step(window, speed, fields)
-    k_spring = _spring(fields, family)
+    k_spring = _spring(fields)
     n_skip = settle_skip(window['lfx'].to_numpy(float), k_spring, dx)
     period = period_x / dx
     k, start = whole_periods(n, n_skip, period)

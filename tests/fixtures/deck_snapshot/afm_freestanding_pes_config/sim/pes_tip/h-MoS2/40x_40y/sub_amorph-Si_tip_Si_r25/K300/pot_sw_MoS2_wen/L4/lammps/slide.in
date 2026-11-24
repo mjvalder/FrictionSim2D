@@ -41,9 +41,9 @@ displace_atoms  tip_all move 0.0 0.0 $(-v_approach) units box
 minimize 0.0 1.0e-6 10000 100000
 
 # --- 3) force the surface exerts on the (rigid, held) tip ------------------------
-variable        fx equal f_tip_hold[1]*1.602176565
-variable        fy equal f_tip_hold[2]*1.602176565
-variable        fz equal f_tip_hold[3]*1.602176565
+variable        fx equal f_tip_hold[1]*1.602176634
+variable        fy equal f_tip_hold[2]*1.602176634
+variable        fz equal f_tip_hold[3]*1.602176634
 
 # --- lateral scan grid over one surface unit cell --------------------------------
 variable        Nx     equal 12

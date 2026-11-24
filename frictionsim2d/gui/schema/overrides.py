@@ -399,12 +399,12 @@ _COMMON: Dict[str, SectionOverride] = {
             'bond_spring': FieldOverride(
                 label='Bond spring constant', order=9, unit='N/m',
                 help='Harmonic bonds holding a sheet together.',
-                detail='Converted to eV/Å² in the builder (divide by NM_TO_EV_A2 = 16.02176565).',
+                detail='Converted to eV/Å² in the builder (divide by NM_TO_EV_A2 = 16.02176634).',
             ),
             'driving_spring': FieldOverride(
                 label='Driving spring constant', order=10, unit='N/m',
                 help='Stiffness of the spring dragging the moving sheet.',
-                detail='Converted to eV/Å² in the builder (divide by NM_TO_EV_A2 = 16.02176565).',
+                detail='Converted to eV/Å² in the builder (divide by NM_TO_EV_A2 = 16.02176634).',
                 required_if_settings=('simulation.drive_method', 'virtual_atom'),
             ),
             'twist_angle': FieldOverride(
