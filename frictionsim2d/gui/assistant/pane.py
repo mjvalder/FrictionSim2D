@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBox
                                QPlainTextEdit, QPushButton, QScrollArea, QTextBrowser,
                                QVBoxLayout, QWidget)
 
-from ...agent.bundles import PUBLISHED, PUBLISHED_SCHEMAS, fits_published, published_tag
+from ...agent.bundles import (MODEL_PREFIX, PUBLISHED, PUBLISHED_SCHEMAS, fits_published,
+                              model_name, published_tag)
 from ...agent.changes import FsChangeSet
 from ...agent.fetch import FetchError, fetch_model
 from ...agent.plot_changes import PlotChange
@@ -440,6 +441,15 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self._ollama_problem = (f'{model} is a FrictionSim2D fine-tune; Download fetches '
                                     f'it from huggingface.co/{PUBLISHED[tag]}.' + older)
             self._set_status(f'{model} is not installed — Download fetches it')
+        elif tag is not None:  # a published fine-tune on a remote server
+            self._ollama_problem = (f'Install it on the machine running that server with: '
+                                    f'FrictionSim2D fetch model {tag}')
+            self._set_status(f'Ollama is running but has no model {model} — see Details')
+        elif model.startswith(f'{MODEL_PREFIX}:'):
+            names = ', '.join(model_name(t) for t in PUBLISHED)
+            self._ollama_problem = (f'{model} is not a published fine-tune. Choose one of '
+                                    f'{names}; Download then fetches it.')
+            self._set_status(f'{model} is not a published fine-tune — see Details')
         else:
             self._ollama_problem = (f'Fetch the model once with: '
                                     f'{ollama_binary()} pull {model}')

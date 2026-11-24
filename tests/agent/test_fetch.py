@@ -91,10 +91,14 @@ def _sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _up(settings):
+    return []  # Ollama answers /api/tags
+
+
 def _fetch(tmp_path, ollama, hub=None, lines=None):
     return fetch_model(TAG, (lines if lines is not None else []).append, popen=ollama,
                        hf_hub_download=hub or FakeHub(), binary='ollama',
-                       models_dir=tmp_path / 'models')
+                       models_dir=tmp_path / 'models', models_fn=_up)
 
 
 def test_pull_path_runs_pull_then_cp(tmp_path):
@@ -175,7 +179,7 @@ def test_unknown_tag_is_refused(tmp_path):
     ollama = FakeOllama()
     with pytest.raises(FetchError, match='unknown model'):
         fetch_model('qwen9', lambda line: None, popen=ollama, binary='ollama',
-                    models_dir=tmp_path)
+                    models_dir=tmp_path, models_fn=_up)
     assert ollama.calls == []
 
 
@@ -190,7 +194,7 @@ def test_without_huggingface_hub_the_fallback_says_how_to_get_it(tmp_path, monke
     monkeypatch.setattr(builtins, '__import__', no_hub)
     with pytest.raises(FetchError, match='huggingface_hub'):
         fetch_model(TAG, lambda line: None, popen=FakeOllama(pull=1), binary='ollama',
-                    models_dir=tmp_path / 'models')
+                    models_dir=tmp_path / 'models', models_fn=_up)
 
 
 def test_progress_drops_the_cli_spinner(tmp_path):
@@ -243,7 +247,8 @@ def test_list_when_ollama_is_down_says_nothing_is_installed(tmp_path, monkeypatc
 def test_remove_frees_dir_and_ollama_rm(tmp_path):
     ollama = FakeOllama(pull=1)
     _fetch(tmp_path, ollama)
-    remove_model(TAG, popen=ollama, binary='ollama', models_dir=tmp_path / 'models')
+    remove_model(TAG, popen=ollama, binary='ollama', models_dir=tmp_path / 'models',
+                 models_fn=_up)
     assert ollama.verbs()[-1] == ['rm', NAME] and NAME not in ollama.models
     assert not (tmp_path / 'models' / TAG).exists()
 
@@ -251,7 +256,7 @@ def test_remove_frees_dir_and_ollama_rm(tmp_path):
 def test_remove_of_a_model_ollama_lacks_still_frees_the_dir(tmp_path):
     (tmp_path / TAG).mkdir()
     remove_model(TAG, popen=FakeOllama(rm=f"Error: model '{NAME}' not found\n", rm_code=1),
-                 binary='ollama', models_dir=tmp_path)
+                 binary='ollama', models_dir=tmp_path, models_fn=_up)
     assert not (tmp_path / TAG).exists()
 
 
@@ -259,5 +264,43 @@ def test_remove_reports_other_ollama_errors(tmp_path):
     (tmp_path / TAG).mkdir()
     with pytest.raises(FetchError, match='connection refused'):
         remove_model(TAG, popen=FakeOllama(rm='Error: connection refused\n', rm_code=1),
-                     binary='ollama', models_dir=tmp_path)
+                     binary='ollama', models_dir=tmp_path, models_fn=_up)
     assert (tmp_path / TAG).exists()  # nothing deleted while Ollama still has the model
+
+
+def test_a_failed_serving_check_never_leaves_the_pulled_model_registered(tmp_path):
+    ollama = FakeOllama(show=SHOWN_PULLED)
+    with pytest.raises(FetchError, match='does not match'):
+        _fetch(tmp_path, ollama, FakeHub(sha256='0' * 64))
+    assert ollama.models == []
+    assert ['rm', NAME] in ollama.verbs()
+    assert available(models=ollama.models, models_dir=tmp_path / 'models')[TAG][
+        'installed'] is False
+
+
+def test_a_failed_cp_is_said_and_cleaned_up(tmp_path):
+    class NoCopy(FakeOllama):
+        def __call__(self, cmd, **kwargs):
+            if cmd[1] == 'cp':
+                self.calls.append((cmd[1:], kwargs))
+                process = type('P', (), {})()
+                process.stdout = io.StringIO('Error: disk full\n')
+                process.wait = lambda timeout=None: 1
+                return process
+            return super().__call__(cmd, **kwargs)
+    lines, ollama = [], NoCopy()
+    assert _fetch(tmp_path, ollama, lines=lines) == NAME  # the bundle path took over
+    assert any('ollama cp failed (Error: disk full)' in line for line in lines)
+    assert ['rm', NAME] in ollama.verbs()
+
+
+def test_nothing_is_fetched_or_removed_while_ollama_is_down(tmp_path):
+    ollama, hub = FakeOllama(), FakeHub()
+    with pytest.raises(FetchError, match='Ollama is not running at http://localhost:11434'):
+        fetch_model(TAG, lambda line: None, popen=ollama, hf_hub_download=hub,
+                    binary='ollama', models_dir=tmp_path, models_fn=lambda s: None)
+    (tmp_path / TAG).mkdir()
+    with pytest.raises(FetchError, match='not running'):
+        remove_model(TAG, popen=ollama, binary='ollama', models_dir=tmp_path,
+                     models_fn=lambda s: None)
+    assert ollama.calls == [] and hub.calls == [] and (tmp_path / TAG).exists()

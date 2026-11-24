@@ -102,13 +102,16 @@ def _pull(ollama: _Ollama, repo: str, name: str) -> bool:
     if code != 0:
         ollama.progress(f'ollama pull failed ({last or f"exit {code}"}); downloading the bundle')
         return False
-    code, _ = ollama.run('cp', source, name)
+    code, last = ollama.run('cp', source, name)
     ollama.output('rm', source)  # the hf.co name only duplicates ``name``
     if code != 0:
+        ollama.output('rm', name)
+        ollama.progress(f'ollama cp failed ({last or f"exit {code}"}); downloading the bundle')
         return False
     code, modelfile = ollama.output('show', '--modelfile', name)
     if code == 0 and serves_as_trained(modelfile):
         return True
+    ollama.output('rm', name)  # never left registered with the GGUF's own template
     ollama.progress('the pulled model lacks the qwen3.5 renderer and parser; '
                     'downloading the bundle')
     return False
@@ -152,18 +155,28 @@ def _download(tag: str, repo: str, folder: Path, progress: Callable[[str], None]
     return tune
 
 
+def _require_server(settings: AgentSettings, models_fn: Callable) -> None:
+    if models_fn(settings) is None:
+        raise FetchError(f'Ollama is not running at {settings.ollama.base_url}; start it '
+                         'first (the Assistant pane starts it when Ollama is selected).')
+
+
 def fetch_model(tag: str, progress: Callable[[str], None], *,
                 settings: Optional[AgentSettings] = None,
                 popen: Callable = subprocess.Popen,
                 hf_hub_download: Optional[Callable] = None,
                 binary: Optional[str] = None,
-                models_dir: Optional[Path] = None) -> str:
+                models_dir: Optional[Path] = None,
+                models_fn: Callable = ollama_models) -> str:
     """Install the published ``tag`` into Ollama; the local model name.
 
-    Raises `FetchError` when neither path works. Settings are not touched.
+    Raises `FetchError` when Ollama is not running or neither path works.
+    Settings are not touched.
     """
     repo, name = _published(tag), model_name(tag)
-    ollama = _Ollama(settings or AgentSettings(), progress, popen, binary)
+    settings = settings or AgentSettings()
+    _require_server(settings, models_fn)
+    ollama = _Ollama(settings, progress, popen, binary)
     if _pull(ollama, repo, name):
         return name
     folder = (models_dir or bundles.models_dir()) / tag
@@ -196,10 +209,13 @@ def available(settings: Optional[AgentSettings] = None, *,
 
 def remove_model(tag: str, *, settings: Optional[AgentSettings] = None,
                  popen: Callable = subprocess.Popen, binary: Optional[str] = None,
-                 models_dir: Optional[Path] = None) -> None:
+                 models_dir: Optional[Path] = None,
+                 models_fn: Callable = ollama_models) -> None:
     """``ollama rm`` the published ``tag`` and delete its downloaded bundle."""
     _published(tag)
-    ollama = _Ollama(settings or AgentSettings(), lambda line: None, popen, binary)
+    settings = settings or AgentSettings()
+    _require_server(settings, models_fn)
+    ollama = _Ollama(settings, lambda line: None, popen, binary)
     code, text = ollama.output('rm', model_name(tag))
     if code != 0 and 'not found' not in text.lower():
         raise FetchError(text.strip() or f'ollama rm failed (exit {code})')

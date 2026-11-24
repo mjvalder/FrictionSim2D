@@ -695,7 +695,12 @@ def test_old_experiment_names_are_left_alone(qt_app, env):
     s.ollama.model = 'fs2d-assistant:q35-4b'
     pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3.5:4b'])
     assert s.ollama.model == 'fs2d-assistant:q35-4b'
-    assert pane.install_button.isHidden() and 'pull fs2d-assistant:q35-4b' in pane.details_label.text()
+    assert pane.install_button.isHidden()
+    assert pane.status_label.text() == ('fs2d-assistant:q35-4b is not a published fine-tune'
+                                        ' — see Details')
+    details = pane.details_label.text()
+    assert 'pull fs2d-assistant:q35-4b' not in details
+    assert 'fs2d-assistant:qwen3.5-4b' in details and 'Download' in details
 
 
 def test_missing_model_is_named_and_details_say_how_to_pull(qt_app, env):
@@ -982,7 +987,8 @@ def test_remote_base_url_no_download(qt_app, env):
     s.ollama.base_url = 'http://gpu-box:11434'
     pane, _ = _tune_pane(settings=s)
     assert pane.install_button.isHidden()
-    assert 'pull fs2d-assistant:qwen3.5-4b' in pane.details_label.text()
+    assert 'FrictionSim2D fetch model qwen3.5-4b' in pane.details_label.text()
+    assert 'pull fs2d-assistant' not in pane.details_label.text()
 
 
 def test_older_schema_is_said_before_download_and_logged_once(qt_app, env, caplog):
