@@ -118,3 +118,10 @@ def test_a_numbered_primary_section_names_its_own_key_in_the_error():
 
     with pytest.raises(ValueError, match=r"\[general\] temp"):
         expand_config_sweeps(base, base_dir=ROOT, model='afm')
+
+
+def test_a_blank_temperature_is_not_a_collision_check_failure():
+    base = _afm(temp=None)
+    base['2D']['pot_path'] = ['sw/a/x.sw', 'sw/b/y.sw']
+
+    assert len(expand_config_sweeps(base, base_dir=ROOT, model='afm')) == 2

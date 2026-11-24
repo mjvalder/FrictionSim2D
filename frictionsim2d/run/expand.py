@@ -644,8 +644,8 @@ def _reject_colliding_sweeps(sweep_params: Dict[Tuple[str, str], List[Any]],
         for value in values:
             try:
                 out = output_dir_for(build({**first, axis: value}), model)
-            except KeyError:
-                return  # a partial config the naming rules cannot read
+            except (KeyError, TypeError):
+                return  # a half-filled config the naming rules cannot read yet
             if out in seen:
                 label = 'materials_list' if key == '_material_expand' else (
                     'pot_path' if key == '_pot_expand' else key)
