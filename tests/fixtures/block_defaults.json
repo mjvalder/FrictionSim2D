@@ -1,5 +1,5 @@
 {
- "block_schema": "1.0.0",
+ "block_schema": "1.1.0",
  "families": {
   "afm": {
    "flake.center_x": null,
@@ -76,8 +76,8 @@
    "settings.potential.lj_type": "LJ_base",
    "settings.potential.reaxff_mincap": 50,
    "settings.potential.reaxff_safezone": 1.2,
-   "settings.quench.equilibrate_steps": 20000,
-   "settings.quench.melt_steps": 50000,
+   "settings.quench.equilibrate_steps": 10000,
+   "settings.quench.melt_steps": 20000,
    "settings.quench.melt_temp": 2500.0,
    "settings.quench.quench_rate": 1000000000000.0,
    "settings.quench.quench_slab_dims": [
@@ -215,8 +215,8 @@
    "settings.potential.lj_type": "LJ_base",
    "settings.potential.reaxff_mincap": 50,
    "settings.potential.reaxff_safezone": 1.2,
-   "settings.quench.equilibrate_steps": 20000,
-   "settings.quench.melt_steps": 50000,
+   "settings.quench.equilibrate_steps": 10000,
+   "settings.quench.melt_steps": 20000,
    "settings.quench.melt_temp": 2500.0,
    "settings.quench.quench_rate": 1000000000000.0,
    "settings.quench.quench_slab_dims": [
@@ -342,8 +342,8 @@
    "settings.potential.lj_type": "LJ_base",
    "settings.potential.reaxff_mincap": 50,
    "settings.potential.reaxff_safezone": 1.2,
-   "settings.quench.equilibrate_steps": 20000,
-   "settings.quench.melt_steps": 50000,
+   "settings.quench.equilibrate_steps": 10000,
+   "settings.quench.melt_steps": 20000,
    "settings.quench.melt_temp": 2500.0,
    "settings.quench.quench_rate": 1000000000000.0,
    "settings.quench.quench_slab_dims": [
@@ -473,8 +473,8 @@
    "settings.potential.lj_type": "LJ_base",
    "settings.potential.reaxff_mincap": 50,
    "settings.potential.reaxff_safezone": 1.2,
-   "settings.quench.equilibrate_steps": 20000,
-   "settings.quench.melt_steps": 50000,
+   "settings.quench.equilibrate_steps": 10000,
+   "settings.quench.melt_steps": 20000,
    "settings.quench.melt_temp": 2500.0,
    "settings.quench.quench_rate": 1000000000000.0,
    "settings.quench.quench_slab_dims": [
@@ -612,8 +612,8 @@
    "settings.potential.lj_type": "LJ_base",
    "settings.potential.reaxff_mincap": 50,
    "settings.potential.reaxff_safezone": 1.2,
-   "settings.quench.equilibrate_steps": 20000,
-   "settings.quench.melt_steps": 50000,
+   "settings.quench.equilibrate_steps": 10000,
+   "settings.quench.melt_steps": 20000,
    "settings.quench.melt_temp": 2500.0,
    "settings.quench.quench_rate": 1000000000000.0,
    "settings.quench.quench_slab_dims": [
@@ -743,8 +743,8 @@
    "settings.potential.lj_type": "LJ_base",
    "settings.potential.reaxff_mincap": 50,
    "settings.potential.reaxff_safezone": 1.2,
-   "settings.quench.equilibrate_steps": 20000,
-   "settings.quench.melt_steps": 50000,
+   "settings.quench.equilibrate_steps": 10000,
+   "settings.quench.melt_steps": 20000,
    "settings.quench.melt_temp": 2500.0,
    "settings.quench.quench_rate": 1000000000000.0,
    "settings.quench.quench_slab_dims": [
@@ -882,8 +882,8 @@
    "settings.potential.lj_type": "LJ_base",
    "settings.potential.reaxff_mincap": 50,
    "settings.potential.reaxff_safezone": 1.2,
-   "settings.quench.equilibrate_steps": 20000,
-   "settings.quench.melt_steps": 50000,
+   "settings.quench.equilibrate_steps": 10000,
+   "settings.quench.melt_steps": 20000,
    "settings.quench.melt_temp": 2500.0,
    "settings.quench.quench_rate": 1000000000000.0,
    "settings.quench.quench_slab_dims": [

@@ -37,7 +37,7 @@ from ..run.naming import AFM_LIKE_MODELS, SHEET_LIKE_MODELS
 
 #: Version of the block layout, the canonical form and the units below.
 #: Stamped into every block's content, so a bump changes every hash.
-BLOCK_SCHEMA_VERSION = '1.0.0'
+BLOCK_SCHEMA_VERSION = '1.1.0'
 
 #: Schema version -> {FIELD_MAP path: its default in that version}, for each
 #: default that changed in the bump *out of* that version. It is a refill
@@ -51,7 +51,12 @@ BLOCK_SCHEMA_VERSION = '1.0.0'
 #: :data:`BLOCK_SCHEMA_VERSION`, record the old value here under the old
 #: version, and regenerate ``tests/fixtures/block_defaults.json``
 #: (``test_block_schema.py::test_defaults_match_the_snapshot`` fails until then).
-LEGACY_DEFAULTS: Dict[str, Dict[str, Any]] = {}
+LEGACY_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    # 1.0.0 -> 1.1.0 (quench rework, 2026-11): the defaults became the shipped
+    # amor_Si block's real conditions (amorphous-quench spec §8, §11.1).
+    '1.0.0': {'settings.quench.melt_steps': 50000,
+              'settings.quench.equilibrate_steps': 20000},
+}
 
 
 def version_key(version: str) -> Tuple[int, ...]:
@@ -263,8 +268,7 @@ PROVENANCE_EXCLUDED = frozenset((
 
 #: Leaf fields that are not simulation physics, each named. Job submission
 #: (``hpc``), the import itself (``aiida``), integrity thresholds
-#: (``integrity``), how and where the amorphous quench runs (not what it
-#: produces), ``materials_list``
+#: (``integrity``), ``materials_list``
 #: (consumed by sweep expansion), the deck shape and point set
 #: (``outer_loop``, ``scan_angle_force``), the periodic-z vacuum margin
 #: (every build refuses a vacuum under cutoff + skin, so the margin cannot
@@ -273,8 +277,10 @@ EXCLUDED = frozenset(
     [f'settings.hpc.{n}' for n in _HPC]
     + [f'settings.aiida.{n}' for n in _AIIDA]
     + [f'settings.integrity.{n}' for n in _INTEGRITY]
-    + ['settings.quench.run_local', 'settings.quench.n_procs',
-       'settings.quench.allow_generate', 'settings.geometry.z_vacuum_margin']
+    # settings.quench.run_local/n_procs/allow_generate were here until the
+    # quench rework removed them; an old tree's copies are ignored by the split,
+    # which reads FIELD_MAP paths only.
+    + ['settings.geometry.z_vacuum_margin']
     + [f'{s}.materials_list' for s in ('sheet', 'sheets', 'flake_sheets')]
     # An acknowledgement that an MLIP cell may be unbound: it lifts a refusal,
     # it does not change which atoms interact or how.

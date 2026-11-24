@@ -11,7 +11,7 @@ import pytest
 
 from frictionsim2d.aiida import block_schema
 from frictionsim2d.aiida.block_schema import (
-    BLOCK_KINDS, EXCLUDED, FIELD_MAP, PROVENANCE_EXCLUDED, PROVENANCE_MAP,
+    BLOCK_KINDS, BLOCK_SCHEMA_VERSION, EXCLUDED, FIELD_MAP, PROVENANCE_EXCLUDED, PROVENANCE_MAP,
     PROVENANCE_SOURCED, SWEPT, RunBlocks, defaults_for, leaf_field_paths,
 )
 from frictionsim2d.aiida.blocks import (
@@ -158,7 +158,7 @@ def test_kind_and_schema_inside_content(afm):                 # C2
     for name, content in _split(cfg, st, prov).blocks.items():
         assert set(content) == {'kind', 'block_schema', 'fields'}, name
         assert content['kind'] == block_kind(name)
-        assert content['block_schema'] == '1.0.0'
+        assert content['block_schema'] == BLOCK_SCHEMA_VERSION
 
 
 def test_load_sweep_not_in_blocks(afm):                       # C1a

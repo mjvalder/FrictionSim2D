@@ -27,8 +27,9 @@ _ALLOWED = {'angstrom', 'eV', 'eV/angstrom^2', 'N/m', 'nN', 'GPa', 'K', 'ps', 'm
 
 
 def test_version_and_legacy():
-    assert BLOCK_SCHEMA_VERSION == '1.0.0'
-    assert LEGACY_DEFAULTS == {}
+    assert BLOCK_SCHEMA_VERSION == '1.1.0'
+    assert LEGACY_DEFAULTS == {'1.0.0': {'settings.quench.melt_steps': 50000,
+                                         'settings.quench.equilibrate_steps': 20000}}
 
 
 def test_every_numeric_field_has_a_unit():                    # user ruling
