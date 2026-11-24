@@ -68,49 +68,6 @@ def test_enrich_converged_true_updates_provenance(tmp_path):
     assert data["lammps_version"] == "2 Aug 2023 - Update 3"
 
 
-def test_enrich_a_legacy_one_x_provenance_json_works(tmp_path):
-    """A pre-Task-5 (schema 1.x) provenance.json, as sits in an already-rsynced
-    tree, must still be enrichable -- ``family``/``model`` are now required
-    fields, so a naive ``ProvenanceRecord.model_validate_json`` would reject
-    every one of these and silently leave the whole run unenriched. See
-    :func:`frictionsim2d.data.provenance.read_provenance`, which this function now reads
-    through instead."""
-    layer_dir = tmp_path / "out" / "L1"
-    (layer_dir / "lammps").mkdir(parents=True)
-    legacy = {
-        "schema_version": "1.0.0",
-        "seed_thermal_tip": 1, "seed_thermal_sub": 2, "seed_velocity": 3,
-        "substrate_realization_id": None, "damping_ratio": 0.1, "damp_ev": None,
-        "git_commit": "abc123", "git_dirty": False, "config_hash": "deadbeef",
-        "layer_type_map": {"layer_1": [1, 2]}, "contact_cutoff": 5.0,
-        "cutoff_source": "uff_sigma_k1.5", "thermostat_scheme": "nvt_system",
-        "run_role": "label", "load_requested": 10.0,
-        "pot_path": "/p/MoS.sw", "pot_type": "sw",
-    }
-    prov_path = layer_dir / "provenance.json"
-    prov_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    log_path = _write_log(
-        tmp_path, "log_system.lammps",
-        "LAMMPS (2 Aug 2023 - Update 3)\n"
-        "# RAMP_STATUS converged=1 r=0.042 iterations=17\n",
-    )
-
-    result = enrich_provenance_post_run(layer_dir, log_path)
-    assert result == prov_path
-
-    data = json.loads(result.read_text(encoding="utf-8"))
-    assert data["schema_version"] == PROVENANCE_SCHEMA_VERSION
-    assert data["family"] == "afm"
-    assert data["model"] == "afm"
-    assert data["materials"] == [{
-        "name": "", "role": "sheet", "pot_path": "/p/MoS.sw",
-        "pot_type": "sw", "pot_resolution_route": None, "pot_file_sha256": None,
-    }]
-    assert data["ramp_converged"] is True
-    assert data["ramp_iterations"] == 17
-
-
 def test_enrich_converged_false_updates_provenance_and_warns(tmp_path, caplog):
     builder = _builder(tmp_path)
     layer_dir = _built_layer_dir(builder, tmp_path)
@@ -363,13 +320,11 @@ def test_enrichment_keeps_the_run_uuid(tmp_path):
 
 
 def test_enrichment_keeps_a_legacy_stamp(tmp_path):
-    from frictionsim2d.data.provenance import stamp_run_uuids
     layer_dir = _built_layer_dir(_builder(tmp_path), tmp_path)
     prov = layer_dir / "provenance.json"
     data = json.loads(prov.read_text(encoding="utf-8"))
-    del data["run_uuid"]
+    data["run_uuid_stamped_at"] = "2026-11-16"
     prov.write_text(json.dumps(data), encoding="utf-8")
-    stamp_run_uuids(layer_dir)
     stamped = json.loads(prov.read_text(encoding="utf-8"))
     log_path = _write_log(tmp_path, "log.lammps", "LAMMPS (2 Aug 2023)\n")
 

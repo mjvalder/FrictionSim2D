@@ -283,19 +283,13 @@ nothing).
 ### 4.2 Legacy runs: stamp, then import
 
 Runs built before provenance schema 2.2.0 carry no `run_uuid`. Give them one,
-once, before their first import:
-
-```bash
-FrictionSim2D aiida stamp-uuid ./simulation_20260421_143404 --dry-run   # report only
-FrictionSim2D aiida stamp-uuid ./simulation_20260421_143404
-```
+once, before their first import.
+Stamp them with the standalone `stamp_uuid.py` kept beside the data (it is not part of
+FrictionSim2D).
 
 - Each `provenance.json` without a `run_uuid` gets a fresh uuid4 (each AFM
   `L{n}` record its own) and `run_uuid_stamped_at` (the ISO date). Every other
-  key keeps its value; the write is atomic. Needs no aiida-core.
-- An existing `run_uuid` is never overwritten, so a second pass stamps nothing.
-  A `run_uuid` that is not a UUID is reported as `invalid` and left alone.
-- Exit code 1 if any `provenance.json` was unreadable or invalid.
+  key keeps its value.
 - Stamping rewrites `provenance.json`, and the provenance is part of each
   deck's fingerprint. Stamp a copy of a tree, and keep using that stamped copy:
   a second, separately stamped copy of the same runs gets new `run_uuid`
@@ -478,8 +472,7 @@ not in force. Each entry records the ruling, its note and date, its file
 (`source`), when it was **seen** (first added, or its decision last changed),
 whether the file is `present`, `missing` or `archived`, and which entry is in
 force. A set ruled before the ledger existed gets one at its next pass, built
-from its live rulings and the old `friction2d_pending_rulings` and
-`friction2d_ruling_conflicts` extras, which are then deleted.
+from its live rulings.
 
 **Which files are read.** Every import, `aiida rule` and `aiida recheck`
 reads:

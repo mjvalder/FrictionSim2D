@@ -67,9 +67,6 @@ VERDICT_UUID_EXTRA = 'friction2d_verdict_uuid'
 #: (:mod:`frictionsim2d.aiida.rulings`): every ruling of every rulings file, the
 #: ones not in force included. Every rulings pass reconciles the store with it.
 LEDGER_EXTRA = 'friction2d_rulings_ledger'
-#: The Group extras the ledger replaced: read once to seed the ledger of a
-#: set ruled before it existed, then deleted (and dropped from archives).
-_OLD_EXTRAS = ('friction2d_pending_rulings', 'friction2d_ruling_conflicts')
 #: The ' (2)' an anonymised archive appends to a repeated basename.
 _ARCHIVED_SUFFIX = re.compile(r' \(\d+\)$')
 #: True on a verdict checked while its stage-2 status was unknown (a
@@ -1011,9 +1008,7 @@ def _seed_entry(content: Dict[str, Any], own_file: bool, when) -> Dict[str, Any]
 def _seed_ledger(group: orm.Group, own: Optional[str]) -> Dict[str, Dict[str, Any]]:
     """The ledger of a set ruled before the ledger existed: every live ruled
     verdict's ruling (by its ruling Dict's ``source``; none means the own
-    file), then every ruling of the old extras ``friction2d_pending_rulings``
-    and ``friction2d_ruling_conflicts`` (their full ruling from the latest
-    ruling Dict of that point and source, when one was ever applied)."""
+    file)."""
     ledger: Dict[str, Dict[str, Any]] = {}
     points = _live_points(group)
     verdicts = _live_verdicts(points)
@@ -1026,19 +1021,6 @@ def _seed_ledger(group: orm.Group, own: Optional[str]) -> Dict[str, Dict[str, An
                 if source is not None:
                     entry = _seed_entry(content, source == own, node.ctime)
                     ledger.setdefault(_pid(point), {})[source] = {**entry, 'in_force': True}
-    for key in _OLD_EXTRAS:
-        for old in group.base.extras.get(key, []) or []:
-            pid, source = old.get('point'), old.get('source')
-            if not pid or not source or source in ledger.get(pid, {}):
-                continue
-            qb = orm.QueryBuilder().append(orm.Dict, tag='r', filters={
-                f'extras.{STEP_INPUT_EXTRA}': 'ruling', 'attributes.point': pid,
-                'attributes.source': source})
-            qb.order_by({'r': {'id': 'desc'}})
-            full = qb.first(flat=True)
-            ledger.setdefault(pid, {})[source] = _seed_entry(
-                full.get_dict() if full is not None else old, source == own,
-                full.ctime if full is not None else datetime.now(timezone.utc))
     return ledger
 
 
@@ -1143,8 +1125,7 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
 
     report = RulingReport(label=group.label[len(GROUP_PREFIX):], dry_run=dry_run)
     own = _own_source(group, root, report.warnings)
-    extras = group.base.extras.all
-    stored = extras.get(LEDGER_EXTRA)
+    stored = group.base.extras.get(LEDGER_EXTRA, None)
     if stored is None:
         ledger = _seed_ledger(group, own)
     else:
@@ -1173,9 +1154,6 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
     if not dry_run:
         if ledger != stored:
             group.base.extras.set(LEDGER_EXTRA, ledger)
-        for key in _OLD_EXTRAS:
-            if key in extras:
-                group.base.extras.delete(key)
     return report
 
 
@@ -1392,7 +1370,6 @@ def _post(point: orm.FolderData, snapshot: Optional[orm.SinglefileData],
     # pylint: disable=import-outside-toplevel
     from ..data.provenance import read_provenance
     from ..postprocessing.post_channels import post_channels
-    from ..run.naming import parse_run_path
 
     if snapshot is None or provenance is None:
         return {}
@@ -1403,11 +1380,8 @@ def _post(point: orm.FolderData, snapshot: Optional[orm.SinglefileData],
     record_path = directory / 'provenance.json'
     record_path.write_bytes(text)
     attrs = point.base.attributes.all
-    tokens = parse_run_path(attrs['rel_path'])
     try:
-        record = read_provenance(record_path, family=attrs['family'], model=tokens.model,
-                                 material_name=tokens.materials[0] if tokens.materials
-                                 else '')
+        record = read_provenance(record_path)
     except (OSError, ValueError) as exc:
         logger.warning('No provenance for %s (%s); post channels skipped',
                        attrs['rel_path'], exc)

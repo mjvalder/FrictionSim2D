@@ -28,9 +28,9 @@ Top-level identity:
   under two labels, or from a moved copy, is still one run. A pre-2.2 record
   has none and reads with `run_uuid = None`, and the import refuses it
   (`MissingRunUUID`). Legacy runs are **stamped, not rebuilt**:
-  `FrictionSim2D aiida stamp-uuid ROOT [--dry-run]` gives each such record a
-  fresh `run_uuid` and records `run_uuid_stamped_at`, leaving every other key
-  as it was. Stamp once, before the first import (see
+  the standalone `stamp_uuid.py`, kept beside the data (not part of
+  FrictionSim2D), gives each such record a fresh `run_uuid` and records
+  `run_uuid_stamped_at`, leaving every other key as it was. Stamp once, before the first import (see
   [aiida.md](aiida.md#42-legacy-runs-stamp-then-import)).
 - `run_uuid_stamped_at` — set only on a stamped legacy record (ISO date), so
   a stamped run stays distinguishable from a 2.2 build. The import uses it to
@@ -91,21 +91,11 @@ guarantee). Every other field is stored as written. HPC paths, the account
 and host names are anonymised only in an exported archive, never in the store
 ([aiida.md](aiida.md#9-archives)).
 
-## Reading old provenance: `read_provenance`
+## Reading provenance: `read_provenance`
 
-`read_provenance(path, *, family='afm', model='afm', material_name='')` reads
-a `provenance.json` and **upgrades a schema-1.x file in memory only** — the
-file on disk is never rewritten. A 1.x file predates `family`/`model`/
-`materials`, so on such a file the function:
-
-- fills in `family`/`model` from its keyword arguments (callers such as
-  `frictionsim2d.run.tree.discover_runs` pass the run's own tokens),
-- turns the old single `pot_path`/`pot_type`/`pot_resolution_route`/
-  `pot_file_sha256` quadruple into one `MaterialProvenance` entry with
-  `role='sheet'` and `name=material_name`.
-
-A schema-2.x file is returned unchanged; none of the keyword arguments have
-any effect on it.
+`read_provenance(path)` reads a schema-2.x `provenance.json` into a
+`ProvenanceRecord`. A schema-1.x file is no longer upgraded: it fails
+validation.
 
 ## Typical provenance tree
 

@@ -650,14 +650,16 @@ def _run_uuid(locator, record: Mapping[str, Any]) -> str:
         raise MissingRunUUID(
             f'{locator.provenance_file} has no run_uuid (a run built before '
             f'provenance schema 2.2.0). Stamp the legacy runs with '
-            f'`FrictionSim2D aiida stamp-uuid {_sim_root(locator)}`, or rebuild.')
+            f'the standalone stamp_uuid.py kept beside the data '
+            f'({_sim_root(locator)}), or rebuild.')
     try:
         UUID(str(run_uuid))
     except ValueError as exc:
         raise MissingRunUUID(
             f'{locator.provenance_file}: run_uuid {run_uuid!r} is not a UUID. '
-            f'Fix or remove it, then stamp with `FrictionSim2D aiida stamp-uuid '
-            f'{_sim_root(locator)}`, or rebuild.') from exc
+            f'Fix or remove it, then stamp with '
+            f'the standalone stamp_uuid.py kept beside the data '
+            f'({_sim_root(locator)}), or rebuild.') from exc
     return str(run_uuid)
 
 

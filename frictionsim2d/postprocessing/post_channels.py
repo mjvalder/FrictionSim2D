@@ -166,9 +166,7 @@ def post_channels_for(locator, load_kind: str, load: float,
         return {}
     tokens = locator.tokens
     try:
-        record = read_provenance(
-            locator.provenance_file, family=tokens.family, model=tokens.model,
-            material_name=tokens.materials[0] if tokens.materials else '')
+        record = read_provenance(locator.provenance_file)
     except (OSError, ValueError) as exc:
         logger.warning("No provenance for %s (%s); post channels skipped",
                        tokens.rel_path, exc)

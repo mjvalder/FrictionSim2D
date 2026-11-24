@@ -485,9 +485,7 @@ def _point_and_record(root):
     # file-level status DataReader gives before stage 3.
     reader = DataReader(results_dir=str(root), integrity=False)
     point = reader.runs[0]
-    tok = point.tokens
-    record = read_provenance(point.locator.provenance_file, family=tok.family,
-                             model=tok.model, material_name=tok.materials[0])
+    record = read_provenance(point.locator.provenance_file)
     return point, record
 
 
@@ -587,20 +585,20 @@ def test_zband_fallback_for_hetero(tmp_path):
     _set_layer_map(run_dir, {})
     ref = _hetero_ref(run_dir / 'build' / 'hetero.lmp')
     loc = discover_runs(tmp_path)[0]
-    rec = read_provenance(loc.provenance_file, family='hetero', model='sheetonsheet')
+    rec = read_provenance(loc.provenance_file)
     assert resolve_layers(loc, rec, ref, 2) == {'layer_1': {1, 2}, 'layer_2': {3, 4}}
 
 
 def test_resolve_layers_order(tmp_path):
     run_dir = make_family_run(tmp_path, 'sheetonsheet')
     loc = discover_runs(tmp_path)[0]
-    rec = read_provenance(loc.provenance_file, family='sheetonsheet', model='sheetonsheet')
+    rec = read_provenance(loc.provenance_file)
     ref = _hetero_ref(run_dir / 'build' / 'x.lmp')
     # 1. provenance map wins
     assert resolve_layers(loc, rec, ref, 2) == {'layer_1': {1}, 'layer_2': {2}}
     # 2. then the group lines, with s48's `a*b` expansion
     _set_layer_map(run_dir, {})
-    rec = read_provenance(loc.provenance_file, family='sheetonsheet', model='sheetonsheet')
+    rec = read_provenance(loc.provenance_file)
     (run_dir / 'lammps' / 'system.in.settings').write_text(
         'group layer_1 type 1*2 5\ngroup layer_2 type 3 4\n', encoding='utf-8')
     assert resolve_layers(loc, rec, ref, 2) == {'layer_1': {1, 2, 5}, 'layer_2': {3, 4}}

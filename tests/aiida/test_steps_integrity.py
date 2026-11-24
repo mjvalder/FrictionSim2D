@@ -1333,24 +1333,15 @@ def test_a_store_ruled_before_the_ledger_is_seeded_from_its_rulings(
     p30, p50 = _pid(root, 30.0), _pid(root, 50.0)
     other = _yaml(tmp_path / 'o.yaml', p30, 'pass')
     assert apply_rulings('camp', other).applied == 1
-    lost = _yaml(tmp_path / 'lost.yaml', p50, 'fail', note='was pending')
     group = orm.load_group('friction2d/camp')
     group.base.extras.delete(LEDGER)                     # ruled before the ledger
-    group.base.extras.set_many({
-        'friction2d_pending_rulings': [{'point': p50, 'source': str(lost.resolve()),
-                                        'ruling': 'fail', 'note': 'was pending'}],
-        'friction2d_ruling_conflicts': []})
-    lost.unlink()
 
-    report = import_root(root, label='camp')
+    import_root(root, label='camp')
 
-    s30, s50 = str(other.resolve()), str(lost.resolve())
-    assert sorted(_live_sources()) == sorted([('complete', s30), ('failed_integrity', s50)])
-    assert report.rulings.pending == [(p50, s50, 'missing')]
+    s30 = str(other.resolve())
+    assert _live_sources() == [('complete', s30)]
     extras = orm.load_group('friction2d/camp').base.extras.all
-    assert 'friction2d_pending_rulings' not in extras
-    assert 'friction2d_ruling_conflicts' not in extras
-    assert set(extras[LEDGER]) == {p30, p50}
+    assert set(extras[LEDGER]) == {p30}
 
 
 def test_a_moved_root_keeps_the_former_own_files_rulings(

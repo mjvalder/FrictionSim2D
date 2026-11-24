@@ -101,11 +101,8 @@ FrictionSim2D aiida import ./simulation_20260421_143404 --label 251113-afm --dry
 FrictionSim2D aiida import ./simulation_20260421_143404 --label 251113-afm
 ```
 
-A tree built before provenance schema 2.2.0 needs a `run_uuid` first:
-
-```bash
-FrictionSim2D aiida stamp-uuid ./simulation_20260421_143404
-```
+A tree built before provenance schema 2.2.0 needs a `run_uuid` first: stamp it with the
+standalone script kept beside the data.
 
 Summarise the complete points, collect them into a dataset, and compare two
 sets:

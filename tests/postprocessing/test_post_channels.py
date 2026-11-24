@@ -42,8 +42,7 @@ def test_final_data_path_matches_on_value_not_spelling(tmp_path):
 def test_afm_channels(tmp_path):
     run_dir = make_family_run(tmp_path, 'afm')
     path = write_final_data(run_dir, 'afm')
-    record = read_provenance(run_dir / 'provenance.json',
-                             family='afm', model='afm')
+    record = read_provenance(run_dir / 'provenance.json')
 
     out = post_channels(path, record, 'afm')
 
@@ -58,8 +57,7 @@ def test_sheet_channels(tmp_path):
     run_dir = make_family_run(tmp_path, 'sheetonsheet')
     path = write_final_data(run_dir, 'sheetonsheet', load_kind='pressure',
                             load=30.0, angle=0.0)
-    record = read_provenance(run_dir / 'provenance.json',
-                             family='sheetonsheet', model='sheetonsheet')
+    record = read_provenance(run_dir / 'provenance.json')
 
     out = post_channels(path, record, 'sheetonsheet')
 
@@ -76,8 +74,7 @@ def test_an_empty_layer_type_map_yields_nothing(tmp_path):
     record['layer_type_map'] = {}
     prov.write_text(json.dumps(record), encoding='utf-8')
 
-    out = post_channels(path, read_provenance(prov, family='flake',
-                                              model='sheetonsheet'), 'flake')
+    out = post_channels(path, read_provenance(prov), 'flake')
 
     assert out == {}
 

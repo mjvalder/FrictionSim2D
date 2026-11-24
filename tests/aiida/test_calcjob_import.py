@@ -551,7 +551,7 @@ def test_a_run_without_run_uuid_raises(computer, tmp_path):
     del record['run_uuid']
     loc.provenance_file.write_text(json.dumps(record), encoding='utf-8')
 
-    with pytest.raises(MissingRunUUID, match='stamp-uuid') as info:
+    with pytest.raises(MissingRunUUID, match='stamp_uuid.py') as info:
         deck_inputs(loc, discover_decks(loc)[0], computer=computer)
     assert str(loc.provenance_file) in str(info.value)
     assert isinstance(info.value, ValueError)

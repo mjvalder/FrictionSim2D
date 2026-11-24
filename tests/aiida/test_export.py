@@ -653,9 +653,6 @@ def test_the_ruling_ledgers_sources_are_basenamed_in_the_archive(
         assert apply_rulings('camp', review).conflicts
     reviews[1].unlink()
     assert apply_rulings('camp').pending
-    stale = [{'point': pid, 'source': str(reviews[0].resolve()), 'ruling': 'pass'}]
-    orm.load_group('friction2d/camp').base.extras.set_many({   # the extras it replaced
-        'friction2d_pending_rulings': stale, 'friction2d_ruling_conflicts': stale})
 
     path = export_archive('camp', tmp_path / 'camp.aiida')
 
@@ -668,8 +665,6 @@ def test_the_ruling_ledgers_sources_are_basenamed_in_the_archive(
     assert sorted(ledger[pid]) == ['integrity_rulings.yaml', 'x.yaml', 'x.yaml (2)']
     assert sorted(e['status'] for e in ledger[pid].values()) == [
         'missing', 'present', 'present']
-    assert 'friction2d_pending_rulings' not in group.base.extras.all
-    assert 'friction2d_ruling_conflicts' not in group.base.extras.all
 
     # The loaded set reads no file for them and replaces no ruling.
     nodes = orm.QueryBuilder().append(orm.Node).count()

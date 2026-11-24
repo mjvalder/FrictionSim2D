@@ -176,7 +176,7 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 - `FrictionSim2D run afm|sheetonsheet|pes-sheet|pes-tip|indent ...`
 - `FrictionSim2D hpc generate ...`
 - `FrictionSim2D settings show|init|reset`
-- `FrictionSim2D aiida status|setup|preflight|stamp-uuid|import|rule|recheck|postprocess|dataset|query|list-sets|export-results|rebuild|reindex|verify|delete|clear|export|import-archive`
+- `FrictionSim2D aiida status|setup|preflight|import|rule|recheck|postprocess|dataset|query|list-sets|export-results|rebuild|reindex|verify|delete|clear|export|import-archive`
 - `FrictionSim2D postprocess read|plot|pes-scan|indent`
 
 Full reference: [documentation/commands.md](documentation/commands.md).

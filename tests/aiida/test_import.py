@@ -510,7 +510,7 @@ def test_a_run_without_run_uuid_fails_alone(aiida_profile_clean, tmp_path):
     assert not report.ok()
     assert report.failures[0][0] == bad.tokens.rel_path
     assert 'MissingRunUUID' in report.failures[0][1]
-    assert 'FrictionSim2D aiida stamp-uuid' in report.failures[0][1]
+    assert 'stamp_uuid.py' in report.failures[0][1]
     assert len(report.created_decks) == 2
     assert len(_calcjobs()) == 2
 

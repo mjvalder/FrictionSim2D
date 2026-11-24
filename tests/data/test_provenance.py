@@ -97,39 +97,10 @@ def test_every_component_gets_its_own_entry():
     assert rec.materials[0].pot_file_sha256 == 'ab' * 32
 
 
-def test_reader_upgrades_a_one_x_file(tmp_path):
-    legacy = {
-        'schema_version': '1.0.0',
-        'seed_thermal_tip': 1, 'seed_thermal_sub': 2, 'seed_velocity': 3,
-        'substrate_realization_id': 'abc', 'damping_ratio': 0.0072, 'damp_ev': None,
-        'git_commit': 'deadbeef', 'git_dirty': False, 'config_hash': 'ff' * 32,
-        'layer_type_map': {'layer_1': [7, 8, 9]}, 'contact_cutoff': 4.8,
-        'cutoff_source': 'uff_sigma_k1.5',
-        'thermostat_scheme': 'langevin_y_tip_sub_nve_sheet',
-        'run_role': 'label', 'load_requested': 30.0,
-        'pot_path': '/p/MoS.sw', 'pot_type': 'sw',
-        'pot_resolution_route': 'explicit', 'pot_file_sha256': 'cd' * 32,
-    }
-    path = tmp_path / 'provenance.json'
-    path.write_text(json.dumps(legacy), encoding='utf-8')
-
-    rec = read_provenance(path, family='hetero', model='sheetonsheet',
-                          material_name='h-MoS2')
-
-    assert rec.schema_version == '2.2.0'
-    assert rec.family == 'hetero'
-    assert rec.model == 'sheetonsheet'
-    assert len(rec.materials) == 1
-    assert rec.materials[0] == MaterialProvenance(
-        name='h-MoS2', role='sheet', pot_path='/p/MoS.sw', pot_type='sw',
-        pot_resolution_route='explicit', pot_file_sha256='cd' * 32)
-    assert rec.contact_cutoff == 4.8
-
-
 def test_reader_leaves_a_two_x_file_alone(tmp_path):
     path = write_provenance(tmp_path, _record())
 
-    rec = read_provenance(path, family='afm', model='afm')
+    rec = read_provenance(path)
 
     assert rec == _record()
 
@@ -282,158 +253,6 @@ def test_an_unset_run_uuid_is_not_written(tmp_path):
     assert 'run_uuid' not in data and 'run_uuid_stamped_at' not in data
 
 
-# --- legacy stamping -----------------------------------------------------------
-
-def _legacy_file(path, **extra):
-    """A 2.1.0 provenance.json as a pre-5b build wrote it (no run_uuid)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = json.loads(_record().model_dump_json(exclude={'interlayer'}))
-    data['schema_version'] = '2.1.0'
-    data.pop('run_uuid', None)
-    data.pop('run_uuid_stamped_at', None)
-    data['drive_k'] = 8.0 / 16.02          # a float that must survive unchanged
-    data.update(extra)
-    path.write_text(json.dumps(data, indent=2), encoding='utf-8')
-    return path
-
-
-def _afm_tree(root):
-    base = root / 'afm' / 'h-MoS2' / '100x_100y' / 'sub_aSi_tip_Si_r25' / 'K300'
-    return [_legacy_file(base / f'L{n}' / 'provenance.json') for n in (1, 2)]
-
-
-def test_stamp_gives_each_legacy_record_its_own_uuid(tmp_path):
-    import datetime
-    from uuid import UUID
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    files = _afm_tree(tmp_path)
-    before = [json.loads(p.read_text(encoding='utf-8')) for p in files]
-
-    report = stamp_run_uuids(tmp_path)
-
-    assert sorted(report.stamped) == sorted(files)
-    assert report.already == [] and report.unreadable == []
-    after = [json.loads(p.read_text(encoding='utf-8')) for p in files]
-    uuids = [a['run_uuid'] for a in after]
-    assert all(UUID(u).version == 4 for u in uuids) and uuids[0] != uuids[1]
-    for old, new in zip(before, after):
-        assert new['run_uuid_stamped_at'] == datetime.date.today().isoformat()
-        assert {k: v for k, v in new.items()
-                if k not in ('run_uuid', 'run_uuid_stamped_at')} == old
-        assert new['schema_version'] == '2.1.0'
-    assert read_provenance(files[0]).run_uuid == uuids[0]
-
-
-def test_stamp_is_idempotent(tmp_path):
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    files = _afm_tree(tmp_path)
-    stamp_run_uuids(tmp_path)
-    texts = [p.read_bytes() for p in files]
-
-    again = stamp_run_uuids(tmp_path)
-
-    assert again.stamped == [] and sorted(again.already) == sorted(files)
-    assert [p.read_bytes() for p in files] == texts
-
-
-def test_stamp_never_overwrites_an_existing_uuid(tmp_path):
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    path = write_provenance(tmp_path / 'run',
-                            _record(run_uuid='3f0c2a7e-1b7d-4c4e-9a51-6d2f0e8b9c11'))
-    text = path.read_bytes()
-
-    report = stamp_run_uuids(tmp_path)
-
-    assert report.already == [path] and report.stamped == []
-    assert path.read_bytes() == text
-
-
-def test_stamp_dry_run_writes_nothing(tmp_path):
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    files = _afm_tree(tmp_path)
-    texts = [p.read_bytes() for p in files]
-
-    report = stamp_run_uuids(tmp_path, dry_run=True)
-
-    assert sorted(report.stamped) == sorted(files)
-    assert [p.read_bytes() for p in files] == texts
-    assert sorted(p.name for p in files[0].parent.iterdir()) == ['provenance.json']
-
-
-def test_stamp_reports_an_unreadable_file(tmp_path):
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    good = _legacy_file(tmp_path / 'a' / 'provenance.json')
-    bad = tmp_path / 'b' / 'provenance.json'
-    bad.parent.mkdir()
-    bad.write_text('{"truncated": ', encoding='utf-8')
-    listed = tmp_path / 'c' / 'provenance.json'
-    listed.parent.mkdir()
-    listed.write_text('[1, 2]', encoding='utf-8')
-
-    report = stamp_run_uuids(tmp_path)
-
-    assert report.stamped == [good]
-    assert sorted(report.unreadable) == sorted([bad, listed])
-    assert bad.read_text(encoding='utf-8') == '{"truncated": '
-
-
-def test_stamp_keeps_the_file_mode(tmp_path):
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    path = _legacy_file(tmp_path / 'provenance.json')
-    path.chmod(0o644)
-    stamp_run_uuids(tmp_path)
-    assert path.stat().st_mode & 0o777 == 0o644
-
-
-def test_stamp_lists_a_non_uuid_run_uuid_as_invalid(tmp_path):
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    path = write_provenance(tmp_path / 'run', _record(run_uuid='keep-me'))
-    text = path.read_bytes()
-
-    report = stamp_run_uuids(tmp_path)
-
-    assert report.invalid == [path]
-    assert report.stamped == [] and report.already == []
-    assert path.read_bytes() == text
-    assert 'invalid run_uuid: ' + str(path) in report.render()
-
-
-def test_stamp_treats_a_null_run_uuid_as_missing(tmp_path):
-    from uuid import UUID
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    path = _legacy_file(tmp_path / 'provenance.json', run_uuid=None)
-
-    report = stamp_run_uuids(tmp_path)
-
-    assert report.stamped == [path]
-    assert UUID(json.loads(path.read_text(encoding='utf-8'))['run_uuid']).version == 4
-
-
-def test_a_failed_rename_leaves_the_original_and_no_temp_file(tmp_path, monkeypatch):
-    import os
-    from frictionsim2d.data.provenance import stamp_run_uuids
-    path = _legacy_file(tmp_path / 'provenance.json')
-    text = path.read_bytes()
-
-    def boom(*_a, **_k):
-        raise OSError('disk full')
-    monkeypatch.setattr(os, 'replace', boom)
-
-    report = stamp_run_uuids(tmp_path)
-
-    assert report.unreadable == [path] and report.stamped == []
-    assert path.read_bytes() == text
-    assert sorted(p.name for p in tmp_path.iterdir()) == ['provenance.json']
-
-
-def test_render_says_would_stamp_on_a_dry_run():
-    from pathlib import Path
-    from frictionsim2d.data.provenance import StampReport
-    report = StampReport(stamped=[Path('a')])
-    assert report.render(dry_run=True).startswith('would stamp 1,')
-    assert report.render().startswith('stamped 1,')
-
-
 class _Cfg(pydantic.BaseModel):
     name: str = 'h-MoS2 \u00c5ngstr\u00f6m'
     cutoff: float = 11.0
@@ -450,18 +269,3 @@ def test_config_hash_recomputes_the_builders_hash_from_config_json(model, mock_s
     written = obj.model_dump_json(indent=2)
     assert config_hash(json.loads(written)) == hashlib.sha256(
         obj.model_dump_json().encode()).hexdigest()
-
-
-def test_write_atomic_failure_leaves_the_original_and_no_temp_file(tmp_path, monkeypatch):
-    import os
-    from frictionsim2d.data import provenance
-    target = tmp_path / 'provenance.json'
-    target.write_text('original')
-
-    def boom(*args, **kwargs):
-        raise OSError('rename failed')
-    monkeypatch.setattr(os, 'replace', boom)
-    with pytest.raises(OSError, match='rename failed'):
-        provenance._write_atomic(target, 'new')
-    assert target.read_text() == 'original'
-    assert list(tmp_path.glob('*.tmp')) == []

@@ -5,16 +5,11 @@ enriched post-run from the LAMMPS log (``parse_log_extras``). A missing
 required field fails the *build*, not the analysis: the record is a Pydantic
 model and builders must construct it completely.
 """
-import datetime
 import hashlib
 import json
 import logging
-import os
 import re
-import shutil
-import tempfile
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
@@ -72,7 +67,8 @@ class ProvenanceRecord(BaseModel):
     # run identity: a uuid4 drawn at build time, one per provenance.json (each
     # AFM L{n} record gets its own; a rebuild is a new run). Optional only so
     # pre-2.2 files still read. ``run_uuid_stamped_at`` (ISO date) marks a
-    # legacy record that :func:`stamp_run_uuids` gave a uuid after the fact.
+    # legacy record that the standalone stamp_uuid.py script (kept beside the
+    # data) gave a uuid after the fact.
     run_uuid: Optional[str] = None
     run_uuid_stamped_at: Optional[str] = None
 
@@ -117,7 +113,7 @@ class ProvenanceRecord(BaseModel):
     tip_group_sizes: Optional[Dict[str, int]] = None
 
     # run identity / roles
-    run_role: Literal['label', 'probe', 'both_forbidden'] = 'label'
+    run_role: Literal['label', 'probe'] = 'label'
     load_requested: Optional[float]
     load_achieved: Optional[float] = None      # enriched post-run
     pressure_requested: Optional[float] = None
@@ -212,24 +208,9 @@ def write_provenance(run_dir: Path, record: ProvenanceRecord) -> Path:
     return out
 
 
-def read_provenance(path: Path, *, family: str = 'afm', model: str = 'afm',
-                    material_name: str = '') -> ProvenanceRecord:
-    """Read a provenance.json, upgrading a schema-1.x file in memory.
-
-    A 1.x file predates ``family``/``model``/``materials``: the keyword
-    arguments supply the first two (``frictionsim2d.run.tree.discover_runs`` passes the
-    run's tokens) and the single ``pot_*`` triple becomes one ``'sheet'``-role
-    :class:`MaterialProvenance` named ``material_name``. A 2.x file ignores all
-    three. The file on disk is never rewritten.
-    """
+def read_provenance(path: Path) -> ProvenanceRecord:
+    """Read a schema-2 provenance.json (a 1.x file fails validation)."""
     data = json.loads(Path(path).read_text(encoding='utf-8'))
-    if str(data.get('schema_version', '1.0.0')).startswith('1.'):
-        pot = {k: data.pop(k, None) for k in
-               ('pot_path', 'pot_type', 'pot_resolution_route', 'pot_file_sha256')}
-        data['schema_version'] = PROVENANCE_SCHEMA_VERSION
-        data.setdefault('family', family)
-        data.setdefault('model', model)
-        data['materials'] = [MaterialProvenance(name=material_name, role='sheet', **pot)]
     return ProvenanceRecord(**data)
 
 
@@ -320,91 +301,3 @@ def parse_hold_files(data_dir: Path) -> Dict[str, float]:
         except (ValueError, ZeroDivisionError, OSError) as exc:
             logger.warning("Skipping unparseable hold file %s (%s).", path, exc)
     return out
-
-
-@dataclass
-class StampReport:
-    """What :func:`stamp_run_uuids` did, as lists of ``provenance.json`` paths.
-
-    ``invalid`` holds files whose ``run_uuid`` is set but is not a UUID: they
-    are listed for a human to fix, never overwritten.
-    """
-    stamped: List[Path] = field(default_factory=list)
-    already: List[Path] = field(default_factory=list)
-    unreadable: List[Path] = field(default_factory=list)
-    invalid: List[Path] = field(default_factory=list)
-
-    def render(self, dry_run: bool = False) -> str:
-        """One summary line, then each unreadable and invalid file."""
-        verb = 'would stamp' if dry_run else 'stamped'
-        lines = [f'{verb} {len(self.stamped)}, already {len(self.already)}, '
-                 f'unreadable {len(self.unreadable)}, invalid {len(self.invalid)}']
-        lines += [f'  unreadable: {path}' for path in self.unreadable]
-        lines += [f'  invalid run_uuid: {path}' for path in self.invalid]
-        return '\n'.join(lines)
-
-
-def _write_atomic(path: Path, text: str) -> None:
-    """Write ``text`` to a temp file next to ``path``, then rename over it."""
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp')
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        shutil.copymode(path, tmp)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
-
-
-def stamp_run_uuids(root: Path, *, dry_run: bool = False) -> StampReport:
-    """Give every legacy ``provenance.json`` under ``root`` a ``run_uuid``.
-
-    Each file without one (absent or null) gets its own fresh uuid4 -- so each
-    AFM ``L{n}`` record gets its own -- plus ``run_uuid_stamped_at`` (today, ISO),
-    which keeps a stamped legacy run distinguishable from a 2.2 build. An
-    existing ``run_uuid`` is never overwritten, so a second pass stamps
-    nothing; one that is not a UUID is reported in ``invalid``. Every other
-    key keeps its value (``schema_version`` included); the write is atomic.
-    A file that is not a JSON object is reported in ``unreadable``, never
-    raised. ``dry_run`` reports without writing.
-    """
-    report = StampReport()
-    today = datetime.date.today().isoformat()
-    for path in sorted(Path(root).rglob('provenance.json')):
-        if not path.is_file():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding='utf-8'))
-        except (OSError, UnicodeDecodeError, ValueError) as exc:
-            logger.warning('Unreadable provenance %s: %s', path, exc)
-            report.unreadable.append(path)
-            continue
-        if not isinstance(data, dict):
-            logger.warning('Unreadable provenance %s: not a JSON object', path)
-            report.unreadable.append(path)
-            continue
-        if data.get('run_uuid'):
-            try:
-                uuid.UUID(str(data['run_uuid']))
-            except ValueError:
-                logger.warning('%s: run_uuid %r is not a UUID; left as is.',
-                               path, data['run_uuid'])
-                report.invalid.append(path)
-            else:
-                report.already.append(path)
-            continue
-        report.stamped.append(path)
-        if dry_run:
-            continue
-        data['run_uuid'] = new_run_uuid()
-        data['run_uuid_stamped_at'] = today
-        try:
-            _write_atomic(path, json.dumps(data, indent=2))
-        except OSError as exc:
-            logger.warning('Could not stamp %s: %s', path, exc)
-            report.stamped.remove(path)
-            report.unreadable.append(path)
-    return report

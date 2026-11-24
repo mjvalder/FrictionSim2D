@@ -92,9 +92,7 @@ def run_provenance(locator, config: Optional[Mapping]) -> dict:
         return {'error': str(exc), 'provenance_sha256': None,
                 'config': settings}
     try:
-        record = read_provenance(
-            path, family=family, model=tokens.model,
-            material_name=tokens.materials[0] if tokens.materials else '')
+        record = read_provenance(path)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.warning("Unreadable provenance %s: %s", path, exc)
         return {'error': str(exc), 'provenance_sha256': sha,

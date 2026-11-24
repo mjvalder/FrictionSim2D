@@ -395,27 +395,6 @@ their node's content; exits 1 when it finds either:
 FrictionSim2D aiida verify [--profile TEXT]
 ```
 
-### aiida stamp-uuid
-
-Give every legacy `provenance.json` under ROOT a `run_uuid`. Runs built
-before provenance schema 2.2.0 carry no run identity, and the CalcJob import
-refuses them (`MissingRunUUID`). Needs no aiida-core:
-
-```bash
-FrictionSim2D aiida stamp-uuid ROOT [--dry-run]
-```
-
-- Each file without a `run_uuid` gets a fresh uuid4 (each AFM `L{n}` record
-  its own) and `run_uuid_stamped_at` (ISO date), so stamped legacy runs stay
-  distinguishable. Every other key keeps its value; the write is atomic.
-- An existing `run_uuid` is never overwritten: a second pass stamps nothing.
-- `--dry-run` reports what would be stamped and writes nothing.
-- Stamping rewrites `provenance.json`. Stamp once, before the first import,
-  and keep the stamped tree: a separately stamped copy of the same runs gets
-  new `run_uuid` values and imports as different runs.
-- Exit code 1 if any `provenance.json` was unreadable, or holds a `run_uuid`
-  that is not a UUID (listed under `invalid`, never overwritten).
-
 ### aiida list-sets
 
 ```bash
