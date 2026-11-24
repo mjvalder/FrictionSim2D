@@ -33,6 +33,7 @@ import pandas as pd
 from pydantic import field_validator
 from scipy.spatial import ConvexHull, QhullError, cKDTree  # pylint: disable=no-name-in-module
 
+from ..postprocessing.snapshot_geometry import expand_lammps_types, parse_type_groups
 from .base import Analysis, register
 from .cof_ranking import WINDOW, _loads
 from .periods import (NO_PERIOD, PeriodDepends, PeriodParams, material_key, period_map,
@@ -79,18 +80,12 @@ _PAIR = re.compile(r'^pair_coeff (\S+) ([\d*]+) lj/cut (\S+) (\S+)\s*# \w+\(tip\
 _LAYER = re.compile(r'^layer_(\d+)$')
 
 
-def _expand(spec: str) -> Set[int]:
-    """``"7*14"`` -> ``{7, ..., 14}`` (s40:63-65)."""
-    first, _, last = spec.partition('*')
-    return set(range(int(first), int(last or first) + 1))
-
-
 def tip_pairs(text: str, tip: Set[int]) -> Dict[int, Tuple[str, float, float]]:
     """``{sheet type: (element, eps, sigma)}`` of the tip-sheet LJ pairs whose
     first type range is the tip's (s40:68-71)."""
     return {t: (el, float(eps), float(sig))
-            for first, spec, eps, sig, el in _PAIR.findall(text) if _expand(first) & tip
-            for t in _expand(spec)}
+            for first, spec, eps, sig, el in _PAIR.findall(text) if expand_lammps_types(first) & tip
+            for t in expand_lammps_types(spec)}
 
 
 def anion(elements: Set[str]) -> str:
@@ -249,7 +244,6 @@ class Contact(PeriodDepends, Analysis):  # pylint: disable=too-few-public-method
     @staticmethod
     def _states(source, row, a_x: float) -> List[Tuple[str, Dict[str, Any]]]:
         from ..postprocessing.integrity import read_snapshot  # pylint: disable=import-outside-toplevel
-        from ..postprocessing.snapshot_geometry import parse_type_groups  # pylint: disable=import-outside-toplevel
         found: List[Tuple[str, Dict[str, Any]]] = []
         text: Optional[str] = None
         for state in ('load', 'final'):

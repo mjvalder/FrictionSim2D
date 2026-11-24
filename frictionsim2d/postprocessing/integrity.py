@@ -35,6 +35,7 @@ import pandas as pd
 from frictionsim2d.core.config import IntegritySettings
 
 from .run_status import UNOBSERVED
+from .snapshot_geometry import parse_type_groups
 
 AFM_LIKE = ('afm', 'indent', 'pes_tip')
 SHEET_LIKE = ('sheetonsheet', 'hetero', 'flake', 'pes_sheet')
@@ -416,17 +417,8 @@ def verdict(status: str, measures: Dict[str, float], settings: IntegritySettings
 # Layer and reference resolution
 # --------------------------------------------------------------------------
 
-_GROUP_RE = re.compile(r"group (layer_\d+) type ([\d* ]+)")
+_LAYER_RE = re.compile(r"layer_\d+")
 _LOAD_RE = re.compile(r'^load_(?P<load>-?\d+\.?\d*(?:[eE][+-]?\d+)?)N\.data$')
-
-
-def expand(spec: str) -> Set[int]:
-    """s48 ``expand`` (:49): ``'1*3 7'`` -> ``{1, 2, 3, 7}``."""
-    out: Set[int] = set()
-    for tok in spec.split():
-        a, _, b = tok.partition('*')
-        out |= set(range(int(a), int(b or a) + 1))
-    return out
 
 
 def _layer_index(name: str) -> int:
@@ -492,9 +484,10 @@ def resolve_layers(locator, record, ref_path: Optional[Path], n_layers: int,
         text = settings_file.read_text(encoding='utf-8')
     except OSError:
         text = ''
-    groups = _GROUP_RE.findall(text)
+    groups = {name: types for name, types in parse_type_groups(text).items()
+              if _LAYER_RE.fullmatch(name)}
     if groups:
-        return _ordered({name: expand(spec) for name, spec in groups})
+        return _ordered(groups)
     if family not in SHEET_LIKE:
         return {}
     return _zband_layers(ref_path, n_layers)

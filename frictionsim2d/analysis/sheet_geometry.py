@@ -19,6 +19,7 @@ import pandas as pd
 from pydantic import BaseModel
 from scipy.spatial import Delaunay, cKDTree  # pylint: disable=no-name-in-module
 
+from ..postprocessing.snapshot_geometry import expand_lammps_types
 from .base import Analysis, register
 from .source import PASS_STATUS
 
@@ -26,15 +27,6 @@ __all__ = ['TOP_TOL', 'SheetGeometry', 'describe', 'read_lmp', 'read_settings']
 
 #: Atoms within this of the highest one form the top plane (s42:42, A).
 TOP_TOL = 0.35
-
-
-def _expand(spec: str) -> List[int]:
-    """``"7*8 10"`` -> ``[7, 8, 10]`` (s42:45-50)."""
-    out: List[int] = []
-    for tok in spec.split():
-        first, _, last = tok.partition('*')
-        out += list(range(int(first), int(last or first) + 1))
-    return out
 
 
 #: Atom style -> (column of the type, column of x) in an ``Atoms`` line. s42
@@ -71,11 +63,11 @@ def read_settings(text: str) -> Tuple[Dict[int, str], Dict[str, float], Dict[int
     ``system.in.settings`` (s42:63-73). The sigma map is empty without a tip."""
     elem: Dict[int, str] = {}
     for spec, name in re.findall(r'^mass ([\d*]+) \S+ #(\w+)', text, re.M):
-        for t in _expand(spec):
+        for t in expand_lammps_types(spec):
             elem[t] = name
     sigma = {m[1]: float(m[0]) for m in re.findall(
         r'pair_coeff 4\*6 \S+ lj/cut \S+ (\S+) # Si\(tip\)-(\w+)\(sheet\)', text)}
-    layers = {int(i): set(_expand(spec))
+    layers = {int(i): set(expand_lammps_types(spec))
               for i, spec in re.findall(r'^group layer_(\d+) type ([\d* ]+)', text, re.M)}
     return elem, sigma, layers
 
