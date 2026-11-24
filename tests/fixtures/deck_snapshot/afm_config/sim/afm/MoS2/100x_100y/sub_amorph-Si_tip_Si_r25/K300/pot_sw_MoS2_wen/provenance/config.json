@@ -178,8 +178,6 @@
       "ramp_max_iterations": 40
     },
     "quench": {
-      "run_local": true,
-      "n_procs": 16,
       "quench_slab_dims": [
         200,
         200,
@@ -189,9 +187,8 @@
       "melt_temp": 2500.0,
       "quench_temp": 300.0,
       "timestep": 0.002,
-      "melt_steps": 50000,
-      "equilibrate_steps": 20000,
-      "allow_generate": false
+      "melt_steps": 20000,
+      "equilibrate_steps": 10000
     },
     "output": {
       "dump": {

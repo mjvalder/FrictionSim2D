@@ -10,7 +10,6 @@ expensive boundaries stay mocked: ``run_lammps_commands`` (a real LAMMPS
 invocation) and ``make_amorphous`` (a real melt-quench) -- both already
 allowed by tests/repo/test_mock_targets.py's ALLOWED_TARGET_PREFIXES.
 """
-import json
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,7 +22,7 @@ from frictionsim2d.builders.afm import AFMSimulation
 from frictionsim2d.builders import SheetOnSheetSimulation as ExportedSheetOnSheetSimulation
 from frictionsim2d.builders import components
 from frictionsim2d.builders import components as exported_components
-from frictionsim2d.builders.construction.components import cifread, get_amorphous_path
+from frictionsim2d.builders.construction.components import cifread
 from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
 from frictionsim2d.core.config import AFMSimulationConfig, SheetConfig, load_settings
 
@@ -182,13 +181,12 @@ def test_afm_builder_structure(afm_config, temp_dir):
     captured: dict = {}
 
     def _fake_make_amorphous(mat, cif_path, target_x, target_y, target_z,
-                              pot_path, pot_type, output_dir, settings,
-                              allow_generate=True, **_kwargs):
+                              pot_path, pot_type, settings, **_kwargs):
         # Stand-in "amorphous" substrate: a real (crystalline) orthogonal
-        # slab is good enough here -- this test is not about melt-quench
-        # fidelity (test_amorphous_guard.py owns that), only about the
+        # slab is good enough here -- this test is not about the block
+        # library (test_amorphous_library.py owns that), only about the
         # build() orchestration around a real substrate file.
-        out_path = Path(output_dir) / f"{mat}_amor.lmp"
+        out_path = Path(temp_dir) / f"{mat}_amor.lmp"
         components.create_orthogonal_slab(
             Path(cif_path), out_path, target_x=target_x, target_y=target_y,
             target_z=target_z,
@@ -318,86 +316,9 @@ def test_build_monolayer_splits_edge_types_when_enabled(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The three biggest coverage gaps (builders-construction.md (c), findings 1-3)
+# Coverage gaps (builders-construction.md (c), findings 2-3; finding 1, the
+# melt-quench render, moved to test_amorphous_library.py with the quench rework)
 # ---------------------------------------------------------------------------
-
-def test_make_amorphous_manual_run_writes_real_script_and_raises(tmp_path):
-    """Finding 1(a): settings.quench.run_local=False writes a real, non-empty
-    melt-quench script (guards a silently-empty Jinja render) naming the real
-    drawn melt_seed and the cif's real element order, then raises naming the
-    manual-run script -- before anything is written to the package materials
-    directory (the RuntimeError fires ahead of the metadata/amor_file write).
-    A distinctive material name guarantees no cached hit short-circuits the
-    melt-quench path and cannot collide with a real material."""
-    settings = load_settings().model_copy(deep=True)
-    settings.quench.run_local = False
-    mat_name = "zz_test_phase2c_manual"
-
-    with pytest.raises(RuntimeError, match=r"make_amorphous_zz_test_phase2c_manual\.in"):
-        components.make_amorphous(
-            mat_name, Path(SI_CIF),
-            target_x=8.0, target_y=8.0, target_z=8.0,
-            pot_path=Path(SI_POT), pot_type="sw",
-            output_dir=tmp_path, settings=settings,
-        )
-
-    local_lmp_input = tmp_path / f"make_amorphous_{mat_name}.in"
-    assert local_lmp_input.exists()
-    text = local_lmp_input.read_text(encoding="utf-8")
-
-    velocity_line = next(l for l in text.splitlines() if l.strip().startswith("velocity"))
-    seed_token = velocity_line.split()[4]
-    assert seed_token.isdigit() and 1 <= int(seed_token) <= 900_000_000
-
-    elements = cifread(Path(SI_CIF))['elements']
-    assert elements
-    for element in elements:
-        assert element in text
-
-    # Nothing landed in the package materials directory.
-    assert get_amorphous_path(mat_name) is None
-
-
-def test_make_amorphous_run_local_success_writes_metadata_and_cleans_base_block(tmp_path):
-    """Finding 1(b): settings.quench.run_local=True with only subprocess.run
-    mocked (the real external-process boundary) -- a "successful" quench
-    writes real metadata (melt_seed, quench_nsteps, pot_type) beside the
-    amorphous block, and the crystal base_block is cleaned up afterward.
-    This does write to the real package materials directory (make_amorphous's
-    actual contract for a real caller), so it tidies up its own output."""
-    settings = load_settings().model_copy(deep=True)
-    settings.quench.run_local = True
-    settings.quench.n_procs = 1
-    mat_name = "zz_test_phase2c_auto"
-
-    meta_path = None
-    try:
-        with patch("subprocess.run") as mock_run:
-            amor_file = components.make_amorphous(
-                mat_name, Path(SI_CIF),
-                target_x=8.0, target_y=8.0, target_z=8.0,
-                pot_path=Path(SI_POT), pot_type="sw",
-                output_dir=tmp_path, settings=settings,
-            )
-        mock_run.assert_called_once()
-
-        meta_path = Path(str(amor_file) + '.json')
-        assert meta_path.exists()
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        assert meta['material'] == mat_name
-        assert meta['pot_type'] == "sw"
-        assert isinstance(meta['melt_seed'], int) and 1 <= meta['melt_seed'] <= 900_000_000
-        assert meta['quench_nsteps'] >= 1
-
-        base_block = tmp_path / f"{mat_name}_crystal_block.lmp"
-        assert not base_block.exists()   # unlinked after the "successful" run
-    finally:
-        if meta_path is not None and meta_path.exists():
-            meta_path.unlink()
-        stray_amor = get_amorphous_path(mat_name)
-        if stray_amor is not None and stray_amor.exists():
-            stray_amor.unlink()
-
 
 def test_calculate_layer_shifts_pair_bonding_n_layers_3(tmp_path):
     """Finding 2: use_pair_bonding=True, n_layers=3 -- the exact shift-tuple

@@ -1,0 +1,33 @@
+{
+  "material": "Si",
+  "potential_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad",
+  "melt_temp": 2500.0,
+  "quench_temp": 300.0,
+  "quench_rate": 1000000000000.0,
+  "timestep": 0.002,
+  "melt_steps": 20000,
+  "equilibrate_steps": 10000,
+  "key8": "021d81ab",
+  "key_sha256": "021d81ab34320c6f3b0caef2c81a8d1a4dd288db16d9dbd8a80231853782242e",
+  "box": [
+    214.79007875865742,
+    214.79007875865742,
+    48.327767720694126
+  ],
+  "natoms": 115200,
+  "block_sha256": "6fc2edcad740fc210a27775050c4c33178d67cfe47fdd89bc4ced94c0cdfc3b4",
+  "melt_seed": 1234579,
+  "quench_nsteps": 1100000,
+  "pot_type": "sw",
+  "potential_file": "Si.sw",
+  "slab_requested": [
+    200,
+    200,
+    50
+  ],
+  "source": "legacy",
+  "derived_from": "d8844877 tribo_2D/model_init.py",
+  "frictionsim2d_version": "unknown",
+  "created": "2025-10-01T13:11:43",
+  "schema": "amorphous-1"
+}

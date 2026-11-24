@@ -53,6 +53,25 @@ def isolated_xdg_config_home(tmp_path_factory):
         os.environ["XDG_CONFIG_HOME"] = previous
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_xdg_data_home(tmp_path_factory):
+    """Point ``$XDG_DATA_HOME`` at a session temp dir.
+
+    The amorphous block library (``builders/construction/amorphous.py``) reads
+    ``$XDG_DATA_HOME/FrictionSim2D/{amorphous,materials-pack}``; a developer's
+    own blocks there would change which block a build picks. Per-test
+    monkeypatch of the variable still works on top.
+    """
+    xdg = tmp_path_factory.mktemp("xdg_data_home")
+    previous = os.environ.get("XDG_DATA_HOME")
+    os.environ["XDG_DATA_HOME"] = str(xdg)
+    yield xdg
+    if previous is None:
+        os.environ.pop("XDG_DATA_HOME", None)
+    else:
+        os.environ["XDG_DATA_HOME"] = previous
+
+
 @pytest.fixture(autouse=True)
 def fixed_lammps_pair_styles(monkeypatch):
     """Keep pot_type validation independent of the host's ``lmp`` binary.
@@ -92,8 +111,6 @@ def mock_settings() -> GlobalSettings:
             drive_method='smd',
         ),
         quench=QuenchSettings(
-            run_local=True,
-            n_procs=4,
             quench_slab_dims=[50, 50, 50],
             quench_rate=10.0,
             quench_melt_temp=3500.0,

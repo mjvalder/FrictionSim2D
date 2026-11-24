@@ -613,18 +613,11 @@ _SETTINGS: Dict[str, SectionOverride] = {
     ),
     'quench': SectionOverride(
         label='Quench',
-        help='Melt-quench parameters for amorphous structures.',
+        help=('Melt-quench conditions; they key the amorphous block library, so '
+              'a run reuses only a block made under the same conditions.'),
         fields={
-            'allow_generate': FieldOverride(
-                label='Allow generating amorphous structures', order=1,
-                help='When off, a missing structure is an error.',
-                detail=('Rather than a melt-quench. The preview always runs with this '
-                        'off, whatever this setting says.'),
-            ),
-            'run_local': FieldOverride(label='Run locally', order=2),
-            'n_procs': FieldOverride(label='Processes', order=3),
             'quench_slab_dims': FieldOverride(
-                label='Quench slab', unit=A, order=4, editor='xyz_dims'),
+                label='Quench slab', unit=A, order=1, editor='xyz_dims'),
         },
     ),
     'thermostat': SectionOverride(

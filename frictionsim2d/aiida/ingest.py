@@ -804,6 +804,7 @@ def import_root(root: Path, label: Optional[str] = None, *,
     Raises:
         SetRootMismatch: ``label`` names a non-empty set holding none of the
             root's runs.
+        ValueError: ``root`` is a ``run quench`` root.
     """
     # pylint: disable=import-outside-toplevel
     from ..run.tree import discover_runs, unparseable_runs
@@ -811,6 +812,12 @@ def import_root(root: Path, label: Optional[str] = None, *,
     from .store import StoreIndex
 
     root = Path(root)
+    from ..builders.construction.amorphous import is_quench_root
+    if is_quench_root(root):
+        # Quench members are not friction runs: their provenance.json is
+        # `kind: quench`, which the run parser would mis-read.
+        raise ValueError(f"{root} is a quench root (amorphous blocks): import it with "
+                         f"`FrictionSim2D quench import {root}`, not into AiiDA")
     label = label or root.name
     report = ImportReport(label=label, dry_run=dry_run)
     report.unparseable = unparseable_runs(root)

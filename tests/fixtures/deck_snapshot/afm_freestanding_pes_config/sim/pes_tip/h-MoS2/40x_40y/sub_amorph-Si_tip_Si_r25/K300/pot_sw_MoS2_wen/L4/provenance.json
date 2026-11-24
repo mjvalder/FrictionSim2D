@@ -31,7 +31,7 @@
   "damp_ev": 0.0,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "90452c1cf1b8ae4a3fd23f98d8b24513e3392d092b502483203b5679f4ce536c",
+  "config_hash": "4297918d83f573d158fa8b97c2236359479ef5c9cc6f284e9921a8bea09c2d6c",
   "lammps_version": null,
   "layer_type_map": {
     "layer_1": [

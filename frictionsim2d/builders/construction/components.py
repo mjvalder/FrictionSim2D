@@ -8,24 +8,19 @@ Sections: flake carving, data-file helpers and orthogonalization, layer
 stacking, then the monolayer, sheet, tip and substrate builders.
 """
 
-import json
-import random
 import logging
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
-from importlib import resources
 import re
 import math
-import subprocess
 import numpy as np
 
-from jinja2 import Environment
 
 from ...core.config import (
-    GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, ComponentConfig, FlakeConfig
+    GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, FlakeConfig
 )
 from ...core.mlip import is_mlip
 from ...potentials.manager import PotentialManager
@@ -40,12 +35,14 @@ from ...potentials.utils import (
     check_potential_cif_compatibility, get_potential_element_order
 )
 from ...interfaces.lammps_monolayer import restore_masses_section
-from ...interfaces.jinja import PackageLoader, render_lammps_commands
+from ...interfaces.jinja import render_lammps_commands
 from ...interfaces.lammps import (
     create_lammps_instance, replicate_data_file, run_lammps_commands, run_on_data_file)
 # No cycle: builders/utils/interlayer imports only frictionsim2d.potentials.interlayer.
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 from ...potentials.interlayer import CHALCOGENS, chalcogen_split_elements
+# Looked up here by _create_base_slab, so `components.make_amorphous` stays the patch point.
+from .amorphous import make_amorphous
 
 logger = logging.getLogger(__name__)
 
@@ -1216,263 +1213,6 @@ def build_matched_crystalline_substrate(
     return sub_lmp
 
 
-def get_amorphous_path(mat_name: str) -> Optional[Path]:
-    """Get path to pre-generated amorphous material file if it exists.
-
-    Args:
-        mat_name: Material name.
-
-    Returns:
-        Path to amorphous file or None.
-    """
-    mat_dir = resources.files('frictionsim2d.data.materials')
-    amor_file = mat_dir.joinpath(f"amor_{mat_name}.lmp")
-    return Path(str(amor_file)) if amor_file.is_file() else None
-
-
-class AmorphousNotCachedError(RuntimeError):
-    """A cached amorphous structure was required but is unusable.
-
-    Raised only when ``allow_generate=False``, i.e. by callers that must never
-    trigger a melt-quench (the GUI preview). Raised before anything is written.
-    """
-
-
-def _cached_amorphous(mat_name: str,
-                      target_x: float,
-                      target_y: float,
-                      target_z: float) -> Tuple[Optional[Path], Optional[str]]:
-    """The cached amorphous file for ``mat_name`` if it is big enough.
-
-    Returns:
-        ``(path, None)`` when the cache is usable, otherwise ``(None, reason)``.
-    """
-    amor_path = get_amorphous_path(mat_name)
-    if not amor_path:
-        return None, f"no cached amorphous structure for '{mat_name}'"
-
-    amor_dims = get_model_dimensions(amor_path)
-    if any(amor_dims.get(k) is None for k in ('xhi', 'xlo', 'yhi', 'ylo', 'zhi', 'zlo')):
-        return None, f"cached amorphous file '{amor_path.name}' has no readable box"
-
-    amor_x = cast(float, amor_dims['xhi']) - cast(float, amor_dims['xlo'])
-    amor_y = cast(float, amor_dims['yhi']) - cast(float, amor_dims['ylo'])
-    amor_z = cast(float, amor_dims['zhi']) - cast(float, amor_dims['zlo'])
-
-    if amor_x >= target_x and amor_y >= target_y and amor_z >= target_z:
-        return amor_path, None
-
-    return None, (
-        f"cached amorphous {mat_name} is too small "
-        f"({amor_x:.1f}x{amor_y:.1f}x{amor_z:.1f} A) for the requested "
-        f"{target_x:.1f}x{target_y:.1f}x{target_z:.1f} A"
-    )
-
-
-def make_amorphous(
-    mat_name: str,
-    cif_path: Path,
-    target_x: float,
-    target_y: float,
-    target_z: float,
-    pot_path: Path,
-    pot_type: str,
-    output_dir: Path,
-    settings: GlobalSettings,
-    allow_generate: bool = True,
-) -> Path:
-    """Get or generate amorphous structure via melt-quench procedure.
-
-    Args:
-        mat_name: Material name.
-        cif_path: Crystalline CIF file path.
-        target_x: Required X dimension (Angstroms).
-        target_y: Required Y dimension (Angstroms).
-        target_z: Required Z dimension (Angstroms).
-        pot_path: Potential file path.
-        pot_type: Potential type (sw, tersoff, etc.).
-        output_dir: Directory for temporary files.
-        settings: Global settings with quench parameters.
-        allow_generate: When False, refuse to run a melt-quench and raise
-            :class:`AmorphousNotCachedError` instead -- before writing anything.
-            Generation is expensive, shells out to ``mpiexec ... lmp``, and
-            writes into the installed package data directory, so interactive
-            callers such as the GUI preview must not be able to trigger it.
-
-    Returns:
-        Path to amorphous structure file with sufficient dimensions.
-
-    Raises:
-        AmorphousNotCachedError: If no usable cached structure exists and
-            ``allow_generate`` is False.
-    """
-    cached, reason = _cached_amorphous(mat_name, target_x, target_y, target_z)
-    if cached is not None:
-        logger.info("Using existing amorphous file: %s", cached)
-        return cached
-
-    # Either the explicit argument or the settings flag can forbid generation.
-    # The settings route exists so a caller can forbid it for a whole run
-    # without threading a parameter through every builder.
-    allow_generate = allow_generate and getattr(settings.quench, 'allow_generate', True)
-
-    if not allow_generate:
-        # Refuse before create_orthogonal_slab writes the base block: the
-        # guarantee is "nothing on disk changed", not "we stopped eventually".
-        raise AmorphousNotCachedError(
-            f"{reason}. Generating it would run a melt-quench; "
-            f"refusing because allow_generate=False."
-        )
-
-    logger.info("%s; regenerating via melt-quench...", reason)
-    logger.info("Generating amorphous %s via melt-quench...", mat_name)
-
-    quench = settings.quench
-    slab_x = max(quench.quench_slab_dims[0], target_x)
-    slab_y = max(quench.quench_slab_dims[1], target_y)
-    slab_z = max(quench.quench_slab_dims[2], target_z)
-
-    if (slab_x > quench.quench_slab_dims[0] or
-        slab_y > quench.quench_slab_dims[1] or
-        slab_z > quench.quench_slab_dims[2]):
-        logger.info(
-            "Increasing slab dimensions from (%dx%dx%d) to required (%.1fx%.1fx%.1f)",
-            quench.quench_slab_dims[0], quench.quench_slab_dims[1],
-            quench.quench_slab_dims[2], slab_x, slab_y, slab_z
-        )
-
-    base_block = output_dir / f"{mat_name}_crystal_block.lmp"
-    create_orthogonal_slab(
-        cif_path, base_block,
-        target_x=slab_x, target_y=slab_y, target_z=slab_z
-    )
-
-    mat_dir = resources.files('frictionsim2d.data.materials')
-    materials_path = Path(str(mat_dir))
-    materials_path.mkdir(parents=True, exist_ok=True)
-
-    amor_file = materials_path / f"amor_{mat_name}.lmp"
-
-    cif_data = cifread(cif_path)
-    elements = cif_data['elements']
-
-    temp_config = ComponentConfig(
-        mat=mat_name,
-        pot_type=pot_type,
-        pot_path=str(pot_path),
-        cif_path=str(cif_path)
-    )
-
-    pm = PotentialManager(settings, use_langevin=False)
-    pot_commands = pm.get_single_component_commands(temp_config, elements)
-
-    # quench_rate is K/s and timestep is ps, so the quench takes
-    # dT / (rate * dt * 1e-12) steps: doubling the rate halves the run.
-    if float(quench.quench_rate) <= 0:
-        raise ValueError(
-            f"quench.quench_rate must be positive (K/s), got {quench.quench_rate}")
-    quench_nsteps = max(round(
-        (quench.melt_temp - quench.quench_temp)
-        / (float(quench.quench_rate) * float(quench.timestep) * 1e-12)), 1)
-
-    lmp_input_path = output_dir / f"lmp_input_amorphous_{mat_name}.in"
-
-    jinja_env = Environment(
-        loader=PackageLoader('frictionsim2d.templates'),
-        trim_blocks=True,
-        lstrip_blocks=True
-    )
-
-    # Drawn here, not in the template: a Jinja `| random` leaves the seed only
-    # in the rendered script, so the amorphous block in the materials library
-    # -- shared by every run that uses it -- could never be reproduced. Same
-    # contract as SimulationBase._run_seed.
-    melt_seed = random.randint(1, 900_000_000)
-
-    context = {
-        'melt_seed': melt_seed,
-        'neighbor_list': settings.simulation.neighbor_list,
-        'neigh_modify_command': settings.simulation.neigh_modify_command,
-        'base_block': base_block,
-        'pot_commands': pot_commands,
-        'min_style': settings.simulation.min_style,
-        'minimization_command': settings.simulation.minimization_command,
-        'timestep': quench.timestep,
-        'melt_temp': quench.melt_temp,
-        'melt_steps': quench.melt_steps,
-        'quench_temp': quench.quench_temp,
-        'quench_nsteps': quench_nsteps,
-        'equilibrate_steps': quench.equilibrate_steps,
-        'amor_file': amor_file
-    }
-
-    template = jinja_env.get_template('common/make_amorphous.lmp')
-    script_content = template.render(context)
-    lmp_input_path.write_text(script_content, encoding='utf-8')
-
-    if quench.run_local:
-        # Serial, deliberately. `mpiexec -np N lmp` did NOT parallelise: `lmp`
-        # links no MPI at all, so every rank singleton-initialises and N
-        # complete, identical melt-quenches run at once -- N x runtime and
-        # N x peak memory for one result, with N ranks writing the same file.
-        # Verified in the `aiida` env: `mpiexec -np 4 lmp` starts 4 instances,
-        # and `lmp_serial` (which does link libmpi) singleton-initialises too,
-        # so swapping the binary does not help. quench.n_procs is therefore
-        # not honoured locally; it still applies to the HPC path below.
-        if quench.n_procs > 1:
-            logger.warning(
-                "quench.n_procs=%d ignored: no working parallel LAMMPS launcher "
-                "in this environment; running the melt-quench serially.",
-                quench.n_procs,
-            )
-        logger.info("Running melt-quench (serial)...")
-        try:
-            subprocess.run(f"lmp -in {lmp_input_path}", shell=True, check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error("Melt-quench LAMMPS run failed: %s", e)
-            raise
-    else:
-        local_lmp_input = output_dir / f"make_amorphous_{mat_name}.in"
-        shutil.copy(lmp_input_path, local_lmp_input)
-        logger.info(
-            "LAMMPS input file for amorphous structure generation saved to: %s",
-            local_lmp_input
-        )
-        logger.info("Please run the following command to generate the amorphous structure:")
-        logger.info("mpiexec -np %d lmp -in %s", quench.n_procs,
-                    local_lmp_input)
-        logger.info("After the simulation is complete, please rerun the program.")
-        raise RuntimeError(
-            f"Amorphous structure generation requires manual LAMMPS run. "
-            f"See {local_lmp_input} for input script."
-        )
-
-    if base_block.exists():
-        base_block.unlink()
-    # The melt-quench script is deliberately NOT deleted: it is the only record
-    # of how this amorphous block was produced, and the output lands in the
-    # packaged materials library where every later run shares it.
-
-    # Record how this block was made, beside the block itself. The materials
-    # library is shared across every run, so the provenance has to travel with
-    # the artefact rather than with the run that happened to create it.
-    meta_path = Path(str(amor_file) + '.json')
-    meta_path.write_text(json.dumps({
-        'material': mat_name,
-        'melt_seed': melt_seed,
-        'melt_temp': quench.melt_temp,
-        'quench_temp': quench.quench_temp,
-        'quench_rate': quench.quench_rate,
-        'timestep': quench.timestep,
-        'quench_nsteps': quench_nsteps,
-        'pot_type': pot_type,
-        'script': str(lmp_input_path),
-    }, indent=2), encoding='utf-8')
-
-    logger.info("Created amorphous structure in materials folder: %s", amor_file)
-    return amor_file
-
-
 def _create_base_slab(
     config,
     cif_path: Path,
@@ -1480,9 +1220,7 @@ def _create_base_slab(
     target_y: float,
     target_z: float,
     output_path: Path,
-    build_dir: Path,
     settings: GlobalSettings,
-    allow_generate: bool = True,
 ) -> None:
     """Create base slab (amorphous or crystalline).
 
@@ -1493,19 +1231,19 @@ def _create_base_slab(
         target_y: Target Y dimension (Angstroms).
         target_z: Target Z dimension (Angstroms).
         output_path: Output slab file path.
-        build_dir: Directory for temporary files.
         settings: Global simulation settings.
-        allow_generate: Passed to :func:`make_amorphous`; False forbids a
-            melt-quench.
+
+    Raises:
+        AmorphousMissing: an amorphous component has no matching library block
+            (:func:`~frictionsim2d.builders.construction.amorphous.make_amorphous`
+            never melt-quenches).
     """
     if config.amorph == 'a':
         pot_path = get_material_path(config.pot_path)
         amor_path = make_amorphous(
             config.mat, cif_path,
             target_x=target_x, target_y=target_y, target_z=target_z,
-            pot_path=pot_path, pot_type=config.pot_type,
-            output_dir=build_dir, settings=settings,
-            allow_generate=allow_generate,
+            pot_path=pot_path, pot_type=config.pot_type, settings=settings,
         )
         shutil.copy(amor_path, output_path)
     else:
@@ -1773,7 +1511,6 @@ def build_tip(
     config: TipConfig,
     build_dir: Path,
     settings: GlobalSettings,
-    allow_generate: bool = True,
 ) -> Tuple[Path, float]:
     """Build AFM tip structure (spherical geometry).
 
@@ -1781,9 +1518,6 @@ def build_tip(
         config: Tip configuration.
         build_dir: Output directory.
         settings: Global simulation settings.
-        allow_generate: When False, an amorphous tip whose structure is not
-            already cached raises :class:`AmorphousNotCachedError` rather than
-            running a melt-quench.
 
     Returns:
         Tuple of (tip_path, actual_radius).
@@ -1798,8 +1532,8 @@ def build_tip(
     _create_base_slab(
         config, cif_path,
         target_x=box_size, target_y=box_size, target_z=box_size,
-        output_path=base_lmp, build_dir=build_dir,
-        settings=settings, allow_generate=allow_generate,
+        output_path=base_lmp,
+        settings=settings,
     )
 
     if config.amorph != 'a':
@@ -1831,7 +1565,6 @@ def build_substrate(
     settings: Optional[GlobalSettings] = None,
     target_x: Optional[float] = None,
     target_y: Optional[float] = None,
-    allow_generate: bool = True,
     ) -> Path:
     """Build substrate slab.
 
@@ -1842,9 +1575,6 @@ def build_substrate(
         settings: Global settings (required for amorphous).
         target_x: Optional explicit substrate size in x.
         target_y: Optional explicit substrate size in y.
-        allow_generate: When False, an amorphous substrate whose structure is
-            not already cached raises :class:`AmorphousNotCachedError` rather
-            than running a melt-quench.
 
     Returns:
         Path to substrate file.
@@ -1860,9 +1590,8 @@ def build_substrate(
     _create_base_slab(
         config, cif_path,
         target_x=target_x, target_y=target_y, target_z=target_z,
-        output_path=base_lmp, build_dir=build_dir,
+        output_path=base_lmp,
         settings=settings or GlobalSettings(),
-        allow_generate=allow_generate,
     )
 
     # Preserve periodic tiling for crystalline substrates by using the

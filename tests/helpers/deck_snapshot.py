@@ -79,6 +79,9 @@ EXTRA_CASES: List[RenderCase] = [
         ("sheet_hetero_twist", "sheetonsheet"),
         ("sheet_hetero_ilp", "sheetonsheet"),
         ("flake_slide_hetero_flake", "sheetonsheet"),
+        # `run quench` (write_quench_root): melt_temp 3000 so no shipped block
+        # satisfies it; a 16 A slab keeps the crystal block small.
+        ("quench_si", "quench"),
     ]
 ]
 
@@ -130,7 +133,7 @@ def render(case: RenderCase, out: Path) -> Dict[str, str]:
     try:
         with _deterministic():
             result = generate_package(ini, case.run_type, output_root=out, generate_hpc=True,
-                             allow_generate_amorphous=False, simulation_root_name="sim")
+                                      simulation_root_name="sim")
     finally:
         os.chdir(cwd)
     if result.failures:

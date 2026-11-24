@@ -12,6 +12,7 @@ from frictionsim2d.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
+SI_SW = str(EXAMPLES / 'potentials' / 'sw' / 'Si.sw')
 
 
 def _minimal_afm_raw_dict(tmp_path: Path) -> dict:
@@ -31,7 +32,9 @@ def _minimal_afm_raw_dict(tmp_path: Path) -> dict:
                "cif_path": cif_path, "x": 20.0, "y": 20.0, "layers": [2]},
         "tip": {"mat": "Si", "pot_type": "sw", "pot_path": pot_path,
                 "cif_path": cif_path, "amorph": "c", "r": 5},
-        "sub": {"mat": "Si", "pot_type": "sw", "pot_path": pot_path,
+        # The real Si.sw: an amorphous substrate must key to a library block
+        # (the shipped amor_Si) or run_simulations' preflight refuses the run.
+        "sub": {"mat": "Si", "pot_type": "sw", "pot_path": SI_SW,
                 "cif_path": cif_path, "amorph": "a", "thickness": 12.0},
     }
 
@@ -1162,6 +1165,44 @@ def test_run_simulations_continues_after_build_failure(
     assert seen_temps == [300.0, 350.0]
     assert call_counter["builds"] == 2
     assert len(created) == 1
+
+
+def test_a_build_time_amorphous_miss_aborts_the_whole_run_naming_the_config(
+        tmp_path: Path, monkeypatch) -> None:
+    """The periodic substrate is sized at build time: a miss there aborts every
+    member alike and its message carries the `run quench --for` line."""
+    from frictionsim2d.builders.construction.amorphous import AmorphousMissing
+
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[dummy]\n", encoding="utf-8")
+    base_dict = _minimal_afm_raw_dict(tmp_path)
+    base_dict["general"]["temp"] = [300.0, 350.0]
+    settings = real_load_settings()
+    monkeypatch.setattr("frictionsim2d.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("frictionsim2d.run.simulate.load_settings", lambda **_kwargs: settings)
+    builds = []
+
+    class MissingBlockBuilder:
+        def __init__(self, config, _output_dir, config_path=None):
+            self.config_path = config_path
+
+        def set_model(self, _model):
+            pass
+
+        def set_base_output_dir(self, _root):
+            pass
+
+        def build(self):
+            builds.append(1)
+            raise AmorphousMissing([])
+
+    monkeypatch.setattr("frictionsim2d.run.simulate.AFMSimulation", MissingBlockBuilder)
+    with pytest.raises(AmorphousMissing) as info:
+        run_simulations(config_file=str(config_file), model="afm", output_root=tmp_path,
+                        simulation_root_name="sim_run", settings_file="s.yaml")
+    assert builds == [1]
+    assert info.value.command == (f"FrictionSim2D run quench --for {config_file} "
+                                  f"--settings-file s.yaml -o DIR")
 
 
 def test_on_failure_callback_gets_the_failed_member_and_the_sweep_continues(

@@ -43,6 +43,7 @@ from typing import (
 
 from pydantic import BaseModel
 
+from ..builders.construction.amorphous import AmorphousMissing
 from ..core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
 from ..run.artifacts import generate_package
 from ..run.naming import AFM_LIKE_MODELS
@@ -410,11 +411,12 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
     ``JobManifest``'s ``rglob('lammps')`` and duplicate every job -- and hands
     each DISTINCT staged ``provenance/config.json`` (by path: every ``L{n}`` of
     an AFM run shares one) to ``run.artifacts.generate_package``, alias-fixed
-    (:func:`_fix_config_aliases`), with ``allow_generate_amorphous=False``
-    and ``simulation_root_name='.'`` so each run keeps its ``rel_path``. The
-    run's stored ``provenance/settings.yaml`` is the settings file. Returns
-    ``(created paths, dest)``; a run that could not be rebuilt (its amorphous block is
-    missing, say) is logged and, when ``failures`` is a list, appended to it.
+    (:func:`_fix_config_aliases`), with ``simulation_root_name='.'`` so each
+    run keeps its ``rel_path``. The run's stored ``provenance/settings.yaml``
+    is the settings file. Returns ``(created paths, dest)``; a run that could
+    not be rebuilt (no library block matches its amorphous component, say:
+    a rebuild never melt-quenches) is logged and, when ``failures`` is a list,
+    appended to it.
     """
     _load_profile(profile)
     rel_paths = sorted({calc.inputs.parameters['rel_path']
@@ -439,11 +441,18 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
             model = _model_of(rel_path)
             _fix_config_aliases(config_json, model)
             settings_file = prov_dir / 'settings.yaml'
-            result = generate_package(
-                config_json, model, output_root=dest,
-                settings_file=settings_file if settings_file.is_file() else None,
-                generate_hpc=generate_hpc,
-                simulation_root_name='.', allow_generate_amorphous=False)
+            try:
+                result = generate_package(
+                    config_json, model, output_root=dest,
+                    settings_file=settings_file if settings_file.is_file() else None,
+                    generate_hpc=generate_hpc,
+                    simulation_root_name='.')
+            except AmorphousMissing as exc:
+                # A rebuild never melt-quenches: the run is skipped, named.
+                logger.error('Rebuild skipped %s: %s', rel_path, exc)
+                if failures is not None:
+                    failures.append(f'{rel_path}: {exc}')
+                continue
             for failure in result.failures:
                 logger.error('Rebuild failed: %s', failure.render())
                 if failures is not None:

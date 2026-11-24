@@ -74,12 +74,12 @@ POTENTIALS = REPO_ROOT / 'examples' / 'potentials' / 'sw'
 #: the whole build half of this file is skipped -- see `_require_lammps`.
 LMP_SERIAL = shutil.which('lmp_serial')
 
-#: The AFM family's substrate is amorphous, and a preview is forbidden from
-#: running a melt-quench (`allow_generate_amorphous=False`), so it can only be
-#: built from this cached structure. Missing, the AFM-family modes are skipped
-#: rather than failing on something that is not what they test.
-#: Amorphous cache lives in package data, not the examples library.
-AMORPHOUS_SI = (Path(str(resources.files('frictionsim2d.data'))) / 'materials' / 'amor_Si.lmp')
+#: The AFM family's substrate is amorphous, and no build path melt-quenches,
+#: so it can only be built from the shipped, conditions-keyed Si block. Missing,
+#: the AFM-family modes are skipped rather than failing on something that is
+#: not what they test. The block lives in package data, not the examples library.
+AMORPHOUS_SI = next((Path(str(resources.files('frictionsim2d.data'))) / 'materials')
+                    .glob('amor_Si__*.lmp'), Path('amor_Si__missing.lmp'))
 
 AFM_FAMILY = ('afm', 'indent', 'pes_tip')
 

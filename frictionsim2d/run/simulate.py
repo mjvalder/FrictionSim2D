@@ -27,6 +27,14 @@ from .expand import (
     missing_pressure,
     outer_loop_conflict,
 )
+from ..builders.construction.amorphous import (
+    AmorphousMissing,
+    expand_quench_config,
+    preflight_amorphous,
+    quench_members_for,
+    satisfying_block,
+    write_quench_root,
+)
 from .hpc_dispatch import generate_hpc_scripts_for_root
 from .naming import AFM_LIKE_MODELS, SHEET_LIKE_MODELS, output_dir_for
 
@@ -136,17 +144,29 @@ def run_simulations(
     generate_hpc: bool = False,
     simulation_root_name: Optional[str] = None,
     on_failure: Optional[Callable[[Path, Dict[str, Any], Exception], None]] = None,
-    allow_generate_amorphous: bool = True,
-) -> Tuple[List[Path], Path, List[Dict[str, Any]], Any]:
+    quench_for: bool = False,
+    force: bool = False,
+) -> Tuple[List[Path], Optional[Path], List[Dict[str, Any]], Any]:
     """Run all simulations defined in a config file.
+
+    No model ever starts a melt-quench here: an amorphous component without a
+    matching library block raises :class:`AmorphousMissing` before the
+    simulation root exists, and model ``'quench'`` only writes decks.
 
     Args:
         on_failure: Called as ``(output_dir, run_dict, exception)`` for each
             config whose build fails; the sweep continues.
-        allow_generate_amorphous: When False, a missing amorphous structure
-            raises instead of triggering a melt-quench.
+        quench_for: Model ``'quench'`` only: ``config_file`` is a friction
+            config, and the members are the blocks it is missing.
+        force: Model ``'quench'`` only: keep members a library block already
+            satisfies.
 
-    Returns a tuple of (created_simulations, simulation_root, configs_to_run, settings).
+    Returns a tuple of (created_simulations, simulation_root, configs_to_run,
+    settings). For ``'quench'`` the created entries are the member directories
+    and the root is None when there was nothing to make.
+
+    Raises:
+        AmorphousMissing: a friction run needs a block the library lacks.
     """
     config_path = Path(config_file)
     if not config_path.exists():
@@ -155,8 +175,11 @@ def run_simulations(
     base_dict = parse_config(config_path)
     defaults = load_settings(settings_file=settings_file)
 
-    if not allow_generate_amorphous:
-        defaults.quench.allow_generate = False
+    if model == 'quench':
+        return _run_quench(config_path, base_dict, defaults, output_root=output_root,
+                           generate_hpc=generate_hpc, ensure_hpc_settings=ensure_hpc_settings,
+                           simulation_root_name=simulation_root_name,
+                           quench_for=quench_for, force=force)
 
     if model in SHEET_LIKE_MODELS:
         if defaults.hpc.lammps_scripts == ['system.in', 'slide.in']:
@@ -184,6 +207,8 @@ def run_simulations(
         no_load = missing_pressure(run_dict, model)
         if no_load is not None:
             raise ValueError(no_load)
+    if model in AFM_LIKE_MODELS:
+        preflight_amorphous(configs_to_run, defaults, config_file, settings_file)
 
     root_name = simulation_root_name or datetime.now().strftime("simulation_%Y%m%d_%H%M%S")
     base_root = Path(output_root) if output_root is not None else Path.cwd()
@@ -225,6 +250,10 @@ def run_simulations(
         except (FreestandingConfigError, NoHeteroBuilderError):
             # Config-level: every member of a sweep would fail identically.
             raise
+        except AmorphousMissing as exc:
+            # A block the preflight could not size (the periodic substrate
+            # follows the built sheet): every member fails alike, so abort.
+            raise exc.for_config(config_file, settings_file) from exc
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("Build failed for %s: %s", output_dir, exc)
             if on_failure is not None:
@@ -235,3 +264,44 @@ def run_simulations(
         generate_hpc_scripts_for_root(simulation_root, defaults)
 
     return created_simulations, simulation_root, configs_to_run, defaults
+
+
+def _run_quench(config_path: Path, base_dict: Dict[str, Any], defaults, *,
+                output_root, generate_hpc: bool, ensure_hpc_settings,
+                simulation_root_name: Optional[str], quench_for: bool, force: bool
+                ) -> Tuple[List[Path], Optional[Path], List[Dict[str, Any]], Any]:
+    """Model ``'quench'``: write a quench root (decks only; nothing is run).
+
+    The members come from the ``[quench]`` section, or with ``quench_for``
+    from the blocks the friction config is missing. A member a library block
+    already satisfies is logged and dropped unless ``force``.
+    """
+    if quench_for:
+        members = quench_members_for(base_dict, defaults)
+    else:
+        if 'quench' not in base_dict:
+            raise ValueError(f"{config_path}: a quench config needs a [quench] section "
+                             f"(or pass --for with a friction config)")
+        members = expand_quench_config(base_dict['quench'], defaults,
+                                       base_dir=config_path.parent)
+        kept = []
+        for member in members:
+            present = satisfying_block(member.key, member.slab)
+            if present is not None and not force:
+                logger.info("Skipping %s [key %s]: %s already satisfies it (--force to "
+                            "quench anyway)", member.material, member.key.key8, present)
+                continue
+            kept.append(member)
+        members = kept
+    run_dicts = [member.as_dict() for member in members]
+    if not members:
+        return [], None, run_dicts, defaults
+
+    if ensure_hpc_settings is not None and generate_hpc:
+        ensure_hpc_settings(defaults.hpc)
+    base_root = Path(output_root) if output_root is not None else Path.cwd()
+    root = write_quench_root(members, base_root, defaults, root_name=simulation_root_name)
+    created = sorted(p.parent for p in root.glob('quench/*/*/provenance.json'))
+    if generate_hpc:
+        generate_hpc_scripts_for_root(root, defaults)
+    return created, root, run_dicts, defaults

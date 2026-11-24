@@ -55,7 +55,6 @@ def _generate(config: Path, output_root: Path):
     try:
         return generate_package(config, MODEL, output_root=output_root,
                                 generate_hpc=False,
-                                allow_generate_amorphous=False,
                                 simulation_root_name='sim')
     finally:
         os.chdir(cwd)

@@ -1,8 +1,9 @@
 """Subprocess entry point for generating a real simulation package.
 
 Separate from the preview worker because the two differ in what they are
-allowed to do: this one runs the full sweep, may emit HPC scripts, and may
-generate a missing amorphous structure.
+allowed to do: this one runs the full sweep and may emit HPC scripts. Neither
+ever melt-quenches: a missing amorphous block comes back as an error carrying
+the ``run quench --for`` command.
 
 Invoked as ``python -m frictionsim2d.gui.generate_worker <request.json>``.
 """
@@ -28,13 +29,20 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
 
     wants_hpc = bool(request.get('generate_hpc'))
 
-    result = generate_package(
-        request['config_file'], request['model'],
-        output_root=Path(request['output_root']),
-        settings_file=request.get('settings_file'),
-        generate_hpc=wants_hpc,
-        simulation_root_name=request.get('root_name'),
-    )
+    from ..builders.construction.amorphous import AmorphousMissing
+
+    try:
+        result = generate_package(
+            request['config_file'], request['model'],
+            output_root=Path(request['output_root']),
+            settings_file=request.get('settings_file'),
+            generate_hpc=wants_hpc,
+            simulation_root_name=request.get('root_name'),
+        )
+    except AmorphousMissing as exc:
+        # The whole run aborts before anything is written (no melt-quench).
+        return {'ok': False, 'created': [], 'requested': 0, 'simulation_root': None,
+                'failures': [], 'error': str(exc), **exc.as_payload()}
 
     payload: Dict[str, Any] = {
         'ok': bool(result.created),

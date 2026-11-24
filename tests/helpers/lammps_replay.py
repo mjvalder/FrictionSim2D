@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
-import types
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Tuple
 
@@ -118,7 +117,7 @@ def make_run_lammps(real: Callable, record: bool, fixture_dir: Path = FIXTURE_DI
 
 def install(monkeypatch, record: bool = False, fixture_dir: Path = FIXTURE_DIR) -> None:
     """Patch the three call sites where they are looked up."""
-    from frictionsim2d.builders.construction import components, hetero_stack
+    from frictionsim2d.builders.construction import amorphous, components, hetero_stack
     from frictionsim2d.builders.sheetonsheet import flake_slide
 
     monkeypatch.setattr(
@@ -135,8 +134,7 @@ def install(monkeypatch, record: bool = False, fixture_dir: Path = FIXTURE_DIR) 
             script = Path(m.group(1)).read_text(encoding="utf-8") if m else text
             raise _missing(replay_key(script))
 
-        shim = types.SimpleNamespace(**{n: getattr(components.subprocess, n)
-                                        for n in dir(components.subprocess)
-                                        if not n.startswith("__")})
-        shim.run = no_melt_quench
-        monkeypatch.setattr(components, "subprocess", shim)
+        # The serial melt-quench launch (`run quench --local`) is the only
+        # subprocess LAMMPS start in the build path; replay never runs it.
+        monkeypatch.setattr(amorphous, "run_lmp_serial",
+                            lambda deck, log, cwd: no_melt_quench(f"-in {Path(cwd) / deck}"))

@@ -204,7 +204,7 @@ def test_rebuild_set_hands_each_config_once_to_the_router(aiida_profile_clean,
     assert {model for _c, model, _k in calls} == {'afm'}
     for _config, _model, kwargs in calls:
         assert 'use_aiida' not in kwargs and kwargs['simulation_root_name'] == '.'
-        assert kwargs['allow_generate_amorphous'] is False
+        assert 'allow_generate_amorphous' not in kwargs
         assert kwargs['output_root'] == tmp_path / 'rebuilt'
 
 
@@ -230,6 +230,26 @@ def test_rebuild_set_collects_the_failures_of_the_router(aiida_profile_clean,
     assert created == []
     assert len(failed) == 1 and failed[0].endswith(': amorphous block missing')
     assert failed[0].startswith('afm/h-MoS2')
+
+
+def test_rebuild_set_skips_a_run_whose_amorphous_block_is_missing(aiida_profile_clean,
+                                                                no_profile_switch, tmp_path,
+                                                                monkeypatch):
+    """A rebuild never melt-quenches: the miss is recorded and the run skipped."""
+    from frictionsim2d.builders.construction.amorphous import AmorphousMissing
+
+    root = tmp_path / 'sim'
+    _run(root, 'h-MoS2', loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+
+    def _missing(*_a, **_k):
+        raise AmorphousMissing([])
+
+    monkeypatch.setattr(export_mod, 'generate_package', _missing)
+    failed = []
+    created, _dest = rebuild_set('camp', tmp_path / 'rebuilt', failures=failed)
+    assert created == [] and len(failed) == 1
+    assert 'create the quench job' in failed[0]
 
 
 # --- export_archive: gate, contents --------------------------------------------

@@ -12,8 +12,8 @@ before -- and asserts the four contracts that go unchecked today:
 
 Nothing is mocked. Builds are session-scoped and shared: ``generate_package`` is
 the slow part, so each config is built at most once per session and every test
-reads that one tree. ``allow_generate_amorphous=False`` keeps the melt-quench out
-of the tier; the pre-generated ``frictionsim2d/data/materials/amor_Si.lmp`` is used instead.
+reads that one tree. No build ever melt-quenches; the shipped
+``frictionsim2d/data/materials/amor_Si__021d81ab.lmp`` block is what they reuse.
 
 Two families need special handling.
 

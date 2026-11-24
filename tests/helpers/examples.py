@@ -86,7 +86,6 @@ def build(name: str, model: str, root: Path, **overrides):
             config, model,
             output_root=root,
             generate_hpc=False,
-            allow_generate_amorphous=False,
             simulation_root_name='sim',
             **overrides,
         )

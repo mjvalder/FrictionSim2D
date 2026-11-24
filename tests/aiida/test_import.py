@@ -835,3 +835,12 @@ def test_an_explicit_settings_file_names_the_machine(aiida_profile_clean, tmp_pa
 
     assert import_root(root, label='camp', settings_file=settings_file).ok()
     assert {n.computer.label for n in _calcjobs()} == {'from-file'}
+
+
+def test_a_quench_root_is_refused(aiida_profile_clean, tmp_path):
+    """Quench members are `kind: quench`, not runs: `quench import` takes them."""
+    member = tmp_path / 'quench_x' / 'quench' / 'Si' / '021d81ab'
+    member.mkdir(parents=True)
+    (member / 'provenance.json').write_text(json.dumps({'kind': 'quench'}), encoding='utf-8')
+    with pytest.raises(ValueError, match='quench import'):
+        import_root(tmp_path / 'quench_x', label='q')

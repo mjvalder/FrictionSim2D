@@ -5,7 +5,6 @@ No aiida import and no `aiida` marker: this file runs in the fast suite.
 import json
 import re
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -219,20 +218,16 @@ def test_defaults_are_environment_free():
 # --- quench_rate: label vs builder ----------------------------------------------
 
 def _quench_nsteps(tmp_path, rate):
-    """The quench run length the builder writes for ``rate`` (no LAMMPS run)."""
-    from frictionsim2d.builders.construction import components  # pylint: disable=import-outside-toplevel
+    """The quench run length ``run quench`` writes for ``rate`` (no LAMMPS run)."""
+    # pylint: disable-next=import-outside-toplevel
+    from frictionsim2d.builders.construction.amorphous import QuenchMember, write_quench_root
     settings = load_settings().model_copy(deep=True)
-    settings.quench.run_local = False                    # write the deck, then stop
     settings.quench.quench_rate = rate
-    out = tmp_path / f'r{rate:g}'
-    out.mkdir()
     mat = REPO / 'examples' / 'materials' / 'Si.cif'
     pot = REPO / 'examples' / 'potentials' / 'sw' / 'Si.sw'
-    with patch.object(components, 'create_orthogonal_slab'), \
-            pytest.raises(RuntimeError, match='manual LAMMPS run'):
-        components.make_amorphous('zz_quench_rate_probe', mat, 8.0, 8.0, 8.0, pot,
-                                  'sw', out, settings)
-    deck = (out / 'lmp_input_amorphous_zz_quench_rate_probe.in').read_text(encoding='utf-8')
+    member = QuenchMember.make('Si', pot, 'sw', mat, (8.0, 8.0, 8.0), settings.quench)
+    root = write_quench_root([member], tmp_path, settings, root_name=f'r{rate:g}')
+    deck = next(root.rglob('quench.in')).read_text(encoding='utf-8')
     return int(re.search(r'^fix\s+quench .*\n^run\s+(\d+)', deck, re.M).group(1))
 
 

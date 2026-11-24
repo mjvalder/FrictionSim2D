@@ -54,7 +54,6 @@ def _generate(config: Path, output_root: Path, model: str = AFM_MODEL):
     try:
         return generate_package(config, model, output_root=output_root,
                                 generate_hpc=False,
-                                allow_generate_amorphous=False,
                                 simulation_root_name='sim')
     finally:
         os.chdir(cwd)

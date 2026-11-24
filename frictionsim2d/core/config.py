@@ -6,6 +6,7 @@ import configparser
 import json
 import logging
 import os
+import warnings
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any, ClassVar, Literal, Mapping, Sequence, cast
 import yaml
@@ -110,27 +111,71 @@ class SimulationSettings(BaseModel):
     )
 
 
+#: `QuenchSettings` keys removed by the quench rework (Task 7): `run_local` and
+#: `allow_generate` were silent opt-ins to an inline melt-quench, `n_procs`
+#: duplicated `settings.hpc` and was never honoured locally.
+_REMOVED_QUENCH_KEYS = ('run_local', 'n_procs', 'allow_generate')
+
+
 class QuenchSettings(BaseModel):
-    """Quenching parameters for amorphous material generation."""
-    run_local: bool = True
-    n_procs: int = 16
+    """Melt-quench conditions for amorphous blocks (they key the block library).
+
+    The defaults are the conditions of the shipped ``amor_Si`` block, so
+    default settings reuse it.
+    """
     quench_slab_dims: List[int] = Field(default_factory=lambda: [200, 200, 50])
     quench_rate: float = 1e12
     melt_temp: float = Field(default=2500.0, alias='quench_melt_temp')
     quench_temp: float = Field(default=300.0, alias='quench_target_temp')
     timestep: float = 0.002
-    melt_steps: int = 50000
-    equilibrate_steps: int = 20000
-    allow_generate: bool = Field(
-        default=True,
-        description=(
-            "May a missing or undersized amorphous structure be melt-quenched into "
-            "existence? False makes make_amorphous raise instead — for interactive "
-            "callers (the GUI preview) that cannot spend minutes in mpiexec or write "
-            "into the packaged materials directory."
-        ),
-    )
+    melt_steps: int = 20000
+    equilibrate_steps: int = 10000
     model_config = {'validate_by_name': True}
+
+    @model_validator(mode='before')
+    @classmethod
+    def drop_removed_keys(cls, data: Any) -> Any:
+        """Drop ``run_local``/``n_procs``/``allow_generate`` with one DeprecationWarning."""
+        if isinstance(data, dict):
+            removed = [key for key in _REMOVED_QUENCH_KEYS if key in data]
+            if removed:
+                warnings.warn(
+                    f"settings.quench {', '.join(removed)} no longer exist and are "
+                    f"ignored: a friction run never starts a melt-quench; use "
+                    f"`FrictionSim2D run quench` (with --local to run it here).",
+                    DeprecationWarning, stacklevel=2)
+                data = {k: v for k, v in data.items() if k not in _REMOVED_QUENCH_KEYS}
+        return data
+
+
+class QuenchRunConfig(BaseModel):
+    """The ``[quench]`` section of a quench config (``FrictionSim2D run quench``).
+
+    ``material`` and the six condition fields may be lists; the members are
+    their product. Unset conditions come from ``settings.quench``.
+    """
+    material: Union[str, List[str]]
+    potential: str = Field(..., description="Potential file; '{mat}' is replaced per material")
+    pot_type: str = Field(..., description="Pair style of the potential, e.g. 'sw'")
+    cif: Optional[str] = Field(None, description="CIF file; default '<mat>.cif'")
+    slab: Optional[List[float]] = Field(
+        None, description=("Crystal slab to melt (x, y, z) A; "
+                           "default settings.quench.quench_slab_dims"))
+    melt_temp: Optional[Union[float, List[float]]] = None
+    quench_temp: Optional[Union[float, List[float]]] = None
+    quench_rate: Optional[Union[float, List[float]]] = None
+    timestep: Optional[Union[float, List[float]]] = None
+    melt_steps: Optional[Union[int, List[int]]] = None
+    equilibrate_steps: Optional[Union[int, List[int]]] = None
+
+    @field_validator('material', mode='before')
+    @classmethod
+    def material_not_empty(cls, v: Any) -> Any:
+        """A quench needs a material."""
+        if v in (None, '', []):
+            raise ValueError("[quench] material is required")
+        return v
+
 
 class OutputSettings(BaseModel):
     """Output and dump settings."""

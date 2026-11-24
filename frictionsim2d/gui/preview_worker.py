@@ -35,16 +35,19 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
 
     _emit('progress', message=f"building {model}")
 
-    result = generate_package(
-        config_file, model,
-        output_root=output_root,
-        settings_file=request.get('settings_file'),
-        generate_hpc=False,
-        simulation_root_name='preview',
-        # A preview must never start a melt-quench: it takes minutes and writes
-        # into the packaged materials directory.
-        allow_generate_amorphous=False,
-    )
+    from ..builders.construction.amorphous import AmorphousMissing
+
+    try:
+        # No build path melt-quenches: a missing amorphous block raises.
+        result = generate_package(
+            config_file, model,
+            output_root=output_root,
+            settings_file=request.get('settings_file'),
+            generate_hpc=False,
+            simulation_root_name='preview',
+        )
+    except AmorphousMissing as exc:
+        return {'ok': False, 'error': str(exc), **exc.as_payload()}
 
     if not result.created:
         return {

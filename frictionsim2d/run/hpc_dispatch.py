@@ -28,7 +28,11 @@ def collect_hpc_simulation_paths(
     simulation_root: Path,
     lammps_scripts: Optional[List[str]] = None,
 ) -> List[str]:
-    """Collect simulation paths relative to a shared simulation root."""
+    """Collect simulation paths relative to a shared simulation root.
+
+    A ``lammps/`` holding a ``quench*.in`` (a member of a ``run quench`` root)
+    always counts: it is a single-phase deck whatever ``lammps_scripts`` says.
+    """
     scripts = ['system.in', 'slide.in'] if lammps_scripts is None else lammps_scripts
 
     def script_exists(lammps_dir: Path, script_name: str) -> bool:
@@ -51,10 +55,11 @@ def collect_hpc_simulation_paths(
         if not lammps_dir.is_dir():
             continue
 
-        if scripts:
-            if not any(script_exists(lammps_dir, script) for script in scripts):
-                continue
-        elif not list(lammps_dir.glob('*.in')):
+        if any(lammps_dir.glob('quench*.in')):
+            pass  # a quench member: always a job
+        elif scripts and not any(script_exists(lammps_dir, script) for script in scripts):
+            continue
+        elif not scripts and not list(lammps_dir.glob('*.in')):
             continue
 
         rel_path = lammps_dir.parent.relative_to(simulation_root)
@@ -75,6 +80,7 @@ def _build_hpc_manifest_entries(
     Discovery strategy per simulation directory:
         - If any ``*slide*.in`` files exist, add all of them (array-per-slide).
         - Otherwise add all ``*system*.in`` files.
+        - Otherwise add all ``quench*.in`` files (one melt-quench per member).
     """
     manifest_entries: List[str] = []
 
@@ -98,6 +104,10 @@ def _build_hpc_manifest_entries(
             manifest_entries.extend(slide_scripts)
         elif system_scripts:
             manifest_entries.extend(system_scripts)
+        else:
+            manifest_entries.extend(sorted(
+                p.relative_to(simulation_root).as_posix()
+                for p in lammps_dir.glob('quench*.in')))
 
     if manifest_entries:
         return manifest_entries, ['__MANIFEST_PATH__']

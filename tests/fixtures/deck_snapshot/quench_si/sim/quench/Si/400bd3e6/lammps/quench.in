@@ -1,0 +1,40 @@
+# LAMMPS input script for melt-quench amorphization
+
+clear
+
+units           metal
+atom_style      atomic
+boundary        p p p
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+read_data       quench/Si/400bd3e6/build/Si_crystal_block.lmp
+
+# Potential commands
+pair_style sw
+pair_coeff * * quench/Si/400bd3e6/provenance/potentials/Si.sw Si
+mass 1 28.085000
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+
+timestep        0.002
+thermo          1000
+thermo_style    custom step temp pe ke etotal press vol
+
+velocity        all create 3000.0 <SEED> rot yes dist gaussian
+run             0
+
+fix             melt all npt temp 3000.0 3000.0 $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             20000
+unfix           melt
+
+fix             quench all npt temp 3000.0 300.0 $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             1350000
+unfix           quench
+
+fix             relax all npt temp 300.0 300.0 $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             10000
+unfix           relax
+
+write_data      quench/Si/400bd3e6/data/amor_Si__<HEX>.lmp

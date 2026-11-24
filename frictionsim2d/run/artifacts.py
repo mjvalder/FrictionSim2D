@@ -81,20 +81,18 @@ def generate_package(config_file: Union[str, Path],
                      settings_file: Optional[Union[str, Path]] = None,
                      generate_hpc: bool = False,
                      simulation_root_name: Optional[str] = None,
-                     allow_generate_amorphous: bool = True,
                      ensure_hpc_settings=None) -> GenerationResult:
     """Generate a simulation package and report per-member outcomes.
 
     Args:
         config_file: Path to the run config.
-        model: ``afm`` | ``indent`` | ``pes_tip`` | ``sheetonsheet`` | ``pes_sheet``.
+        model: ``afm`` | ``indent`` | ``pes_tip`` | ``sheetonsheet`` | ``pes_sheet``
+            | ``quench`` (a ``[quench]`` config: writes a quench root, runs nothing).
         output_root: Directory to create the simulation root inside.
         settings_file: Optional settings.yaml override.
         generate_hpc: Also emit HPC job scripts.
         simulation_root_name: Explicit root directory name. Without it the name
             is a timestamp to the second, so two runs in the same second merge.
-        allow_generate_amorphous: False forbids a melt-quench (see
-            :func:`frictionsim2d.builders.construction.components.make_amorphous`).
         ensure_hpc_settings: Optional callable applied to the HPC settings.
 
     Returns:
@@ -114,7 +112,6 @@ def generate_package(config_file: Union[str, Path],
         generate_hpc=generate_hpc,
         simulation_root_name=simulation_root_name,
         on_failure=record,
-        allow_generate_amorphous=allow_generate_amorphous,
     )
 
     return GenerationResult(

@@ -1,0 +1,27 @@
+{
+  "kind": "quench",
+  "schema": "quench-1",
+  "material": "Si",
+  "potential_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad",
+  "melt_temp": 3000.0,
+  "quench_temp": 300.0,
+  "quench_rate": 1000000000000.0,
+  "timestep": 0.002,
+  "melt_steps": 20000,
+  "equilibrate_steps": 10000,
+  "key8": "400bd3e6",
+  "key_sha256": "400bd3e64aff5dfbc6a6f5fce22147ab127e29b4670bfbbb4af731c8635b4abc",
+  "slab_requested": [
+    16.0,
+    16.0,
+    16.0
+  ],
+  "melt_seed": 48014721,
+  "quench_nsteps": 1350000,
+  "pot_type": "sw",
+  "potential_file": "Si.sw",
+  "cif_file": "Si.cif",
+  "frictionsim2d_version": "0.1.0",
+  "git_commit": "<GITHASH>",
+  "created": "<TIMESTAMP>"
+}
