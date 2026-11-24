@@ -8,7 +8,6 @@ from frictionsim2d.core.mlip import (
     d3_style_token,
     get_mlip,
     is_mlip,
-    mlip_by_style,
 )
 from frictionsim2d.core.utils.structures import count_atomtypes
 
@@ -56,13 +55,6 @@ def test_coeff_line_mace_places_model_path():
 def test_coeff_line_deepmd_places_index():
     line = get_mlip("deepmd").coeff_line(" 2", "m.pth", ["NULL", "Mo", "S"])
     assert line == "pair_coeff * * deepmd 2 NULL Mo S"
-
-
-def test_mlip_by_style_resolves_emitted_tokens_back_to_the_spec():
-    assert mlip_by_style("symmetrix/mace").name == "mace"
-    assert mlip_by_style(" deepmd ").name == "deepmd"
-    assert mlip_by_style("lj/cut") is None
-    assert mlip_by_style("") is None and mlip_by_style(None) is None
 
 
 def test_registry_capability_flags():

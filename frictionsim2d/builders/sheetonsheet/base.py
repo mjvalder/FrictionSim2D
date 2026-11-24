@@ -526,7 +526,11 @@ class SheetOnSheetSimulation(SimulationBase):
         if has_internal_lj:
             pass  # ReaxFF, AIREBO, etc. handle interlayer interactions internally
         elif constraint_mode in ('atom_bonds', 'com_spring'):
-            # Adjacent layers are real; every non-adjacent pair is a ghost.
+            # Adjacent layers keep their real LJ. Non-adjacent pairs get a
+            # near-zero-epsilon (1e-100) ghost line instead of none: this keeps
+            # the pair table complete at minimal cost and with minimal effect on
+            # dynamics, while the bond/spring already couples the top pair, so a
+            # second real interaction across the gap would double-count it.
             ghost = [(i, j) for i in range(n_layers) for j in range(i + 2, n_layers)]
             pm.add_interlayer(['sheet'], low_interaction_pairs=ghost)
         else:

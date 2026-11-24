@@ -31,7 +31,6 @@ __all__ = [
     'validate_mlip_cell',
     'check_bound_stack',
     'check_d3_fits_box',
-    'mlip_by_style',
 ]
 
 
@@ -90,8 +89,14 @@ class MLIPSpec:
         """Return a full ``pair_coeff`` line for this framework.
 
         Inside ``pair_style hybrid`` the line names the sub-style. Outside it
-        that token is not a selector (deepmd would read it as an element,
-        symmetrix as the model filename), so ``hybrid=False`` drops it; what
+        that token is not a selector, so ``hybrid=False`` drops it:
+
+        * MACE: kept, LAMMPS reads ``symmetrix/mace`` as the model filename
+          and rejects the pair_style (measured 2026-08-24).
+        * DeePMD: kept, pair_deepmd reads it as an element ("element deepmd
+          not found in the model", pair_deepmd.cpp:860).
+
+        What
         remains differs only because deepmd carries its model path in the
         pair_style line and symmetrix carries it here.
 
@@ -519,15 +524,3 @@ def check_d3_fits_box(box_x: float, box_y: float, d3_cutoff: float,
         f"settings.potential.d3_cutoff below {shortest - skin:.1f}, or "
         f"increase the sheet footprint (x/y) past {required:.1f} A."
     )
-
-
-def mlip_by_style(style_token: str):
-    """Resolve a LAMMPS ``pair_style`` token (``symmetrix/mace``) to its :class:`MLIPSpec`.
-
-    Returns ``None`` if the token is not an MLIP style.
-    """
-    token = (style_token or '').strip()
-    for spec in MLIP_REGISTRY.values():
-        if token == spec.style_token_name:
-            return spec
-    return None

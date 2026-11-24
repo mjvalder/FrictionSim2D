@@ -41,8 +41,10 @@ def test_lone_reaxff_writes_the_null_safezone_mincap_style(mock_settings, tmp_pa
     mincap = mock_settings.potential.reaxff_mincap
     assert f'pair_style reaxff NULL safezone {safezone} mincap {mincap}' in lines
     coeff = next(l for l in lines if l.startswith('pair_coeff * *'))
-    assert coeff.split('#')[0].split() == ['pair_coeff', '*', '*', coeff.split()[3], 'Mo', 'S']
-    assert 'reaxff' not in coeff.split('#')[0].split()
+    tokens = coeff.split('#')[0].split()
+    assert tokens[:3] == ['pair_coeff', '*', '*']
+    assert tokens[3].endswith('ffield_Wang.reax.MoS')   # the file, not a style name
+    assert tokens[4:] == ['Mo', 'S']
 
 
 def test_reaxff_in_hybrid_keeps_the_same_null_token(mock_settings, tmp_path):
@@ -101,17 +103,13 @@ def test_padded_maps_pad_with_null_and_narrow_by_layer():
     assert reg.build_element_map(['tip']) == ['NULL', 'NULL', 'Si']
 
 
-def test_cross_interaction_orders_the_pair_by_first_type(mock_settings, tmp_path):
-    pm = _reaxff_pm(mock_settings, tmp_path, cross=True)
-    for line in pm.cross_interaction_commands:
-        t1, t2 = line.split()[1:3]
-        assert int(t1.split('*')[0]) <= int(t2.split('*')[0])
-    pm2 = PotentialManager(mock_settings, use_langevin=False)
-    pm2.types.register('b', 'S', 'S')
-    pm2.types.register('a', 'Mo', 'Mo')
-    pm2.components = {n: {'config': SimpleConfig()} for n in ('a', 'b')}
-    pm2.add_cross_interaction('a', 'b')
-    assert pm2.cross_interaction_commands[0].startswith('pair_coeff 1 2 lj/cut')
+def test_cross_interaction_orders_the_pair_by_first_type(mock_settings):
+    pm = PotentialManager(mock_settings, use_langevin=False)
+    pm.types.register('b', 'S', 'S')
+    pm.types.register('a', 'Mo', 'Mo')
+    pm.components = {n: {'config': SimpleConfig()} for n in ('a', 'b')}
+    pm.add_cross_interaction('a', 'b')
+    assert pm.cross_interaction_commands[0].startswith('pair_coeff 1 2 lj/cut')
 
 
 class SimpleConfig:

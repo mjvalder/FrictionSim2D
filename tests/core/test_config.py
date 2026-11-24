@@ -1284,12 +1284,32 @@ class TestSheetSectionsAgreeOnDispersion:
                 '2D-2': self._sheet(tmp_path, allow_unbound=True)})
 
     def test_flake_section_must_agree_with_the_sheet(self, tmp_path):
-        with pytest.raises(ValidationError, match=r'\[2D\] dispersion = d3.*\[Flake-1\] dispersion = none'):
+        with pytest.raises(ValidationError, match=r'\[2D\]/\[2D-1\] dispersion = d3.*\[Flake-1\] dispersion = none'):
             self._config(tmp_path, {
                 '2D': self._sheet(tmp_path, dispersion='d3'),
                 'Flake': {'shape': 'hexagon', 'edge_length': 5.0},
                 'Flake-1': self._sheet(tmp_path, dispersion='none'),
                 'Flake-2': self._sheet(tmp_path, dispersion='none')})
+
+    def test_classical_hetero_may_differ_on_allow_unbound(self, tmp_path):
+        sw = lambda **o: self._sheet(tmp_path, pot_type='sw', pot_path=str(
+            Path(__file__).resolve().parents[2] / 'examples' / 'potentials' / 'sw' / 'MoS2_wen.sw'),
+            lat_c=None, **o)
+        cfg = self._config(tmp_path, {'2D-1': sw(), '2D-2': sw(allow_unbound=True)})
+        assert len(cfg.sheets) == 2
+
+    def test_afm_ignores_unused_flake_sections(self, tmp_path):
+        from frictionsim2d.core.config import AFMSimulationConfig, load_settings
+        cfg = AFMSimulationConfig(**{
+            'general': {'temp': 300.0, 'force': 5.0, 'scan_speed': 2.0},
+            'tip': {'mat': 'Si', 'pot_type': 'sw', 'r': 5.0, 'dspring': 0.1,
+                    'pot_path': str(Path(__file__).resolve().parents[2] / 'examples' / 'potentials' / 'sw' / 'Si.sw'),
+                    'cif_path': str(Path(__file__).resolve().parents[2] / 'examples' / 'materials' / 'Si.cif')},
+            '2D': self._sheet(tmp_path, dispersion='d3'),
+            'Flake-1': self._sheet(tmp_path, dispersion='none'),
+            'Flake-2': self._sheet(tmp_path, dispersion='none'),
+            'settings': load_settings().model_dump()})
+        assert len(cfg.flake_sheets) == 2
 
     def test_agreeing_sections_are_accepted(self, tmp_path):
         cfg = self._config(tmp_path, {

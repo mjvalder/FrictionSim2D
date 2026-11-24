@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any, Literal, Mapping, cast
+from typing import List, Optional, Union, Dict, Any, ClassVar, Literal, Mapping, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -607,7 +607,7 @@ class SubstrateConfig(_EmptyAmorphDefault, ComponentConfig):
             "bound is 2× this, and residual strain beyond it fails loud."
         ),
     )
-#: Config keys struck by the v4 MLIP redesign. Pydantic *ignores* unknown keys
+#: Config keys struck by the MLIP redesign. Pydantic *ignores* unknown keys
 #: by default, which for these would silently change a run's physics, so
 #: :meth:`SheetConfig.reject_removed_mlip_keys` rejects them by name with a
 #: pointer at documentation/mlip.md.
@@ -670,7 +670,7 @@ class SheetConfig(ComponentConfig):
     @model_validator(mode='before')
     @classmethod
     def reject_removed_mlip_keys(cls, data):
-        """Fail loudly on keys the v4 redesign removed."""
+        """Fail loudly on keys the MLIP redesign removed."""
         if not isinstance(data, dict):
             return data
         for key, reason in REMOVED_SHEET_KEYS.items():
@@ -684,7 +684,7 @@ class SheetConfig(ComponentConfig):
 
     @model_validator(mode='after')
     def validate_mlip_capability_rules(self) -> 'SheetConfig':
-        """Enforce the v4 config-layer rules for MLIP sheets.
+        """Enforce the config-layer rules for MLIP sheets.
 
         These come straight from the binding capability matrix
         (documentation/mlip.md §1-§2);
@@ -1103,25 +1103,30 @@ def _check_mlip_interlayer_choice(config: Any) -> None:
         "and dispersion = d3 for the vdW term (documentation/mlip.md).")
 
 
-def _check_sheet_sections_agree(config: Any) -> None:
-    """Require every sheet section of a hetero or flake cell to agree on its D3 settings.
+def _check_sheet_sections_agree(config: Any, include_flake_sheets: bool) -> None:
+    """Require the sheet sections of an MLIP hetero or flake cell to agree on D3.
 
     ``dispersion`` and ``allow_unbound`` are properties of the whole cell, but the
     builders read them from the first sheet only, so a disagreeing section would
-    be silently ignored (or wrongly refused).
+    be silently ignored (or wrongly refused). Only MLIP cells are checked, since
+    both settings are inert for classical potentials, and only the sheet lists
+    the config's builders actually read (``flake_sheets`` is read by the flake
+    slide only).
 
     Raises:
         ValueError: Naming the sections that disagree.
     """
     sheets = list(getattr(config, 'sheets', None) or [])
-    flake_sheets = list(getattr(config, 'flake_sheets', None) or [])
+    flake_sheets = list(getattr(config, 'flake_sheets', None) or []) if include_flake_sheets else []
     if len(sheets) < 2 and not flake_sheets:
         return
     if len(sheets) >= 2:
         labelled = [(f"[2D-{i}]", sh) for i, sh in enumerate(sheets, 1)]
     else:
-        labelled = [("[2D]", config.sheet)]
+        labelled = [("[2D]/[2D-1]", config.sheet)]
     labelled += [(f"[Flake-{i}]", sh) for i, sh in enumerate(flake_sheets, 1)]
+    if not any(sh.pot_type and is_mlip(sh.pot_type) for _, sh in labelled):
+        return
     for field in ('dispersion', 'allow_unbound'):
         values = {label: getattr(sh, field) for label, sh in labelled}
         if len(set(values.values())) > 1:
@@ -1133,6 +1138,9 @@ def _check_sheet_sections_agree(config: Any) -> None:
 
 class _InterlayerChecked(BaseModel):
     """Mixin: reject interlayer settings that cannot produce a valid run."""
+
+    #: Whether this config's builders read ``flake_sheets`` (the flake slide does).
+    _READS_FLAKE_SHEETS: ClassVar[bool] = False
 
     @model_validator(mode='after')
     def _check_interlayer(self, info: ValidationInfo):
@@ -1146,7 +1154,7 @@ class _InterlayerChecked(BaseModel):
     @model_validator(mode='after')
     def _check_sheet_sections_agree(self):
         """Refuse hetero/flake sheet sections that disagree on dispersion or allow_unbound."""
-        _check_sheet_sections_agree(self)
+        _check_sheet_sections_agree(self, self._READS_FLAKE_SHEETS)
         return self
 
 
@@ -1313,6 +1321,7 @@ class AFMSimulationConfig(_InterlayerChecked):
 
 class SheetOnSheetSimulationConfig(_InterlayerChecked):
     """Master configuration object for a Sheet-on-Sheet simulation run."""
+    _READS_FLAKE_SHEETS: ClassVar[bool] = True
     general: GeneralConfig
     sheet: SheetConfig = Field(..., alias='2D')
     sheets: List[SheetConfig] = Field(

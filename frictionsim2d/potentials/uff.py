@@ -1,5 +1,5 @@
 """UFF Lennard-Jones (sigma [Angstrom], epsilon [eV]) per element, for Lorentz-Berthelot
-cross terms in ``utils.lj_params``.
+cross terms in ``utils.lj_params`` (cross-component and interlayer LJ).
 
 Reference:
     Rappe et al. (1992). "A full description of the UFF"

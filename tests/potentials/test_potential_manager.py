@@ -1688,12 +1688,12 @@ class TestSingleComponentCommandsRefuseMLIP:
 
 
 class TestNonHybridPathForBothFrameworks:
-    """A multi-component MLIP cell can now take the NON-hybrid path (v6 §8).
+    """A multi-component MLIP cell can take the NON-hybrid path.
 
     With one instance and no cross-LJ, `_is_single_potential` is true, so
-    `write_file` emits a bare `pair_style` and routes every line through
-    `_strip_non_hybrid_prefix`. Before v6 only single-component cells reached
-    that path, and the two frameworks need opposite treatment there: deepmd's
+    `write_file` emits a bare `pair_style` and builds the line with
+    `coeff_line(hybrid=False)`. The two frameworks need opposite treatment
+    there: deepmd's
     model path lives in the pair_style line (so the coeff line loses its style
     token), MACE's lives in the coeff line (so it must survive).
     """
