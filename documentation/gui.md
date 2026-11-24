@@ -15,7 +15,7 @@ FrictionSim2D gui             # launch
 ```
 
 `--check` reports the Qt platform, the ovito version, whether the viewport gets
-a usable OpenGL context, and whether `lmp` is on PATH. It exits
+a usable OpenGL context, and whether `lmp` and `atomsk` are on PATH. It exits
 non-zero when the environment cannot run the GUI, so it is worth running once on
 a new machine before wondering why the viewport is blank.
 

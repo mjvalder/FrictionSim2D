@@ -633,7 +633,8 @@ def test_write_provenance_git_failure_falls_back_loudly(
     def _raise(*_args, **_kwargs):
         raise FileNotFoundError("git: command not found")
 
-    # Object-form: patches the same `subprocess` module
+    # Object-form (mirrors tests/interfaces/test_atomsk.py's identical
+    # subprocess-boundary pattern): patches the same `subprocess` module
     # object base.py's `import subprocess` resolves at call time.
     monkeypatch.setattr(subprocess, "run", _raise)
 

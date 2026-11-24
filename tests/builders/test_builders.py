@@ -13,7 +13,7 @@ allowed by tests/repo/test_mock_targets.py's ALLOWED_TARGET_PREFIXES.
 import json
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -35,6 +35,11 @@ MOS2_CIF, MOS2_POT = f"{MAT}/h-MoS2.cif", f"{POT}/MoS2_wen.sw"
 @pytest.fixture
 def temp_dir(tmp_path: Path) -> Path:
     return tmp_path
+
+
+@pytest.fixture
+def mock_atomsk() -> MagicMock:
+    return MagicMock(name="atomsk")
 
 
 def _afm_config(build_dir: Path) -> AFMSimulationConfig:

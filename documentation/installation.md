@@ -6,6 +6,7 @@ Environment setup, optional extras, verification, and troubleshooting.
 
 - Python 3.9+
 - LAMMPS executable available in your environment
+- Atomsk executable available in your environment (optional)
 
 Optional features require extra dependencies:
 
@@ -42,6 +43,12 @@ Then verify external binaries used by workflows:
 lmp -h
 ```
 
+If you use Atomsk-based geometry operations, also verify:
+
+```bash
+atomsk --version
+```
+
 ## AiiDA setup (optional)
 
 After installing AiiDA dependencies:
@@ -76,6 +83,10 @@ See [aiida.md](aiida.md) for both in full.
 `lmp` missing
 
 - Install LAMMPS in the same environment used to run FrictionSim2D.
+
+`atomsk` missing
+
+- Atomsk is optional. Install it only if you plan to use Atomsk-based operations.
 
 AiiDA commands abort immediately
 
