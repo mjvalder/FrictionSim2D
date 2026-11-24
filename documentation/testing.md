@@ -1,12 +1,12 @@
 # Testing
 
-How the suite is organised, how to run each tier, and the two ways a naive
-`pytest` invocation misleads you.
+How the suite is organised, how to run each tier, how GUI dialogs are kept from
+hanging a run, and how `-m integration` can mislead you.
 
 ## Tiers
 
 ```bash
-pytest tests --ignore=tests/gui          # fast tier: 3689 tests, ~14 min
+pytest tests                             # default: 5927 tests, ~23 min (gui and aiida included)
 pytest -m lammps                         # real LAMMPS runs: 80 tests
 pytest -m 'integration and not lammps'   # cross-package tier: 105 tests
 pytest -m integration                    # the same tier PLUS the LAMMPS smoke: 116 tests
@@ -20,11 +20,12 @@ pytest --cov=frictionsim2d --cov-report=term-missing tests/core    # coverage fo
 `pyproject.toml` sets `addopts = "-v --tb=short -m 'not lammps'"`, so the fast tier is
 the default.
 
-### Two traps
+### Two things to know
 
-- **Never run a bare `pytest`.** `tests/gui/test_gui_app_smoke.py` hangs on an unpatched
-  modal dialog and the run never finishes. Always name paths or pass
-  `--ignore=tests/gui`.
+- **GUI modals are stubbed.** `tests/gui/conftest.py` replaces every `QMessageBox` /
+  `QFileDialog` / `QInputDialog` call and `QDialog.exec`: an unpatched one fails the test
+  instead of hanging it. A test that expects a dialog patches it itself. A 300 s per-test
+  `faulthandler` backstop (`FS2D_GUI_TEST_TIMEOUT`) dumps tracebacks and exits on a hang.
 - **`-m integration` replaces the default marker expression**, including the
   `not lammps` part, so it pulls the real-LAMMPS smoke in with it. Use `-m 'integration and not lammps'` when you want only the fast half.
 
