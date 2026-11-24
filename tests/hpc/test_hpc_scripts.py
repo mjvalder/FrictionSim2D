@@ -252,3 +252,44 @@ def test_submit_files_carry_the_rsync_lines_for_the_host_and_home(
         assert lines[0] == f"# rsync -rvltoD {tmp_path.name} {target}"
         assert lines[1].endswith(f'--exclude="*" {target}{tmp_path.name} ./')
         assert '--include="run*.log"' in lines[1]
+
+
+def test_hpc_home_gives_one_shared_log_directory(tmp_path):
+    HPCScriptGenerator(_config(hpc_home="/home/me/work/")).generate_scripts(
+        ["mat0/L1"], tmp_path / "hpc")
+
+    text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
+    assert "#PBS -o /home/me/work/logs/friction2d_out.txt" in text
+
+
+def test_an_explicit_log_dir_wins_over_hpc_home(tmp_path):
+    HPCScriptGenerator(_config(hpc_home="/home/me/work", log_dir="/scratch/logs")).generate_scripts(
+        ["mat0/L1"], tmp_path / "hpc")
+
+    text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
+    assert "#PBS -o /scratch/logs/friction2d_out.txt" in text
+
+
+def test_a_relative_log_dir_is_created_beside_the_hpc_directory(tmp_path):
+    HPCScriptGenerator(_config(log_dir="joblogs")).generate_scripts(
+        ["mat0/L1"], tmp_path / "hpc")
+
+    assert (tmp_path / "joblogs").is_dir()
+    assert (tmp_path / "logs").is_dir()
+
+
+@pytest.mark.parametrize("log_dir", ["$SLURM_SUBMIT_DIR/joblogs", "/abs/joblogs"])
+def test_absolute_and_variable_log_dirs_are_not_created_locally(tmp_path, log_dir):
+    HPCScriptGenerator(_config(log_dir=log_dir)).generate_scripts(
+        ["mat0/L1"], tmp_path / "hpc", scheduler="slurm")
+
+    assert not (tmp_path / "joblogs").exists()
+    assert not (tmp_path / "$SLURM_SUBMIT_DIR").exists()
+
+
+def test_slurm_directive_drops_the_submit_dir_prefix_from_log_dir(tmp_path):
+    HPCScriptGenerator(_config(log_dir="$SLURM_SUBMIT_DIR/joblogs")).generate_scripts(
+        ["mat0/L1"], tmp_path / "hpc", scheduler="slurm")
+
+    text = (tmp_path / "hpc" / "run.sh").read_text(encoding="utf-8")
+    assert "#SBATCH --output=joblogs/friction2d_out.txt" in text
