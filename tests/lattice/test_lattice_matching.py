@@ -12,11 +12,10 @@ from frictionsim2d.lattice.matching import (
     cell_from_params,
     find_coincidence_lattice,
     scan_registry_index,
-    rotation_angle_from_match,
-    _max_strain,
+    max_strain,
     _enumerate_matrices,
     _circle_overlap_area,
-    _relative_rotation_strain,
+    relative_rotation_strain,
 )
 
 
@@ -63,24 +62,24 @@ class TestCellFromParams:
 
 
 # ---------------------------------------------------------------------------
-# _max_strain
+# max_strain
 # ---------------------------------------------------------------------------
 
 class TestMaxStrain:
     def test_identical_cells_zero_strain(self):
         cell = _hex_cell(3.18)
-        assert math.isclose(_max_strain(cell, cell), 0.0, abs_tol=1e-9)
+        assert math.isclose(max_strain(cell, cell), 0.0, abs_tol=1e-9)
 
     def test_scaled_cell_gives_strain(self):
         cell = _rect_cell(3.0, 4.0)
         stretched = _rect_cell(3.03, 4.0)   # 1% strain along a
-        s = _max_strain(cell, stretched)
+        s = max_strain(cell, stretched)
         assert 0.005 < s < 0.02
 
     def test_singular_cell_returns_inf(self):
         good = _hex_cell(3.18)
         singular = np.zeros((2, 2))
-        assert _max_strain(good, singular) == math.inf
+        assert max_strain(good, singular) == math.inf
 
 
 # ---------------------------------------------------------------------------
@@ -149,11 +148,6 @@ class TestFindCoincidenceLatticeIdentical:
         result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
         assert np.array_equal(result.matrix_a, np.eye(2, dtype=int))
         assert np.array_equal(result.matrix_b, np.eye(2, dtype=int))
-
-    def test_mean_strain_is_average(self):
-        cell = _hex_cell(3.18)
-        result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
-        assert math.isclose(result.mean_strain, (result.strain_a + result.strain_b) / 2)
 
     def test_area_matches_unit_cell(self):
         cell = _hex_cell(3.18)
@@ -337,51 +331,6 @@ class TestScanRegistryIndex:
         assert result.aa_ri == 0.0 and result.ab_ri == 0.0
 
 
-# ---------------------------------------------------------------------------
-# rotation_angle_from_match
-# ---------------------------------------------------------------------------
-
-class TestRotationAngleFromMatch:
-    def test_identical_cells_zero_rotation(self):
-        """Two identical hexagonal cells should give 0° rotation."""
-        cell = _hex_cell(3.18)
-        match = MatchResult(
-            matrix_a=np.eye(2, dtype=int),
-            matrix_b=np.eye(2, dtype=int),
-            supercell_a=cell,
-            supercell_b=cell,
-            strain_a=0.0,
-            strain_b=0.0,
-            area=float(np.abs(np.linalg.det(cell))),
-        )
-        angle = rotation_angle_from_match(match)
-        assert abs(angle) < 1e-6
-
-    def test_none_match_returns_zero(self):
-        """rotation_angle_from_match(None) must return 0.0."""
-        assert rotation_angle_from_match(None) == 0.0
-
-    def test_45_degree_rotation(self):
-        """A deliberately rotated supercell should give the correct angle."""
-        theta = math.radians(45.0)
-        R = np.array([[math.cos(theta), -math.sin(theta)],
-                      [math.sin(theta),  math.cos(theta)]])
-        base = _rect_cell(3.0, 3.0)
-        rotated = base @ R.T  # row-vector convention
-        match = MatchResult(
-            matrix_a=np.eye(2, dtype=int),
-            matrix_b=np.eye(2, dtype=int),
-            supercell_a=base,
-            supercell_b=rotated,
-            strain_a=0.0,
-            strain_b=0.0,
-            area=float(np.abs(np.linalg.det(base))),
-        )
-        angle = rotation_angle_from_match(match)
-        assert abs(angle - 45.0) < 0.1
-
-
-
 # --- D2b: fixed-reference substrate match (match_to_fixed_box) ---
 
 def test_match_to_fixed_box_pins_box_and_strains_other():
@@ -399,7 +348,7 @@ def test_match_to_fixed_box_pins_box_and_strains_other():
     # ASSERT THE ALGEBRA: the integer supercell of `other`, once strain-closed, lands on `box`.
     # Use the module's confirmed row-vector convention sc = M @ cell (matching.py:163).
     sup = m.supercell_matrix @ other                       # 2x2 supercell BEFORE strain
-    from frictionsim2d.lattice.matching import _max_strain as _ms
+    from frictionsim2d.lattice.matching import max_strain as _ms
     assert abs(_ms(box, sup) - m.residual_strain) < 1e-9   # residual is the box<-sup strain
     # and the residual is within tol -> the strained supercell equals the box within that strain
     assert m.residual_strain <= 0.05 + 1e-9
@@ -453,9 +402,8 @@ def test_orthorhombic_wrapper_tiles_rhombic_moire():
     assert abs(ratio - round(ratio)) < 1e-6 and round(ratio) >= 1
 
 
-def test_rotation_angle_between_matches_from_match():
-    """The factored-out raw-cell helper agrees with rotation_angle_from_match."""
-    from frictionsim2d.lattice.matching import rotation_angle_between, rotation_angle_from_match
+def test_rotation_angle_between_recovers_the_applied_rotation():
+    from frictionsim2d.lattice.matching import rotation_angle_between
     A = _hex_cell()
     theta = 15.0
     r = math.radians(theta)
@@ -463,13 +411,37 @@ def test_rotation_angle_between_matches_from_match():
     B = A @ R.T                                            # A rotated by +15 deg
     assert abs(rotation_angle_between(A, B) - (-theta)) < 1e-6 \
         or abs(rotation_angle_between(A, B) - theta) < 1e-6
-    match = MatchResult(matrix_a=np.eye(2, dtype=int), matrix_b=np.eye(2, dtype=int),
-                        supercell_a=A, supercell_b=B, strain_a=0.0, strain_b=0.0, area=1.0)
-    assert abs(rotation_angle_between(A, B) - rotation_angle_from_match(match)) < 1e-9
 
 
 def test_relative_rotation_strain_singular_supercell_returns_zero_angle_inf_strain():
     """A degenerate (zero-area) sc_a makes the polar stretch tensor singular,
     so the LinAlgError fallback (finding 9) fires: (0.0, inf)."""
-    angle, strain = _relative_rotation_strain(np.zeros((2, 2)), np.eye(2))
+    angle, strain = relative_rotation_strain(np.zeros((2, 2)), np.eye(2))
     assert angle == 0.0 and math.isinf(strain)
+
+
+def test_scan_registry_index_reports_the_ab_offset_and_aa_at_the_origin():
+    cart, cell = _graphene_positions()
+    result = scan_registry_index(cart, cart, cell, n_grid=12)
+    frac_aa = np.linalg.solve(cell.T, result.aa_shift) % 1.0
+    frac_ab = np.linalg.solve(cell.T, result.ab_shift) % 1.0
+    assert np.allclose(np.minimum(frac_aa, 1.0 - frac_aa), 0.0, atol=1e-9)
+    assert np.all(np.minimum(frac_ab, 1.0 - frac_ab) > 0.2)   # AB is off the AA origin
+
+
+def test_orthorhombic_wrapper_raises_when_no_tiling_fits():
+    from frictionsim2d.lattice.matching import orthorhombic_wrapper
+    skew = np.array([[1.0, 0.0], [math.sqrt(2.0) * 0.5, 1.0]])
+    with pytest.raises(ValueError, match="no orthogonalising integer tiling"):
+        orthorhombic_wrapper(skew, max_tiling=1)
+
+
+def test_gauss_reduce_2d_returns_a_right_handed_integer_transform_of_the_cell():
+    from frictionsim2d.lattice.matching import _gauss_reduce_2d
+    for cell in (np.array([[3.0, 0.0], [1.5, 2.598]]),
+                 np.array([[3.0, 0.0], [10.5, 2.598]]),     # skewed basis of the same lattice
+                 np.array([[5.0, 1.0], [14.0, 3.5]])):
+        reduced, unimod = _gauss_reduce_2d(cell)
+        assert np.allclose(reduced, unimod @ cell)
+        assert round(abs(np.linalg.det(unimod))) == 1
+        assert np.linalg.det(reduced) > 0

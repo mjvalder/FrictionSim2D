@@ -1,3 +1,5 @@
+import shutil
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -148,7 +150,8 @@ def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):
     a0 = read(str(src_path), format="lammps-data")
 
     out = tmp_path / "twisted.data"
-    rotate_flake_in_plane(src_path, 15.0, out)
+    shutil.copy(src_path, out)
+    rotate_flake_in_plane(out, 15.0)
     a1 = read(str(out), format="lammps-data")
 
     # atoms conserved; box (cell) unchanged (only atoms rotated, not the frame)
@@ -158,3 +161,22 @@ def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):
     rel = (_flake_lattice_orientation(a1) - _flake_lattice_orientation(a0)) % 60.0
     rel = min(rel, 60.0 - rel)
     assert abs(rel - 15.0) < 1.0        # the LATTICE actually twisted by ~15 deg (a real twist, not a no-op)
+
+
+def test_strain_without_a_masses_section_falls_back_to_a_placeholder_mass(tmp_path):
+    src = tmp_path / "bare.data"
+    src.write_text(
+        "bare\n\n2 atoms\n1 atom types\n\n0 6 xlo xhi\n0 6 ylo yhi\n0 20 zlo zhi\n\n"
+        "Atoms # atomic\n\n1 1 0 0 5\n2 1 3 3 5\n", encoding="utf-8")
+    out = tmp_path / "out.data"
+    strain = strain_monolayer_to_cell(str(src), str(out), np.array([[6.3, 0.0], [0.0, 6.3]]))
+    assert 0.049 < strain < 0.051
+    assert "Masses" in out.read_text(encoding="utf-8")
+
+
+def test_strain_rejects_a_target_not_along_x(tmp_path):
+    src = tmp_path / "in.data"
+    _write_square_monolayer(src)
+    with pytest.raises(ValueError, match="first vector along x"):
+        strain_monolayer_to_cell(str(src), str(tmp_path / "o.data"),
+                                 np.array([[6.0, 1.0], [0.0, 6.0]]))

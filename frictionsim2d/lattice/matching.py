@@ -22,7 +22,7 @@ This module provides two complementary tools for 2D material heterostructure set
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, NamedTuple, Optional, Tuple
 
 import numpy as np
@@ -43,7 +43,6 @@ class MatchResult:
         strain_a: Max absolute principal strain applied to A to reach the common cell.
         strain_b: Max absolute principal strain applied to B to reach the common cell.
         area: Supercell area (Å²).
-        mean_strain: Average of ``strain_a`` and ``strain_b``.
     """
     matrix_a: np.ndarray
     matrix_b: np.ndarray
@@ -52,19 +51,6 @@ class MatchResult:
     strain_a: float
     strain_b: float
     area: float
-    mean_strain: float = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.mean_strain = (self.strain_a + self.strain_b) / 2.0
-
-    def __repr__(self) -> str:  # pragma: no cover
-        ma = self.matrix_a.tolist()
-        mb = self.matrix_b.tolist()
-        return (
-            f"MatchResult(M_A={ma}, M_B={mb}, "
-            f"strain_A={self.strain_a:.4f}, strain_B={self.strain_b:.4f}, "
-            f"area={self.area:.2f} Å²)"
-        )
 
 
 def cell_from_params(lat_a: float, lat_b: float, ang_gamma_deg: float) -> np.ndarray:
@@ -88,7 +74,7 @@ def cell_from_params(lat_a: float, lat_b: float, ang_gamma_deg: float) -> np.nda
     ])
 
 
-def _max_strain(cell_ref: np.ndarray, cell_def: np.ndarray) -> float:
+def max_strain(cell_ref: np.ndarray, cell_def: np.ndarray) -> float:
     """Return the maximum absolute principal strain deforming *cell_def* → *cell_ref*.
 
     Both cells must have the same number of atoms / area sign so that the
@@ -134,6 +120,15 @@ def _enumerate_matrices(n: int):
                     yield np.array([[a, b], [0, c]], dtype=int)
 
 
+def _supercell_candidates(cell: np.ndarray, n: int) -> List[Tuple[np.ndarray, np.ndarray, float]]:
+    """``(M, M @ cell, |det(M @ cell)|)`` for every matrix of :func:`_enumerate_matrices`."""
+    out = []
+    for matrix in _enumerate_matrices(n):
+        sc = matrix @ cell  # type: ignore[operator]
+        out.append((matrix, sc, abs(float(np.linalg.det(sc)))))
+    return out
+
+
 def find_coincidence_lattice(
     cell_a: np.ndarray,
     cell_b: np.ndarray,
@@ -160,16 +155,13 @@ def find_coincidence_lattice(
         or ``None`` if no match is found within the constraints.
     """
     best: Optional[MatchResult] = None
+    cand_b = _supercell_candidates(cell_b, max_supercell)
 
-    for ma in _enumerate_matrices(max_supercell):
-        sc_a = ma @ cell_a  # type: ignore[operator]
-        area_a = abs(float(np.linalg.det(sc_a)))
+    for ma, sc_a, area_a in _supercell_candidates(cell_a, max_supercell):
         if area_a < 1.0:
             continue
 
-        for mb in _enumerate_matrices(max_supercell):
-            sc_b = mb @ cell_b  # type: ignore[operator]
-            area_b = abs(float(np.linalg.det(sc_b)))
+        for mb, sc_b, area_b in cand_b:
 
             # Areas must agree within area_tol before computing full strain.
             if abs(area_a - area_b) / max(area_a, area_b) > area_tol:
@@ -178,8 +170,8 @@ def find_coincidence_lattice(
             # Compute strain: how much must each supercell deform to reach a
             # common mean cell?
             mean_cell = (sc_a + sc_b) / 2.0
-            sa = _max_strain(mean_cell, sc_a)
-            sb = _max_strain(mean_cell, sc_b)
+            sa = max_strain(mean_cell, sc_a)
+            sb = max_strain(mean_cell, sc_b)
 
             if sa > strain_tol or sb > strain_tol:
                 continue
@@ -206,12 +198,12 @@ class FixedBoxMatch:
 
     Unlike :class:`MatchResult` (which strains both cells onto a mean cell),
     this pins ``box_cell`` and strains only the supercell of the other cell
-    onto it. See the D2b crystalline-substrate design (§4.1).
+    onto it.
 
     Attributes:
         supercell_matrix: Integer 2×2 matrix applied to ``other_cell``
             (row-vector convention ``supercell = M @ other_cell``).
-        residual_strain: ``_max_strain(box_cell, other_supercell)`` — the
+        residual_strain: ``max_strain(box_cell, other_supercell)`` — the
             strain the supercell absorbs to land on the pinned box.
         box_cell: The pinned reference cell (returned unchanged).
     """
@@ -232,12 +224,12 @@ def match_to_fixed_box(
     Enumerates integer supercells of ``other_cell`` (via :func:`_enumerate_matrices`,
     with the same area pre-filter as :func:`find_coincidence_lattice`) and returns
     the one whose supercell, strained onto the fixed ``box_cell``, needs the
-    smallest ``_max_strain(box_cell, other_supercell)``. Accepts only if that
+    smallest ``max_strain(box_cell, other_supercell)``. Accepts only if that
     residual strain is ``<= 2 * strain_tol``.
 
     Deliberately diverges from :func:`find_coincidence_lattice` (which strains
     both cells onto a mean cell): here the box is load-bearing and never strained.
-    See the D2b spec §4.1. Reuses ``_enumerate_matrices``/``_max_strain`` so the
+    Reuses ``_enumerate_matrices``/``max_strain`` so the
     matrix convention matches sheet–sheet matching exactly.
 
     Args:
@@ -260,15 +252,13 @@ def match_to_fixed_box(
 
     best: Optional[Tuple[np.ndarray, float]] = None
     best_eps = math.inf
-    for matrix in _enumerate_matrices(max_supercell):
-        sup = matrix @ other_cell  # type: ignore[operator]
-        sup_area = abs(float(np.linalg.det(sup)))
+    for matrix, sup, sup_area in _supercell_candidates(other_cell, max_supercell):
         if sup_area < 1.0:
             continue
         # Area pre-filter: box must be reachable by strain (mirror find_coincidence_lattice).
         if abs(sup_area - box_area) / max(sup_area, box_area) > area_tol:
             continue
-        eps = _max_strain(box_cell, sup)
+        eps = max_strain(box_cell, sup)
         if eps < best_eps:
             best = (matrix.copy(), eps)
             best_eps = eps
@@ -288,7 +278,7 @@ def match_to_fixed_box(
     )
 
 
-def _relative_rotation_strain(sc_a: np.ndarray, sc_b: np.ndarray) -> Tuple[float, float]:
+def relative_rotation_strain(sc_a: np.ndarray, sc_b: np.ndarray) -> Tuple[float, float]:
     """Relative rotation (deg) and residual stretch strain between two 2×2 cells.
 
     Uses the **left** transform ``rel_transform = inv(sc_b) @ sc_a``
@@ -326,11 +316,10 @@ def rotation_angle_between(sc_a: np.ndarray, sc_b: np.ndarray) -> float:
     """Rotation angle (degrees) carrying raw 2×2 cell ``sc_b`` onto ``sc_a``.
 
     The relative rotation is the polar-rotation component of the left transform
-    ``G = inv(sc_b) @ sc_a`` (see :func:`_relative_rotation_strain`), which is
+    ``G = inv(sc_b) @ sc_a`` (see :func:`relative_rotation_strain`), which is
     rotation-invariant and so gives the twist directly. Operates on **raw** 2×2
     lattice matrices (row-vector convention), so it can be called on candidate
-    supercell pairs during a twist search -- unlike
-    :func:`rotation_angle_from_match`, which unpacks a :class:`MatchResult`.
+    supercell pairs during a twist search.
 
     Args:
         sc_a: 2×2 reference cell (rows = lattice vectors, Å).
@@ -340,7 +329,7 @@ def rotation_angle_between(sc_a: np.ndarray, sc_b: np.ndarray) -> float:
         Rotation angle in degrees (counter-clockwise positive). Returns 0.0 when
         the two cells are already aligned or the decomposition is singular.
     """
-    return _relative_rotation_strain(sc_a, sc_b)[0]
+    return relative_rotation_strain(sc_a, sc_b)[0]
 
 
 def _gauss_reduce_2d(cell: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -389,25 +378,6 @@ def _gauss_reduce_2d(cell: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         reduced = reduced[::-1]        # acute angle: dot is symmetric)
         unimod = swap @ unimod
     return reduced, np.rint(unimod).astype(int)
-
-
-def rotation_angle_from_match(match: MatchResult) -> float:
-    """Extract the rotation angle (degrees) that aligns material B to material A.
-
-    Thin wrapper over :func:`rotation_angle_between` that unpacks the two
-    supercells of a :class:`MatchResult` (the rotation component of
-    ``F = supercell_a @ inv(supercell_b)``).
-
-    Args:
-        match: A :class:`MatchResult` from :func:`find_coincidence_lattice`.
-
-    Returns:
-        Rotation angle in degrees (counter-clockwise positive).  Returns 0.0
-        when the two supercells are already aligned.
-    """
-    if match is None:
-        return 0.0
-    return rotation_angle_between(match.supercell_a, match.supercell_b)
 
 
 @dataclass
@@ -540,7 +510,7 @@ def find_commensurate_twist(
     ``sc_a = M_a @ cell_a`` / ``sc_b = M_b @ cell_b``, and for area-compatible
     pairs measures the **achieved** relative rotation
     (:func:`rotation_angle_between`, rotation-only) and the residual strain to
-    close ``sc_b`` onto ``sc_a`` (:func:`_max_strain`, rotation-invariant, so it
+    close ``sc_b`` onto ``sc_a`` (:func:`max_strain`, rotation-invariant, so it
     is the pure stretch mismatch). The best candidate minimises
     ``|achieved - target_angle|`` among those within ``angle_tol`` and
     ``strain_tol``. Its rhombic moiré cell is then wrapped in its minimal
@@ -574,25 +544,21 @@ def find_commensurate_twist(
     cell_a = np.asarray(cell_a, dtype=float)
     cell_b = np.asarray(cell_b, dtype=float)
 
-    # Pre-compute candidate supercells + areas once per layer.
-    cand_a = []
-    for ma in _enumerate_matrices(max_supercell):
-        sc = ma @ cell_a
-        cand_a.append((ma, sc, abs(float(np.linalg.det(sc)))))
-    cand_b = []
-    for mb in _enumerate_matrices(max_supercell):
-        sc = mb @ cell_b
-        cand_b.append((mb, sc, abs(float(np.linalg.det(sc)))))
+    cand_a = _supercell_candidates(cell_a, max_supercell)
+    cand_b = _supercell_candidates(cell_b, max_supercell)
+    # Reduced bases, computed on first use: each supercell meets many partners.
+    reduced_a_cache: List[Optional[np.ndarray]] = [None] * len(cand_a)
+    reduced_b_cache: List[Optional[np.ndarray]] = [None] * len(cand_b)
 
-    # In-tolerance candidates: (sort_key, matrix_a, reduced_a, matrix_b,
-    # achieved_folded, residual, ncells). The orthogonal-box wrapper is a HARD
+    # In-tolerance candidates: (sort_key, matrix_a, matrix_b, achieved_folded,
+    # residual, ncells). The orthogonal-box wrapper is a HARD
     # feasibility constraint (downstream needs an orthogonal box), so we keep ALL
     # in-tolerance candidates and, after sorting best-angle-first, return the
     # first whose reduced moiré cell actually wraps into an orthorhombic box
     # within the tiling budget -- skipping oblique approximants that would need
     # an exploded (or non-existent) orthogonal super-supercell.
     candidates: List[
-        Tuple[Tuple[float, int], np.ndarray, np.ndarray, np.ndarray, float, float, int]
+        Tuple[Tuple[float, int], np.ndarray, np.ndarray, float, float, int]
     ] = []
     # Nearest *achievable* commensurate angle seen at all (for a helpful raise),
     # tracked independently of angle_tol so we can name it when nothing qualifies.
@@ -600,10 +566,10 @@ def find_commensurate_twist(
     nearest_err = math.inf
     nearest_res = math.inf
 
-    for ma, sc_a, area_a in cand_a:
+    for ia, (ma, sc_a, area_a) in enumerate(cand_a):
         if area_a < 1.0:
             continue
-        for mb, sc_b, area_b in cand_b:
+        for ib, (mb, sc_b, area_b) in enumerate(cand_b):
             if area_b < 1.0:
                 continue
             if abs(area_a - area_b) / max(area_a, area_b) > area_tol:
@@ -611,9 +577,12 @@ def find_commensurate_twist(
             # Reduce both supercells to their shortest-vector bases first, so the
             # measured rotation/strain reflect the sublattices' actual geometry
             # (not an integer-unimodular basis skew).
-            ra, _ua = _gauss_reduce_2d(sc_a)
-            rb, _ub = _gauss_reduce_2d(sc_b)
-            achieved, residual = _relative_rotation_strain(ra, rb)
+            if reduced_a_cache[ia] is None:
+                reduced_a_cache[ia] = _gauss_reduce_2d(sc_a)[0]
+            if reduced_b_cache[ib] is None:
+                reduced_b_cache[ib] = _gauss_reduce_2d(sc_b)[0]
+            ra, rb = reduced_a_cache[ia], reduced_b_cache[ib]
+            achieved, residual = relative_rotation_strain(ra, rb)
             # Fold onto the hexagonal irreducible wedge [0, 60): twist is
             # defined modulo the 60° lattice symmetry, so compare in [0, 60).
             achieved_folded = abs(achieved) % 60.0
@@ -792,7 +761,6 @@ def scan_registry_index(
     fx = np.linspace(0.0, 1.0, n_grid, endpoint=False)
     fy = np.linspace(0.0, 1.0, n_grid, endpoint=False)
 
-    ri_grid = np.zeros((n_grid, n_grid))
     raw_grid = np.zeros((n_grid, n_grid))
 
     for i, xi in enumerate(fx):
@@ -801,10 +769,7 @@ def scan_registry_index(
             raw_grid[i, j] = _ri_raw(cart_a, cart_b, cell, shift, atomic_radius)
 
     raw_max = raw_grid.max()
-    if raw_max > 0.0:
-        ri_grid = raw_grid / raw_max
-    else:
-        ri_grid = raw_grid.copy()
+    ri_grid = raw_grid / raw_max if raw_max > 0.0 else raw_grid
 
     # Cartesian coordinates of each grid point.
     shifts_cart = np.array([[xi, yj] for xi in fx for yj in fy]) @ cell

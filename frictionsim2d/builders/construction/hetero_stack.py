@@ -44,8 +44,8 @@ from ...core.config import (
 from ...lattice.apply import rotate_layer_to_angle
 from ...lattice.matching import (
     MatchResult,
-    _max_strain,
-    _relative_rotation_strain,
+    max_strain,
+    relative_rotation_strain,
     find_coincidence_lattice,
     find_commensurate_twist,
     scan_registry_index,
@@ -563,7 +563,7 @@ def build_matched_supercells(
     # 5. Measure each material's strain onto the mean cell IN THE CO-ORIENTED
     #    FRAME (rotation-free), and fail loud if either exceeds the bound (no
     #    silent incommensurate fallback).
-    strains = {label: _max_strain(mean_co, sc_cell[label]) for label in ("a", "b")}
+    strains = {label: max_strain(mean_co, sc_cell[label]) for label in ("a", "b")}
     if strains["a"] > strain_tol or strains["b"] > strain_tol:
         raise ValueError(
             f"Cannot build a commensurate heterostructure stack between "
@@ -709,7 +709,7 @@ def build_twisted_supercells(
         # Residual strain to close this layer onto the ortho box (rotation-
         # invariant: the tiled box and the ortho box differ by a rigid rotation
         # plus this strain).
-        strains[lbl] = _relative_rotation_strain(ortho, sc_cell)[1]
+        strains[lbl] = relative_rotation_strain(ortho, sc_cell)[1]
         if strains[lbl] > strain_tol + 1e-9:
             raise ValueError(
                 f"build_twisted_supercells: layer '{lbl}' residual strain "

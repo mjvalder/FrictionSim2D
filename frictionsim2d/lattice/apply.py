@@ -1,7 +1,7 @@
 """Apply lattice-matching results to LAMMPS monolayer data files.
 
-Bridges the pure-math ``lattice_matching`` module to on-disk structures. Kept
-separate so ``lattice_matching`` stays dependency-free (math only).
+Bridges the pure-math ``lattice.matching`` module to on-disk structures. Kept
+separate so ``lattice.matching`` stays dependency-free (math only).
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import numpy as np
 from ..interfaces.lammps_monolayer import (
     detect_atom_style, monolayer_to_atoms, read_monolayer, write_supercell,
 )
-from .matching import _max_strain, rotation_angle_between
+from .matching import max_strain, rotation_angle_between
 
 _TILT_EPS = 1e-9
 
@@ -55,8 +55,9 @@ def strain_monolayer_to_cell(input_data_path: str,
         cell to ``target_cell_2x2``).
     """
     target = np.asarray(target_cell_2x2, dtype=float)
-    assert abs(target[0][1]) < _TILT_EPS, \
-        "target_cell_2x2 must have its first vector along x (LAMMPS-canonical form)"
+    if abs(target[0][1]) >= _TILT_EPS:
+        raise ValueError(
+            "target_cell_2x2 must have its first vector along x (LAMMPS-canonical form)")
 
     atom_style = detect_atom_style(input_data_path)
     needs_mass_fallback = not _has_masses_section(input_data_path)
@@ -102,34 +103,19 @@ def strain_monolayer_to_cell(input_data_path: str,
     finally:
         lmp.close()
 
-    return _max_strain(target, source_2x2)
+    return max_strain(target, source_2x2)
 
 
 def rotate_layer_to_angle(mono_path: str,
                           angle_deg: float,
                           out_path: str) -> float:
-    """Rigidly reorient a monolayer's atoms + cell about z by ``angle_deg``.
+    """Rigidly reorient a monolayer's atoms and cell about z by ``angle_deg``.
 
-    ``change_box`` (used by :func:`strain_monolayer_to_cell`) is affine and
-    **cannot rotate**, so the reorientation is done in ASE: the atoms and the
-    lattice vectors are rotated together about z (``atoms.rotate(angle_deg,
-    'z', rotate_cell=True)``), then written back to a LAMMPS data file. The
-    write re-canonicalises the box to the LAMMPS frame (first vector along +x),
-    preserving every LAMMPS type as a distinct placeholder element, the real
-    ``Masses`` section, per-atom charges, and the ``atom_style`` -- reusing
-    :func:`~frictionsim2d.builders.construction.hetero_stack.build_matched_supercells`' metadata
-    machinery,
-    so nothing is dropped the way a bare ASE round-trip would.
-
-    Note on periodicity: a rigid rotation of a *periodic* cell is a
-    lattice-symmetry-equivalent operation, so after re-canonicalisation the
-    reoriented monolayer's on-disk box matches the input's -- the reorientation
-    only becomes physically observable **relative to another layer**. The
-    twisted heterostructure realises the relative twist by tiling this layer
-    with its commensurate moiré supercell matrix into the shared moiré box (see
-    :func:`~frictionsim2d.builders.construction.hetero_stack.build_twisted_supercells`); this
-    function is the
-    reorientation primitive and the achieved-angle reporter.
+    A rigid rotation of a periodic cell is a lattice symmetry, so the on-disk
+    box matches the input's after re-canonicalisation; the twist is carried by
+    the supercell matrices of the layer (see
+    :func:`~frictionsim2d.builders.construction.hetero_stack.build_twisted_supercells`).
+    Types, masses, charges and ``atom_style`` are preserved.
 
     Args:
         mono_path: Path to the source monolayer LAMMPS data file.
@@ -137,11 +123,8 @@ def rotate_layer_to_angle(mono_path: str,
         out_path: Path to write the reoriented monolayer data file.
 
     Returns:
-        The **applied** in-plane rotation (deg), measured off the reoriented
-        lattice vectors before the LAMMPS-frame canonicalisation (equals
-        ``angle_deg`` up to numerical precision). Reported explicitly because
-        commensurate twist angles are discrete and the achieved angle must
-        never be silently assumed.
+        The applied in-plane rotation (deg), measured off the reoriented
+        lattice vectors before the LAMMPS-frame canonicalisation.
     """
     mono = read_monolayer(Path(mono_path))
     atoms = monolayer_to_atoms(mono)
@@ -162,36 +145,27 @@ def rotate_layer_to_angle(mono_path: str,
     return rotation_angle_between(cell_in, cell_rot)
 
 
-def rotate_flake_in_plane(flake_path, angle_deg, out_path=None):
-    """Twist a FINITE flake by rotating its atoms about z in the FIXED box frame.
+def rotate_flake_in_plane(flake_path: str | Path, angle_deg: float) -> None:
+    """Twist a finite flake in place by rotating its atoms about z in the fixed box frame.
 
-    Unlike :func:`rotate_layer_to_angle` (which rotates the cell too and
-    re-canonicalises -- a lattice-symmetry no-op for a layer in a shared box),
-    this rotates ONLY the atom xy positions, about the flake centroid, leaving
-    the cell unchanged. The flake is finite, so this is a genuine twist relative
-    to whatever it is later placed on (the periodic sheet / the tip contact).
-    Metadata (types/masses/charges/atom_style) is preserved by reusing the same
-    metadata-preserving I/O helpers as :func:`rotate_layer_to_angle`.
+    Unlike :func:`rotate_layer_to_angle`, only the atom xy positions rotate
+    (about the flake centroid); the cell is unchanged, so the twist is real
+    relative to whatever the flake is later placed on. Types, masses, charges
+    and ``atom_style`` are preserved.
 
     Args:
-        flake_path: Path to the source flake LAMMPS data file.
+        flake_path: LAMMPS data file of the flake, rewritten in place.
         angle_deg: In-plane twist about z (degrees, CCW positive).
-        out_path: Where to write the twisted flake; defaults to overwriting
-            ``flake_path`` in place.
-
-    Returns:
-        The output path (a :class:`~pathlib.Path`).
     """
-    out_path = Path(out_path) if out_path is not None else Path(flake_path)
-    mono = read_monolayer(Path(flake_path))
+    flake_path = Path(flake_path)
+    mono = read_monolayer(flake_path)
     atoms = monolayer_to_atoms(mono)
     cxy = atoms.get_positions()[:, :2].mean(axis=0)
     atoms.rotate(angle_deg, "z", center=(cxy[0], cxy[1], 0.0), rotate_cell=False)
     write_supercell(
         atoms,
-        out_path,
+        flake_path,
         atom_style=str(mono["atom_style"]),
         n_types=int(mono["n_types"]),
         masses=mono["masses"],  # type: ignore[arg-type]
     )
-    return out_path
