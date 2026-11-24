@@ -68,7 +68,6 @@ def test_cpu_launch_command_is_mains_expression():
 def test_gpu_select_line_exact_string():
     ctx = _group_config("deepmd").to_dict()
     assert ctx["select_single"] == "1:ncpus=8:mem=64gb:mpiprocs=1:ngpus=1:gpu_type=L40S"
-    assert ctx["select_multi"] == ctx["select_single"]
 
 
 def test_gpu_select_line_omits_gpu_type_when_unset():

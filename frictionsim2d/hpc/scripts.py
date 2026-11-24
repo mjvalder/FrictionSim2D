@@ -44,13 +44,8 @@ CPU_GROUP: GroupKey = (False, None)
 
 
 def _group_key(entry) -> GroupKey:
-    """Group key for a :class:`~frictionsim2d.hpc.manifest.JobEntry`.
-
-    Tolerates entries predating the MLIP fields (``getattr`` defaults), so a
-    manifest loaded from an older campaign groups as pure CPU.
-    """
-    return (bool(getattr(entry, 'needs_gpu', False)),
-            getattr(entry, 'framework', None) or None)
+    """Group key for a :class:`~frictionsim2d.hpc.manifest.JobEntry`."""
+    return (bool(entry.needs_gpu), entry.framework or None)
 
 
 def _path_group_key(path: str) -> GroupKey:
@@ -130,7 +125,6 @@ class HPCConfig:
         scratch_dir: Scratch directory path.
         modules: Environment modules to load.
         mpi_command: MPI launcher command.
-        lmp_flags: Additional LAMMPS flags.
         use_tmpdir: Whether to use scratch directory.
         lammps_scripts: Script names to execute.
         max_array_size: Maximum array job size.
@@ -142,7 +136,6 @@ class HPCConfig:
     """
     hpc_settings: Any = field(default_factory=_default_hpc_settings)
     job_name: str = "friction2d"
-    lmp_flags: str = "-l none"
     framework: Optional[str] = None
 
     @classmethod
@@ -192,19 +185,19 @@ class HPCConfig:
 
     @property
     def hpc_host(self) -> Optional[str]:
-        return getattr(self.hpc_settings, 'hpc_host', None)
+        return self.hpc_settings.hpc_host
 
     @property
     def hpc_home(self) -> Optional[str]:
-        return getattr(self.hpc_settings, 'hpc_home', None)
+        return self.hpc_settings.hpc_home
 
     @property
     def log_dir(self) -> Optional[str]:
-        return getattr(self.hpc_settings, 'log_dir', None)
+        return self.hpc_settings.log_dir
 
     @property
     def scratch_dir(self) -> Optional[str]:
-        return getattr(self.hpc_settings, 'scratch_dir', None)
+        return self.hpc_settings.scratch_dir
 
     @property
     def modules(self) -> List[str]:
@@ -212,11 +205,11 @@ class HPCConfig:
 
     @property
     def conda_env(self) -> Optional[str]:
-        return getattr(self.hpc_settings, 'conda_env', None) or None
+        return self.hpc_settings.conda_env or None
 
     @property
     def preflight(self) -> bool:
-        return bool(getattr(self.hpc_settings, 'preflight', False))
+        return self.hpc_settings.preflight
 
     @property
     def mpi_command(self) -> str:
@@ -228,7 +221,7 @@ class HPCConfig:
 
     @property
     def lammps_scripts(self) -> List[str]:
-        return list(getattr(self.hpc_settings, 'lammps_scripts', None) or ['system.in', 'slide.in'])
+        return list(self.hpc_settings.lammps_scripts or ['system.in', 'slide.in'])
 
     @lammps_scripts.setter
     def lammps_scripts(self, scripts: List[str]) -> None:
@@ -247,13 +240,13 @@ class HPCConfig:
     @property
     def gpu(self):
         """:class:`~frictionsim2d.core.config.GPUSettings` for this group, or None."""
-        return getattr(self.hpc_settings, 'gpu', None)
+        return self.hpc_settings.gpu
 
     @property
     def lmp_binary(self) -> str:
         """LAMMPS binary for this group (``hpc.lmp_binary``, or a framework
         overlay's ``binary``); the bare ``lmp`` on PATH by default."""
-        return getattr(self.hpc_settings, 'lmp_binary', None) or 'lmp'
+        return self.hpc_settings.lmp_binary or 'lmp'
 
     @property
     def launcher(self):
@@ -305,7 +298,7 @@ class HPCConfig:
         """Shell lines emitted after the environment setup, in order:
         settings/overlay lines first, then the framework LauncherSpec's
         (e.g. DeePMD's ``LAMMPS_PLUGIN_PATH`` export), without duplicates."""
-        lines = list(getattr(self.hpc_settings, 'env_lines', None) or [])
+        lines = list(self.hpc_settings.env_lines or [])
         launcher = self.launcher
         if launcher is not None:
             lines.extend(line for line in launcher.env_lines if line not in lines)
@@ -353,24 +346,16 @@ class HPCConfig:
         """
         return {
             'nodes': self.nodes,
-            'cpus_per_node': self.cpus_per_node,
-            'memory_gb': self.memory_gb,
             'walltime': f"{self.walltime_hours}:00:00",
             'job_name': self.job_name,
             'queue': self.queue,
             'partition': self.partition,
             'account': self.account,
-            'hpc_host': self.hpc_host,
-            'hpc_home': self.hpc_home,
-            'log_dir': self.log_dir,
             'scratch_dir': self.scratch_dir,
             'modules': self.modules,
             'conda_env': self.conda_env,
             'mpi_command': self.mpi_command,
-            'lmp_flags': self.lmp_flags,
             'use_tmpdir': self.use_tmpdir,
-            'lammps_scripts': self.lammps_scripts,
-            'select_multi': self._select_line(),
             'select_single': self._select_line(),
             # SLURM: one task per MPI rank, each owning cpus_per_task cores.
             'ntasks_per_node': self.mpi_ranks,
@@ -472,10 +457,10 @@ class HPCScriptGenerator:
         """
         needs_gpu, framework = key
         settings = self.config.hpc_settings
-        strip_gpu = split and not needs_gpu and getattr(settings, 'gpu', None) is not None
+        strip_gpu = split and not needs_gpu and settings.gpu is not None
         if not framework and not strip_gpu:
             return self.config
-        if framework and hasattr(settings, 'frameworks'):
+        if framework:
             settings = apply_framework_overlay(settings, framework)
         else:
             settings = copy.deepcopy(settings)
@@ -591,9 +576,7 @@ class HPCScriptGenerator:
                 context = config.to_dict()
                 context.update({
                     'array_size': len(chunk),
-                    'manifest_file': f"{base_dir}/{output_dir.name}/{manifest_name}",
                     'manifest_filename': manifest_name,
-                    'base_dir': base_dir,
                     **self._log_context(base_dir),
                 })
                 job_name = config.job_name + group_token
@@ -756,9 +739,7 @@ class HPCScriptGenerator:
             context = config.to_dict()
             context.update({
                 'array_size': len(sim_dirs),
-                'manifest_file': f"{base_dir}/hpc/{manifest_name}",
                 'manifest_filename': manifest_name,
-                'base_dir': base_dir,
                 'job_name': f"{config.job_name}{group_token}",
                 **self._log_context(base_dir),
             })
@@ -954,9 +935,7 @@ class HPCScriptGenerator:
                 context = config.to_dict()
                 context.update({
                     'array_size': len(jobs),
-                    'manifest_file': f"{base_dir}/hpc/{manifest_name}",
                     'manifest_filename': manifest_name,
-                    'base_dir': base_dir,
                     **self._log_context(base_dir),
                     'job_name': f"{config.job_name}_{phase}{group_token}",
                 })
