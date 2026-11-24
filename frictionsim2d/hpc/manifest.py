@@ -4,7 +4,6 @@ import json
 import logging
 import re
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, fields, asdict
@@ -71,20 +70,9 @@ def _mlip_job_fields(path_str: str) -> Dict[str, Any]:
     }
 
 
-class JobStatus(Enum):
-    """Simulation job lifecycle states."""
-    PREPARED = "prepared"
-    EXPORTED = "exported"
-    SUBMITTED = "submitted"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    IMPORTED = "imported"
-
-
 @dataclass
 class JobEntry:
-    """Single simulation job with status tracking.
+    """Single simulation job.
     
     Attributes:
         job_id: Unique identifier for the job.
@@ -95,12 +83,7 @@ class JobEntry:
         force: Applied force in nN.
         angle: Scan angle in degrees.
         speed: Sliding speed in m/s.
-        status: Current job status.
-        hpc_job_id: PBS/SLURM job ID when submitted.
         created_at: ISO timestamp of creation.
-        submitted_at: ISO timestamp of submission.
-        completed_at: ISO timestamp of completion.
-        error_message: Error description if failed.
         needs_gpu: Whether this job must run on a GPU node.
         framework: MLIP framework driving the job ('deepmd' | 'mace'), or None
             for a classical potential. Together with ``needs_gpu`` this is the
@@ -116,12 +99,7 @@ class JobEntry:
     force: float = 0.0
     angle: float = 0.0
     speed: float = 2.0
-    status: str = JobStatus.PREPARED.value
-    hpc_job_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    submitted_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    error_message: Optional[str] = None
     # --- MLIP resource fields. Defaults describe a plain CPU job, so a
     # manifest.json written before MLIP support still loads through from_dict().
     needs_gpu: bool = False
@@ -188,35 +166,6 @@ class JobManifest:
         """Total number of jobs in manifest."""
         return len(self.jobs)
 
-    def _count_status(self, *statuses: JobStatus) -> int:
-        status_values = {s.value for s in statuses}
-        return sum(1 for j in self.jobs if j.status in status_values)
-
-    @property
-    def n_prepared(self) -> int:
-        """Number of prepared jobs."""
-        return self._count_status(JobStatus.PREPARED)
-
-    @property
-    def n_submitted(self) -> int:
-        """Number of submitted or running jobs."""
-        return self._count_status(JobStatus.SUBMITTED, JobStatus.RUNNING)
-
-    @property
-    def n_completed(self) -> int:
-        """Number of completed jobs."""
-        return self._count_status(JobStatus.COMPLETED)
-
-    @property
-    def n_failed(self) -> int:
-        """Number of failed jobs."""
-        return self._count_status(JobStatus.FAILED)
-
-    @property
-    def n_imported(self) -> int:
-        """Number of jobs with imported results."""
-        return self._count_status(JobStatus.IMPORTED)
-
     def add_job(self, entry: JobEntry) -> None:
         """Add job entry to manifest.
         
@@ -225,17 +174,6 @@ class JobManifest:
         """
         self.jobs.append(entry)
         self._update_timestamp()
-
-    def get_job(self, job_id: str) -> Optional[JobEntry]:
-        """Get job by ID.
-        
-        Args:
-            job_id: Job identifier.
-            
-        Returns:
-            JobEntry if found, None otherwise.
-        """
-        return next((j for j in self.jobs if j.job_id == job_id), None)
 
     def get_system_jobs(self) -> List[JobEntry]:
         """Get all system initialization jobs.
@@ -413,5 +351,4 @@ class JobManifest:
 
     def __repr__(self) -> str:
         return (f"<JobManifest: {self.name} "
-                f"({self.n_jobs} jobs, {self.n_completed} completed, "
-                f"{self.n_failed} failed)>")
+                f"({self.n_jobs} jobs)>")

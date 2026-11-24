@@ -18,13 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from frictionsim2d.hpc.manifest import JobEntry, JobManifest, JobStatus
+from frictionsim2d.hpc.manifest import JobEntry, JobManifest
 
 
-def _entry(job_id="j1", material="h-MoS2", status=JobStatus.PREPARED,
+def _entry(job_id="j1", material="h-MoS2",
            script="slide.in", simulation_path="afm/mat0/L1") -> JobEntry:
     return JobEntry(job_id=job_id, simulation_path=simulation_path, material=material,
-                     status=status.value, lammps_script=script)
+                     lammps_script=script)
 
 
 def test_entry_round_trips_through_to_dict_and_from_dict():
@@ -33,25 +33,12 @@ def test_entry_round_trips_through_to_dict_and_from_dict():
     assert restored.to_dict() == original.to_dict()
 
 
-def test_counts_track_every_status_that_has_a_counter():
+def test_n_jobs_counts_entries():
     manifest = JobManifest()
-    manifest.add_job(_entry("a", status=JobStatus.PREPARED))
-    manifest.add_job(_entry("b", status=JobStatus.SUBMITTED))
-    manifest.add_job(_entry("c", status=JobStatus.RUNNING))
-    manifest.add_job(_entry("d", status=JobStatus.COMPLETED))
-    manifest.add_job(_entry("e", status=JobStatus.FAILED))
-    manifest.add_job(_entry("f", status=JobStatus.IMPORTED))
-
-    assert manifest.n_jobs == 6
-    assert manifest.n_prepared == 1
-    assert manifest.n_submitted == 2  # SUBMITTED and RUNNING both count here
-    assert manifest.n_completed == 1
-    assert manifest.n_failed == 1
-    assert manifest.n_imported == 1
-
-
-def test_get_job_returns_none_for_an_unknown_id():
-    assert JobManifest().get_job("nope") is None
+    manifest.add_job(_entry("a"))
+    manifest.add_job(_entry("b"))
+    assert manifest.n_jobs == 2
+    assert repr(manifest) == "<JobManifest: friction2d_manifest (2 jobs)>"
 
 
 def test_system_and_slide_jobs_are_split_by_script_name():
@@ -85,9 +72,6 @@ def test_save_then_load_round_trips_the_full_manifest(tmp_path):
     manifest.add_job(JobEntry(
         job_id="a", simulation_path="afm/mat0/L1", lammps_script="slide.in",
         material="h-MoS2", layers=2, force=1.5, angle=30.0, speed=5.0,
-        status=JobStatus.COMPLETED.value, hpc_job_id="123",
-        submitted_at="2026-01-01T00:00:00", completed_at="2026-01-02T00:00:00",
-        error_message=None,
     ))
     path = tmp_path / "manifest.json"
     manifest.save(path)
@@ -126,7 +110,7 @@ def test_load_tolerates_legacy_uuid_fields_and_round_trips_without_them(tmp_path
             "force": 0.0,
             "angle": 0.0,
             "speed": 2.0,
-            "status": JobStatus.COMPLETED.value,
+            "status": "completed",
             "hpc_job_id": None,
             "created_at": "2026-01-01T00:00:00",
             "submitted_at": None,
@@ -167,6 +151,11 @@ def test_status_half_is_gone():
                  'mark_all_submitted', 'mark_completed_from_results', 'get_summary'):
         assert not hasattr(_JobManifest, name), name
     assert not hasattr(_JobEntry, 'update_status')
+    for name in ('get_job', 'n_prepared', 'n_submitted', 'n_completed', 'n_failed',
+                 'n_imported'):
+        assert not hasattr(_JobManifest, name), name
+    for name in ('status', 'hpc_job_id', 'submitted_at', 'completed_at', 'error_message'):
+        assert name not in _JobEntry.__dataclass_fields__, name
     assert 'simulation_node_uuid' not in _JobEntry.__dataclass_fields__
     assert 'results_node_uuid' not in _JobEntry.__dataclass_fields__
     assert 'config_node_uuid' not in _JobManifest.__dataclass_fields__

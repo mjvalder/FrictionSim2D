@@ -5,12 +5,11 @@ and manifest-based job tracking for offline HPC workflows.
 """
 
 from .scripts import HPCScriptGenerator, HPCConfig
-from .manifest import JobManifest, JobEntry, JobStatus
+from .manifest import JobManifest, JobEntry
 
 __all__ = [
     'HPCScriptGenerator',
     'HPCConfig',
     'JobManifest',
     'JobEntry',
-    'JobStatus',
 ]
