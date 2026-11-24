@@ -359,3 +359,22 @@ def test_cite_knowledge_needs_the_passage_title(tmp_path, mock_settings):
                            tools=tools))
     assert not verdict(CASES['cite_knowledge'], _result(deps, 'Thin sheets pucker.',
                                                         tools=tools))
+
+
+@pytest.mark.parametrize('name, plot_type, fields', [
+    ('plot_stickslip_period', 'stickslip_period_histogram', {}),
+    ('plot_contact_cof', 'contact_cof_scatter', {'x_column': 'contact_area_A2'}),
+    ('plot_sheet_profile', 'sheet_profile', {'material': 'h_MoS2'}),
+    ('plot_integrity_panel', 'integrity_panel', {'material': 'h-WS2'}),
+])
+def test_the_new_plot_types_pass_from_the_tool(name, plot_type, fields, tmp_path,
+                                               mock_settings):
+    deps = _deps(name, tmp_path, mock_settings)
+    propose_plot(deps, PlotProposalRequest(
+        plot_type=plot_type, datasets=[f'workspace:/{DATASET}'],
+        fields=[PlotField(key=k, value=v) for k, v in fields.items()]))
+    assert verdict(CASES[name], _result(deps, 'Proposed.'))
+    other = 'summary' if plot_type != 'summary' else 'timeseries'
+    deps = _deps(name, tmp_path / 'b', mock_settings)
+    propose_plot(deps, PlotProposalRequest(plot_type=other, datasets=[f'workspace:/{DATASET}']))
+    assert not verdict(CASES[name], _result(deps, 'Proposed.'))

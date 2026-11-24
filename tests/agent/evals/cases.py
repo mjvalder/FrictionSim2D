@@ -340,6 +340,15 @@ def _plot(result, plot_type: str, y_axis: str = '') -> bool:
                and y_axis in str(p.plot.get('y_axis') or '').lower() for p in plots(result))
 
 
+def _plot_of_material(result, plot_type: str, material: str) -> bool:
+    """A ``plot_type`` plot of ``material`` (any spelling) reading the campaign dataset."""
+    return any(p.plot['plot_type'] == plot_type
+               and material_core(str(p.plot.get('material') or '')) == material_core(material)
+               and (DATASET in [folder for folder, _ in p.folders]
+                    or DATASET in str(p.plot.get('dataset') or ''))
+               for p in plots(result))
+
+
 def _fs(result, kind: str, suffix: str) -> bool:
     return any(op[0] == kind and op[-1].endswith(suffix) for op in fs_ops(result))
 
@@ -601,6 +610,25 @@ ANALYSIS = {
     'plot_rank': Case(
         f'Rank the materials in {DATASET} by friction in a plot.',
         lambda r: _plot(r, 'rank_friction'),
+        tools=('plot_schema', 'propose_plot'), prepare=(results_dataset,)),
+    # The four types plot_types gained with schema 06dce8f045182397.
+    'plot_stickslip_period': Case(
+        f'Plot a histogram of the stick-slip period relative to the lattice period for '
+        f'{DATASET}.',
+        lambda r: _plot(r, 'stickslip_period_histogram'),
+        tools=('plot_schema', 'propose_plot'), prepare=(results_dataset,)),
+    'plot_contact_cof': Case(
+        f'Plot the COF against the tip contact area for {DATASET}.',
+        lambda r: any(p.plot['plot_type'] == 'contact_cof_scatter' and p.plot.get('x_column')
+                      for p in plots(r)),
+        tools=('plot_schema', 'propose_plot'), prepare=(results_dataset,)),
+    'plot_sheet_profile': Case(
+        f'Plot the sheet height profile around the tip for h-MoS2 in {DATASET}.',
+        lambda r: _plot_of_material(r, 'sheet_profile', 'h-MoS2'),
+        tools=('plot_schema', 'propose_plot'), prepare=(results_dataset,)),
+    'plot_integrity_panel': Case(
+        f'Show the end-of-slide integrity panel for h-WS2 in {DATASET}.',
+        lambda r: _plot_of_material(r, 'integrity_panel', 'h-WS2'),
         tools=('plot_schema', 'propose_plot'), prepare=(results_dataset,)),
     'plot_filtered_material': Case(
         f'Plot COF against load for h-WS2 only, from {DATASET}.',

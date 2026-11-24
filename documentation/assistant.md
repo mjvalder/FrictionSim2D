@@ -307,7 +307,7 @@ and the result is written to the chat.
     pytest tests/agent -q                                  # no network
     pytest tests/agent/evals -m agent_eval                 # live model
 
-The eval tier judges one provider/model on ~60 cases in groups (setup,
+The eval tier judges one provider/model on 78 cases in groups (setup,
 params, sweeps, materials, workspace, analysis, materials_db, must_ask,
 declines): setup per family, parameters, sweeps and reference load bands,
 materials, workspace, analysis and plots, Materials Project against a fake
