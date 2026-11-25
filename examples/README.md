@@ -49,8 +49,19 @@ the frozen copy in `tests/fixtures/examples/` instead.
 |---|---|---|
 | `sheetonsheet/basic.ini` | driven top layer on a 3-layer stack | |
 | `sheetonsheet/interlayer_styles.ini` | the same run under lj, lj_g and ilp interlayer styles | |
+| `sheetonsheet/five_layers.ini` | a thicker 5-layer stack | |
 | `sheetonsheet/hetero_pair_sweep.ini` | one run per `A + B` pair in `lists/hetero_pairs.txt` | lammps |
+| `sheetonsheet/hetero_twist.ini` | twisted MoS2/WS2 heterostructure (`twist_angle`) | lammps |
+| `sheetonsheet/hetero_alternating.ini` | layers interleaved A B A B (`hetero_stacking`) | lammps |
+| `sheetonsheet/hetero_ilp.ini` | heterostructure with the ILP interlayer potential | lammps |
+| `sheetonsheet/flake_slide.ini` | a finite MoS2 flake sliding on a bilayer | |
+| `sheetonsheet/flake_slide_hetero.ini` | a two-material flake (`[Flake-1]`, `[Flake-2]`) sliding on a bilayer | lammps |
+| `sheetonsheet/reaxff_speed_sweep.ini` | ReaxFF sheet, swept over two sliding speeds | |
 | `sheetonsheet/mlip_full.ini` | full-cell DeePMD stack, interlayer physics from the model | MLIP model |
+
+There is no sheet-on-sheet finite-edge example:
+`geometry.finite_sheet_sheetonsheet_edge_mode: rigid` splits edge atom types
+but no fix holds them yet, so it would not do what its name says.
 
 ## pes-tip/ -- static tip PES scans (`run pes-tip`)
 
