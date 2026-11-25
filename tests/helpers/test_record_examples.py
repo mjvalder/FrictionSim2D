@@ -5,7 +5,7 @@ Task 2 owns the full render set; this covers what ``examples/*.ini`` trigger.
 import pytest
 
 from tests.helpers.deck_snapshot import render, render_set
-from tests.helpers.examples import CASES, HETERO, build
+from tests.helpers.examples import CASES, FROZEN_EXAMPLES, HETERO, build
 
 _CASES = CASES + [HETERO]
 
@@ -15,14 +15,14 @@ _CASES = CASES + [HETERO]
 def test_record_example(name, model, _n, lammps_replay, tmp_path, request):
     if not request.config.getoption("--record-lammps"):
         pytest.skip("recording needs --record-lammps")
-    build(name, model, tmp_path)
+    build(name, model, tmp_path, source=FROZEN_EXAMPLES)
 
 
 @pytest.mark.parametrize("name,model,_n", _CASES, ids=[c[0] for c in _CASES])
 def test_replay_example(name, model, _n, lammps_replay, tmp_path, request):
     if request.config.getoption("--record-lammps"):
         pytest.skip("recording run")
-    build(name, model, tmp_path)
+    build(name, model, tmp_path, source=FROZEN_EXAMPLES)
 
 
 @pytest.mark.lammps

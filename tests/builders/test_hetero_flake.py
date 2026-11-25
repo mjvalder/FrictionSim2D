@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 LMP = shutil.which("lmp_serial")
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 
 
 def _lammps_atom_types(path):

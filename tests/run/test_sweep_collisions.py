@@ -6,13 +6,13 @@ import pytest
 from frictionsim2d.run.expand import count_expansion, expand_config_sweeps
 from frictionsim2d.run.naming import output_dir_for
 
-ROOT = Path('examples/potentials')
+ROOT = Path('frictionsim2d/data/potentials')
 
 
 def _afm(**general):
     return {
         '2D': {'mat': 'h-MoS2', 'pot_path': 'sw/sw_lammps/h-MoS2.sw', 'pot_type': 'sw',
-               'cif_path': 'examples/materials/h-MoS2.cif', 'x': 100, 'y': 100, 'layers': [1]},
+               'cif_path': 'frictionsim2d/data/materials/h-MoS2.cif', 'x': 100, 'y': 100, 'layers': [1]},
         'tip': {'mat': 'Si', 'pot_type': 'sw', 'pot_path': 'Si.sw', 'r': 25},
         'sub': {'mat': 'Si', 'pot_type': 'sw', 'pot_path': 'Si.sw', 'amorph': 'a'},
         'general': {'temp': 300.0, 'force': 30.0, 'scan_speed': 2.0, **general},

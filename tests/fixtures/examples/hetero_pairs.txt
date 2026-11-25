@@ -1,0 +1,10 @@
+# One ordered heterostructure pair per line: member 1 goes into [2D-1],
+# member 2 into [2D-2]. Order is never sorted, so A + B and B + A are
+# different stacks and different runs.
+#
+# Both members must be commensurate within [lattice_match] strain_tol (2% by
+# default), which is why these three are chalcogen-matched Mo/W pairs. A pair
+# that is not commensurate fails to build with a message saying so.
+h-MoS2 + h-WS2
+h-MoSe2 + h-WSe2
+h-MoTe2 + h-WTe2

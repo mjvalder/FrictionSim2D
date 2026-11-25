@@ -16,7 +16,7 @@ from frictionsim2d.gui.controllers.document import ConfigDocument, DocumentError
 from tests.helpers.config_issues import issues_for
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 #: (config file, simulation model)
 EXAMPLE_MODELS = [
@@ -393,8 +393,8 @@ class TestSweepProbe:
                 document.set('2D', key, value)
         document.set('2D', 'materials_list', str(listing))
         document.set('2D', 'mat', '{mat}')
-        document.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
-        document.set('2D', 'pot_path', 'examples/potentials/sw/sw_lammps/{mat}.sw')
+        document.set('2D', 'cif_path', 'frictionsim2d/data/materials/{mat}.cif')
+        document.set('2D', 'pot_path', 'frictionsim2d/data/potentials/sw/sw_lammps/{mat}.sw')
         document.set('2D', 'pot_type', 'sw')
         return document
 
@@ -492,7 +492,7 @@ class TestPairExpansion:
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(
             EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
-        document.set('2D-2', 'cif_path', 'examples/materials/{mat1}.cif')
+        document.set('2D-2', 'cif_path', 'frictionsim2d/data/materials/{mat1}.cif')
         preview = document.expansion_output_dirs()
         assert preview.dirs == []
         assert '[2D-2]' in preview.error

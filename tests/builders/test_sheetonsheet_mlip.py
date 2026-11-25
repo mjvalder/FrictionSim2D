@@ -26,8 +26,8 @@ from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_setting
 from frictionsim2d.core.mlip import is_mlip
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MOS2_CIF = REPO_ROOT / 'examples' / 'materials' / 'h-MoS2.cif'
-MOS2_SW = REPO_ROOT / 'examples' / 'potentials' / 'sw' / 'MoS2_wen.sw'
+MOS2_CIF = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials' / 'h-MoS2.cif'
+MOS2_SW = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'MoS2_wen.sw'
 
 
 def _model(tmp_path: Path, name: str) -> Path:

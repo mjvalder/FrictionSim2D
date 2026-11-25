@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from frictionsim2d.core.utils.paths import find_existing
 from frictionsim2d.run.naming import material_token, output_dir_for, primary_sheet
 
 
@@ -116,8 +117,11 @@ class TestShippedPairSweepExample:
         for config in expanded:
             for section in ('2D-1', '2D-2'):
                 for key in ('cif_path', 'pot_path'):
-                    path = self.REPO_ROOT / config[section][key]
-                    assert path.is_file(), f"{section}.{key} -> {path}"
+                    # Library names (materials/..., potentials/...) resolve the
+                    # way a build resolves them.
+                    path = find_existing(config[section][key], self.REPO_ROOT)
+                    assert path is not None and path.is_file(), \
+                        f"{section}.{key} -> {config[section][key]}"
 
     def test_no_placeholder_survives_expansion(self, expanded):
         for config in expanded:

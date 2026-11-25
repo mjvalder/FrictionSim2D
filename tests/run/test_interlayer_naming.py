@@ -9,7 +9,7 @@ from frictionsim2d.run.naming import (
 )
 from tests.run.test_potential_sweep import _minimal_afm_dict
 
-ROOT = Path('examples/potentials')
+ROOT = Path('frictionsim2d/data/potentials')
 POT = 'sw/sw_lammps/h-MoS2.sw'
 
 

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from frictionsim2d.run.artifacts import generate_package
-from tests.helpers.examples import EXAMPLES, REPO_ROOT
+from tests.helpers.examples import FROZEN_EXAMPLES as EXAMPLES, REPO_ROOT
 
 pytestmark = pytest.mark.integration
 

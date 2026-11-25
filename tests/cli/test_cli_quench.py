@@ -22,7 +22,7 @@ from frictionsim2d.builders.construction.amorphous import QuenchKey, find_block
 from frictionsim2d.core.config import QuenchSettings
 
 REPO = Path(__file__).resolve().parents[2]
-SI_POT = REPO / 'examples' / 'potentials' / 'sw' / 'Si.sw'
+SI_POT = REPO / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'Si.sw'
 
 
 @pytest.fixture(autouse=True)
@@ -55,9 +55,9 @@ def _quench_ini(tmp_path, melt_temp=3000) -> Path:
     path.write_text(
         '[quench]\n'
         'material = Si\n'
-        f'potential = {REPO}/examples/potentials/sw/{{mat}}.sw\n'
+        f'potential = {REPO}/frictionsim2d/data/potentials/sw/{{mat}}.sw\n'
         'pot_type = sw\n'
-        f'cif = {REPO}/examples/materials/{{mat}}.cif\n'
+        f'cif = {REPO}/frictionsim2d/data/materials/{{mat}}.cif\n'
         'slab = [12, 12, 12]\n'
         f'melt_temp = {melt_temp}\n', encoding='utf-8')
     return path
@@ -83,7 +83,7 @@ def test_run_quench_writes_the_root_and_starts_nothing(tmp_path, no_lammps):
     assert no_lammps == []
 
 
-@pytest.mark.parametrize('extra', [[], ['--for', str(REPO / 'examples' / 'afm_config.ini')]],
+@pytest.mark.parametrize('extra', [[], ['--for', str(REPO / 'tests' / 'fixtures' / 'examples' / 'afm_config.ini')]],
                          ids=['neither', 'both'])
 def test_run_quench_needs_exactly_one_of_config_and_for(tmp_path, no_lammps, extra):
     args = ['run', 'quench', '-o', tmp_path / 'out', *extra]
@@ -117,7 +117,7 @@ def test_run_quench_skips_a_satisfied_member_unless_force(tmp_path, no_lammps):
 
 
 def test_run_quench_for_a_satisfied_friction_config_writes_nothing(tmp_path, no_lammps):
-    result = _invoke('run', 'quench', '--for', REPO / 'examples' / 'afm_config.ini',
+    result = _invoke('run', 'quench', '--for', REPO / 'tests' / 'fixtures' / 'examples' / 'afm_config.ini',
                      '-o', tmp_path / 'out')
     assert result.exit_code == 0, result.output
     assert 'all amorphous blocks present' in result.output
@@ -127,7 +127,7 @@ def test_run_quench_for_a_satisfied_friction_config_writes_nothing(tmp_path, no_
 def test_run_quench_for_turns_each_miss_into_a_member(tmp_path, no_lammps, monkeypatch):
     monkeypatch.chdir(REPO)
     settings = _settings_file(tmp_path, melt_temp=3000, quench_slab_dims=[12, 12, 12])
-    result = _invoke('run', 'quench', '--for', 'examples/afm_config.ini',
+    result = _invoke('run', 'quench', '--for', 'tests/fixtures/examples/afm_config.ini',
                      '--settings-file', settings, '-o', tmp_path / 'out')
     assert result.exit_code == 0, result.output
     members = list((tmp_path / 'out').glob('quench_*/quench/Si/*'))
@@ -144,11 +144,11 @@ def test_run_never_calls_lammps_without_opt_in(tmp_path, no_lammps, monkeypatch)
     """A friction run with no matching block aborts with the command, before writing."""
     monkeypatch.chdir(REPO)
     settings = _settings_file(tmp_path, melt_temp=3000)
-    result = _invoke('run', 'afm', 'examples/afm_config.ini', '--settings-file', settings,
+    result = _invoke('run', 'afm', 'tests/fixtures/examples/afm_config.ini', '--settings-file', settings,
                      '-o', tmp_path / 'out')
     assert result.exit_code == 1
     assert 'No amorphous Si block matches this run.' in result.output
-    assert 'FrictionSim2D run quench --for examples/afm_config.ini' in result.output
+    assert 'FrictionSim2D run quench --for tests/fixtures/examples/afm_config.ini' in result.output
     assert f'--settings-file {settings}' in result.output
     assert not (tmp_path / 'out').exists()
     assert no_lammps == []

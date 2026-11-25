@@ -9,7 +9,7 @@ from frictionsim2d.run.simulate import run_simulations
 from frictionsim2d.hpc.manifest import JobManifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 
 def test_from_simulation_directory_extracts_material_layers_and_slide_speed(tmp_path: Path) -> None:

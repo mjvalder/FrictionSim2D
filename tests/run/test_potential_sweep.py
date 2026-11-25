@@ -9,7 +9,7 @@ from frictionsim2d.potentials.utils import (
 from frictionsim2d.run.expand import expand_config_sweeps
 from frictionsim2d.run.naming import output_dir_for
 
-ROOT = Path('examples/potentials')
+ROOT = Path('frictionsim2d/data/potentials')
 
 
 def test_directory_inference():
@@ -60,7 +60,7 @@ def test_dir_token_slug():
 def _minimal_afm_dict(pot_path):
     return {
         '2D': {'mat': 'h-MoS2', 'pot_path': pot_path, 'pot_type': 'sw',
-               'cif_path': 'examples/materials/h-MoS2.cif',
+               'cif_path': 'frictionsim2d/data/materials/h-MoS2.cif',
                'x': 100, 'y': 100, 'layers': [2]},
         'tip': {'mat': 'Si', 'pot_type': 'sw', 'pot_path': 'Si.sw', 'r': 25},
         'sub': {'mat': 'Si', 'pot_type': 'sw', 'pot_path': 'Si.sw',

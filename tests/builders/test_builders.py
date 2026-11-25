@@ -26,7 +26,7 @@ from frictionsim2d.builders.construction.components import cifread
 from frictionsim2d.builders.utils.lammps_data import get_model_dimensions
 from frictionsim2d.core.config import AFMSimulationConfig, SheetConfig, load_settings
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 SI_CIF, SI_POT = f"{MAT}/Si.cif", f"{POT}/Si.sw"
 MOS2_CIF, MOS2_POT = f"{MAT}/h-MoS2.cif", f"{POT}/MoS2_wen.sw"
 

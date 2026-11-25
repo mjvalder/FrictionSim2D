@@ -29,7 +29,7 @@ from frictionsim2d.gui.preview.assemble import AssembledSystem, ComponentSlice  
 from frictionsim2d.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 ALL_MODELS = ['afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet']
 
 
@@ -575,7 +575,7 @@ class TestMainWindow:
         monkeypatch.chdir(REPO_ROOT)
         window.document = ConfigDocument.from_file(
             EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
-        window.document.set('2D-2', 'cif_path', 'examples/materials/{mat1}.cif')
+        window.document.set('2D-2', 'cif_path', 'frictionsim2d/data/materials/{mat1}.cif')
         window.form.document = window.document
         window.form.rebuild()
 
@@ -1013,16 +1013,16 @@ class TestSubstrateSection:
 
         for section, values in (
             ('2D', {'mat': 'h-MoS2', 'pot_type': 'sw',
-                    'pot_path': 'examples/potentials/sw/MoS2_wen.sw',
-                    'cif_path': 'examples/materials/h-MoS2.cif',
+                    'pot_path': 'frictionsim2d/data/potentials/sw/MoS2_wen.sw',
+                    'cif_path': 'frictionsim2d/data/materials/h-MoS2.cif',
                     # >= 2x the tip diameter (4 * r), or the footprint rule rejects it
                     'x': 100, 'y': 100, 'layers': [1]}),
             ('tip', {'mat': 'Si', 'pot_type': 'sw',
-                     'pot_path': 'examples/potentials/sw/Si.sw',
-                     'cif_path': 'examples/materials/Si.cif', 'r': 25}),
+                     'pot_path': 'frictionsim2d/data/potentials/sw/Si.sw',
+                     'cif_path': 'frictionsim2d/data/materials/Si.cif', 'r': 25}),
             ('sub', {'mat': 'Si', 'pot_type': 'sw',
-                     'pot_path': 'examples/potentials/sw/Si.sw',
-                     'cif_path': 'examples/materials/Si.cif',
+                     'pot_path': 'frictionsim2d/data/potentials/sw/Si.sw',
+                     'cif_path': 'frictionsim2d/data/materials/Si.cif',
                      'thickness': 12, 'amorph': 'a'}),
         ):
             for key, value in values.items():

@@ -36,9 +36,14 @@ class SearchRoots:
 
 
 def find_examples_dir() -> Optional[Path]:
-    """The repository's examples/ folder, when running from a checkout."""
-    candidate = Path(__file__).resolve().parents[2] / 'examples'
-    return candidate if candidate.is_dir() else None
+    """The bundled library the ``examples:/`` tier shows: ``frictionsim2d/data``.
+
+    It holds ``materials/`` and ``potentials/`` (moved there from the old
+    repository ``examples/``), so ``examples:/materials/h-MoS2.cif`` names the
+    same file it always did, and an installed package has it too.
+    """
+    candidate = Path(__file__).resolve().parents[1] / 'data'
+    return candidate if (candidate / 'materials').is_dir() else None
 
 
 def _lexical(path: PathLike) -> Path:

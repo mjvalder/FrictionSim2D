@@ -3,14 +3,80 @@
 Config files reference potentials and structures by relative path; these
 helpers find them. No structure parsing happens here -- see
 :mod:`frictionsim2d.core.utils.structures` for that, and note it is far heavier.
-"""
-from pathlib import Path
-from typing import List, Optional, Union
 
-#: How far above ``base_dir`` to look for a config-relative file. Configs in
-#: ``examples/`` name ``examples/materials/...``, i.e. paths relative to the
-#: project root rather than to themselves, so the search has to climb.
+A name that is not found as given (or next to its config) is looked up in the
+libraries, in this order (:func:`library_roots`):
+
+1. ``packaged`` -- ``frictionsim2d/data/{materials,potentials}`` (always there);
+2. ``pack`` -- the materials pack, ``$XDG_DATA_HOME/FrictionSim2D/materials-pack``
+   (``FrictionSim2D fetch materials``; materials only);
+3. ``user`` -- the user library, ``$XDG_DATA_HOME/FrictionSim2D/amorphous``
+   (materials only; the amorphous block library writes it);
+4. ``legacy`` -- the old repository ``examples/{materials,potentials}`` folders,
+   with a deprecation warning.
+
+A library name is ``materials/<file>`` / ``potentials/<dir>/<file>``, or the bare
+tail. The old spelling ``examples/materials/...`` still resolves, through the
+same roots, with a deprecation warning.
+"""
+import logging
+import os
+from pathlib import Path, PurePosixPath
+from typing import List, Optional, Set, Tuple, Union
+
+logger = logging.getLogger(__name__)
+
+#: How far above ``base_dir`` to look for a config-relative file. Configs may
+#: name paths relative to the project root rather than to themselves, so the
+#: search has to climb.
 PATH_SEARCH_MAX_PARENTS = 4
+
+#: The two library kinds, and the folder each lives in under every root.
+LIBRARY_KINDS: Tuple[str, ...] = ('materials', 'potentials')
+
+_PACKAGE_DIR = Path(__file__).resolve().parents[2]
+#: The repository's old ``examples/`` folder (exists only in a checkout).
+LEGACY_EXAMPLES_DIR = _PACKAGE_DIR.parent / 'examples'
+
+#: Names already warned about, so a sweep logs each legacy path once.
+_WARNED: Set[str] = set()
+
+
+def data_home() -> Path:
+    """``$XDG_DATA_HOME`` (default ``~/.local/share``)."""
+    return Path(os.environ.get('XDG_DATA_HOME') or str(Path.home() / '.local' / 'share'))
+
+
+def packaged_dir(kind: str) -> Path:
+    """``frictionsim2d/data/<kind>``: shipped with the package, read-only."""
+    return _PACKAGE_DIR / 'data' / kind
+
+
+def materials_pack_dir() -> Path:
+    """``$XDG_DATA_HOME/FrictionSim2D/materials-pack``: what ``fetch materials`` installs."""
+    return data_home() / 'FrictionSim2D' / 'materials-pack'
+
+
+def amorphous_library_dir() -> Path:
+    """``$XDG_DATA_HOME/FrictionSim2D/amorphous``: the user library, the only
+    place amorphous blocks are written."""
+    return data_home() / 'FrictionSim2D' / 'amorphous'
+
+
+def library_roots(kind: str, legacy: bool = True) -> List[Tuple[str, Path]]:
+    """``[(label, dir)]`` for ``kind`` in lookup order: packaged, pack, user, legacy.
+
+    The pack and the user library hold materials only. ``legacy=False`` leaves
+    out the old ``examples/`` folder.
+    """
+    if kind not in LIBRARY_KINDS:
+        raise ValueError(f"unknown library kind {kind!r}; one of {LIBRARY_KINDS}")
+    roots = [('packaged', packaged_dir(kind))]
+    if kind == 'materials':
+        roots += [('pack', materials_pack_dir()), ('user', amorphous_library_dir())]
+    if legacy:
+        roots.append(('legacy', LEGACY_EXAMPLES_DIR / kind))
+    return roots
 
 
 def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List[Path]:
@@ -18,8 +84,8 @@ def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List
 
     Config files reference potentials and structures by relative path, and those
     paths are relative to wherever the user ran from -- in practice the project
-    root, not the config's own directory. ``examples/indent_config.ini`` names
-    ``examples/materials/h-MoS2.cif``, which resolves one level *above* itself.
+    root, not the config's own directory: a config in ``runs/`` naming
+    ``runs/my.cif`` resolves one level *above* itself.
 
     So the search tries the name as given (absolute, or relative to the current
     directory), then ``base_dir``, then each of its parents up to
@@ -47,12 +113,95 @@ def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List
     return candidates
 
 
-def find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[Path]:
-    """First existing candidate for ``name``, or None."""
-    for candidate in search_paths(name, base_dir):
+def _within(path: Path, root: Path) -> Optional[PurePosixPath]:
+    """``path`` relative to ``root`` (lexically), or None when outside it."""
+    try:
+        rel = Path(os.path.normpath(os.path.abspath(path))).relative_to(
+            Path(os.path.normpath(os.path.abspath(root))))
+    except ValueError:
+        return None
+    return PurePosixPath(rel.as_posix())
+
+
+def _library_name(name: str) -> Tuple[Tuple[str, ...], PurePosixPath, bool]:
+    """``(kinds, tail, legacy_spelling)``: where in a library root ``name`` points.
+
+    ``examples/materials/x.cif`` (relative, or absolute inside the legacy
+    folder) is the legacy spelling; ``materials/x.cif`` names its kind; any
+    other relative name is tried under both kinds. An absolute name outside the
+    legacy folder has no library form (``kinds`` is empty).
+    """
+    path = Path(name)
+    if path.is_absolute():
+        rel = _within(path, LEGACY_EXAMPLES_DIR)
+        if rel is None or not rel.parts or rel.parts[0] not in LIBRARY_KINDS:
+            return (), PurePosixPath(), False
+        return (rel.parts[0],), PurePosixPath(*rel.parts[1:]), True
+    parts = PurePosixPath(path.as_posix()).parts
+    if len(parts) >= 2 and parts[0] == 'examples' and parts[1] in LIBRARY_KINDS:
+        return (parts[1],), PurePosixPath(*parts[2:]), True
+    if parts and parts[0] in LIBRARY_KINDS:
+        return (parts[0],), PurePosixPath(*parts[1:]), False
+    return LIBRARY_KINDS, PurePosixPath(*parts), False
+
+
+def _warn_legacy(name: str, found: Path) -> None:
+    if name in _WARNED:
+        return
+    _WARNED.add(name)
+    logger.warning(
+        "Deprecated path '%s' (the old repository examples/ library), resolved to "
+        "%s. Name library files materials/<file> or potentials/<dir>/<file>; "
+        "examples/materials and examples/potentials are no longer shipped.", name, found)
+
+
+def find_in_library(name: str) -> Optional[Path]:
+    """``name`` in the library roots (:func:`library_roots`), or None.
+
+    Roots are tried in order (packaged, pack, user, legacy); a name without a
+    kind prefix tries materials before potentials within each root. A legacy
+    spelling, or a hit in the legacy folder, logs a deprecation warning.
+    """
+    kinds, tail, legacy_spelling = _library_name(name)
+    if not kinds:
+        return None
+    candidates: List[Tuple[str, Path]] = []
+    for kind in kinds:
+        candidates += [(label, root / tail) for label, root in library_roots(kind)]
+    order = ('packaged', 'pack', 'user', 'legacy')
+    candidates.sort(key=lambda c: order.index(c[0]))
+    for label, candidate in candidates:
         if candidate.exists():
+            if legacy_spelling or label == 'legacy':
+                _warn_legacy(name, candidate)
             return candidate
     return None
+
+
+def find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[Path]:
+    """First existing candidate for ``name``, or None.
+
+    The name as given and next to ``base_dir`` (:func:`search_paths`) win, so a
+    user's own file is never shadowed by a library one -- except a hit inside
+    the legacy ``examples/`` folder, which only counts after every library root.
+    """
+    legacy_hit = None
+    for candidate in search_paths(name, base_dir):
+        if candidate.exists():
+            if _within(candidate, LEGACY_EXAMPLES_DIR) is not None:
+                legacy_hit = legacy_hit or candidate
+                continue
+            return candidate
+    found = find_in_library(name)
+    if found is not None:
+        return found
+    if legacy_hit is not None:
+        _warn_legacy(name, legacy_hit)
+    return legacy_hit
+
+
+def _roots_text(kind: str) -> str:
+    return ', '.join(str(root) for _, root in library_roots(kind, legacy=False))
 
 
 def get_material_path(mat_name: str,
@@ -76,10 +225,10 @@ def get_material_path(mat_name: str,
         return found
 
     raise FileNotFoundError(
-        f"Material file '{mat_name}' not found. "
-        f"Please provide a valid path to a CIF file."
-        f"For a collection of 2D material CIF files, check the 'examples/materials' "
-        f"folder in the GitHub repository: https://github.com/Mclat16/FrictionSim2D"
+        f"Material file '{mat_name}' not found as given, next to the config, or "
+        f"in the material library ({_roots_text('materials')}). "
+        f"Provide a valid path to a CIF file, or a library name such as "
+        f"materials/h-MoS2.cif."
     )
 
 
@@ -104,9 +253,8 @@ def get_potential_path(pot_name: str,
         return found
 
     raise FileNotFoundError(
-        f"Potential file '{pot_name}' not found. "
-        f"Please provide a valid path to a potential file. "
-        f"For a collection of potential files (sw, tersoff, rebo, reaxff, etc.), "
-        f"check the 'examples/potentials' folder in the GitHub repository: "
-        f"https://github.com/Mclat16/FrictionSim2D"
+        f"Potential file '{pot_name}' not found as given, next to the config, or "
+        f"in the potential library ({_roots_text('potentials')}). "
+        f"Provide a valid path to a potential file, or a library name such as "
+        f"potentials/sw/MoS2_wen.sw."
     )

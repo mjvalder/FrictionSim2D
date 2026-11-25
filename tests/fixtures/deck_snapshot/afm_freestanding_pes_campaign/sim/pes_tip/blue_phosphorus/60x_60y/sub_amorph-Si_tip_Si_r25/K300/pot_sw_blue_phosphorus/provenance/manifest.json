@@ -4,7 +4,7 @@
   "files": [
     {
       "filename": "blue_phosphorus.cif",
-      "original_path": "<REPO>/examples/materials/blue_phosphorus.cif",
+      "original_path": "<REPO>/frictionsim2d/data/materials/blue_phosphorus.cif",
       "stored_path": "provenance/cif/blue_phosphorus.cif",
       "category": "cif",
       "components": [
@@ -15,7 +15,7 @@
     },
     {
       "filename": "blue_phosphorus.sw",
-      "original_path": "<REPO>/examples/potentials/sw/sw_lammps/blue_phosphorus.sw",
+      "original_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/blue_phosphorus.sw",
       "stored_path": "provenance/potentials/blue_phosphorus.sw",
       "category": "potential",
       "components": [
@@ -26,7 +26,7 @@
     },
     {
       "filename": "Si.cif",
-      "original_path": "<REPO>/examples/materials/Si.cif",
+      "original_path": "<REPO>/frictionsim2d/data/materials/Si.cif",
       "stored_path": "provenance/cif/Si.cif",
       "category": "cif",
       "components": [
@@ -37,7 +37,7 @@
     },
     {
       "filename": "Si.sw",
-      "original_path": "<REPO>/examples/potentials/sw/Si.sw",
+      "original_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
       "stored_path": "provenance/potentials/Si.sw",
       "category": "potential",
       "components": [

@@ -24,7 +24,7 @@ from ase.io import read
 from frictionsim2d.builders import components
 from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 LMP = shutil.which("lmp_serial")
 
 

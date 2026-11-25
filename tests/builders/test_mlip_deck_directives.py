@@ -145,7 +145,7 @@ def _afm_mlip_config(tmp_path):
 
     model = tmp_path / 'mace-test-Mo-S-Si.json'
     model.write_text(MACE_MODEL_JSON, encoding='utf-8')
-    mats = REPO_ROOT / 'examples' / 'materials'
+    mats = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
     mlip = {'pot_type': 'mace', 'pot_path': str(model)}
     raw = {
         '2D': {'mat': 'h-MoS2', 'cif_path': str(mats / 'h-MoS2.cif'),
@@ -203,8 +203,8 @@ def test_generated_classical_deck_is_unchanged(tmp_path, monkeypatch):
     from frictionsim2d.run.simulate import run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
-    mats = REPO_ROOT / 'examples' / 'materials'
-    pots = REPO_ROOT / 'examples' / 'potentials' / 'sw'
+    mats = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
+    pots = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw'
     si = {'mat': 'Si', 'cif_path': str(mats / 'Si.cif'),
           'pot_path': str(pots / 'Si.sw'), 'pot_type': 'sw'}
     raw = {
@@ -329,8 +329,8 @@ def test_generated_classical_deck_keeps_tiled(tmp_path, monkeypatch):
     from frictionsim2d.run.simulate import run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
-    mats = REPO_ROOT / 'examples' / 'materials'
-    pots = REPO_ROOT / 'examples' / 'potentials' / 'sw'
+    mats = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
+    pots = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw'
     si = {'mat': 'Si', 'cif_path': str(mats / 'Si.cif'),
           'pot_path': str(pots / 'Si.sw'), 'pot_type': 'sw'}
     raw = {
@@ -366,7 +366,7 @@ import shutil
 from frictionsim2d.core.config import SheetOnSheetSimulationConfig
 from frictionsim2d.core.config import load_settings
 
-MAT = REPO_ROOT / 'examples' / 'materials'
+MAT = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
 
 needs_lmp = pytest.mark.skipif(
     shutil.which('lmp_serial') is None and shutil.which('lmp') is None,

@@ -19,8 +19,8 @@ from frictionsim2d.builders.construction import components
 from frictionsim2d.core.config import SheetConfig, load_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MOS2_CIF = REPO_ROOT / 'examples' / 'materials' / 'h-MoS2.cif'
-MOS2_SW = REPO_ROOT / 'examples' / 'potentials' / 'sw' / 'MoS2_wen.sw'
+MOS2_CIF = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials' / 'h-MoS2.cif'
+MOS2_SW = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'MoS2_wen.sw'
 
 
 def _sheet(tmp_path, **overrides) -> SheetConfig:

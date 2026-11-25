@@ -11,7 +11,7 @@ Must not import ``ase`` (``tests/repo/test_import_weight.py``): the CIF read in
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from ..core.utils.paths import get_material_path, get_potential_path
+from ..core.utils.paths import get_material_path, get_potential_path, packaged_dir
 
 INTERLAYER_STYLES: Tuple[str, ...] = ('lj', 'lj_g', 'ilp', 'kc')
 
@@ -26,7 +26,9 @@ KC_FULL_CUTOFF = 16.0
 #: LAMMPS ilp/kc ``tap_flag`` argument: 1 = taper the cutoff.
 TAPER_FLAG = 1
 
-EXAMPLES_POTENTIALS_DIR = Path(__file__).resolve().parents[2] / 'examples' / 'potentials'
+#: The packaged potential library (``frictionsim2d/data/potentials``), where the
+#: bundled ilp/ and kc/ parameter files live.
+BUNDLED_POTENTIALS_DIR = packaged_dir('potentials')
 
 _ILP_TMD = {'Mo', 'W', 'S', 'Se'}
 _ILP_BNCH = {'B', 'N', 'C', 'H'}
@@ -165,8 +167,8 @@ def resolve_interlayer_file(name: str, style: str,
                             base_dir: Optional[Path]) -> Path:
     """Find an interlayer parameter file like any other potential.
 
-    Looks relative to ``base_dir``/working directory first, then in the bundled
-    ``examples/potentials/<ilp|kc>/``.
+    Looks relative to ``base_dir``/working directory and in the potential
+    library first, then in the bundled ``frictionsim2d/data/potentials/<ilp|kc>/``.
 
     Raises:
         FileNotFoundError: Naming both places searched.
@@ -175,7 +177,7 @@ def resolve_interlayer_file(name: str, style: str,
         return get_potential_path(name, base_dir)
     except FileNotFoundError:
         pass
-    bundled_dir = EXAMPLES_POTENTIALS_DIR / ('ilp' if style == 'ilp' else 'kc')
+    bundled_dir = BUNDLED_POTENTIALS_DIR / ('ilp' if style == 'ilp' else 'kc')
     bundled = bundled_dir / Path(name).name
     if bundled.exists():
         return bundled

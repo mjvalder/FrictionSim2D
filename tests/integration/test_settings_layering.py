@@ -25,7 +25,7 @@ from typing import Dict, List
 import pytest
 import yaml
 
-from tests.helpers.examples import build
+from tests.helpers.examples import FROZEN_EXAMPLES, build
 
 pytestmark = pytest.mark.integration
 
@@ -65,7 +65,7 @@ def _rendered(result) -> List[str]:
 
 
 def _build(tmp_path: Path, **kwargs):
-    result = build(CONFIG, MODEL, tmp_path / 'out', **kwargs)
+    result = build(CONFIG, MODEL, tmp_path / 'out', source=FROZEN_EXAMPLES, **kwargs)
     assert result.ok, result.render()
     return result
 

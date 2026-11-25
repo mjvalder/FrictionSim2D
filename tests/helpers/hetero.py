@@ -7,7 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 
 # --- bodies moved verbatim from test_hetero_afm.py and test_hetero_slide.py ---
 

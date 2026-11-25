@@ -14,7 +14,7 @@ import pytest
 from frictionsim2d.core.config import SubstrateConfig
 from frictionsim2d.builders.construction.components import extract_substrate_surface_cell
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 LMP = shutil.which("lmp_serial")
 
 

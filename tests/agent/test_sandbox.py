@@ -21,8 +21,13 @@ def _roots(tmp_path):
     return SearchRoots(ws, ex)
 
 
-def test_find_examples_dir_is_the_repo_examples():
-    assert find_examples_dir() == REPO / 'examples'
+def test_find_examples_dir_is_the_packaged_library():
+    """The examples:/ tier is frictionsim2d/data, so examples:/materials/... and
+    examples:/potentials/... name the files they did before the library moved."""
+    found = find_examples_dir()
+    assert found == REPO / 'frictionsim2d' / 'data'
+    assert (found / 'materials' / 'h-MoS2.cif').is_file()
+    assert (found / 'potentials' / 'sw' / 'MoS2_wen.sw').is_file()
 
 
 def test_tiers_order_workspace_first(roots):

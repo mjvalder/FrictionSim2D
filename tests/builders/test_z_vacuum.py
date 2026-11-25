@@ -103,7 +103,7 @@ def _build(tmp_path, monkeypatch, *, mat, cif, pot, layers, lat_c, style='lj',
     """Build a sheet-on-sheet run (given lat_c: no minimisation) and return
     ``(slide.in text, atom z-range of its data file, settings)``."""
     monkeypatch.chdir(REPO_ROOT)
-    raw = read_config(REPO_ROOT / "examples" / "sheet_config.ini")
+    raw = read_config(REPO_ROOT / "tests" / "fixtures" / "examples" / "sheet_config.ini")
     raw["general"].update({"interlayer_style": style, "pressure": 1.0})
     raw["2D"].update({"mat": mat, "cif_path": cif, "pot_path": pot,
                       "layers": [layers], "x": xy, "y": xy, "lat_c": lat_c})
@@ -127,31 +127,31 @@ def _vacuum(slide, zrange):
 
 def test_five_layer_mos2_sevik_lj12(tmp_path, monkeypatch):
     slide, zr, settings = _build(
-        tmp_path, monkeypatch, mat="h-MoS2", cif="examples/materials/h-MoS2.cif",
-        pot="examples/potentials/sw/MoS2_sevik.sw", layers=5, lat_c=6.15)
+        tmp_path, monkeypatch, mat="h-MoS2", cif="frictionsim2d/data/materials/h-MoS2.cif",
+        pot="frictionsim2d/data/potentials/sw/MoS2_sevik.sw", layers=5, lat_c=6.15)
     assert zr[1] - zr[0] > 27.0                     # five layers, not one
     assert _vacuum(slide, zr) >= 12.0 + 2.0 + settings.geometry.z_vacuum_margin - 1e-6
 
 
 def test_ilp_gets_the_larger_cutoff(tmp_path, monkeypatch):
     slide, zr, settings = _build(
-        tmp_path, monkeypatch, mat="h-MoS2", cif="examples/materials/h-MoS2.cif",
-        pot="examples/potentials/sw/MoS2_wen.sw", layers=3, lat_c=6.15,
+        tmp_path, monkeypatch, mat="h-MoS2", cif="frictionsim2d/data/materials/h-MoS2.cif",
+        pot="frictionsim2d/data/potentials/sw/MoS2_wen.sw", layers=3, lat_c=6.15,
         style="ilp", xy=20.0)
     assert _vacuum(slide, zr) >= 16.0 + 2.0 + settings.geometry.z_vacuum_margin - 1e-6
 
 
 def test_thick_monolayer_inte_passes(tmp_path, monkeypatch):
     slide, zr, settings = _build(
-        tmp_path, monkeypatch, mat="InTe", cif="examples/materials/InTe.cif",
-        pot="examples/potentials/sw/sw_lammps/InTe.sw", layers=4, lat_c=8.5,
+        tmp_path, monkeypatch, mat="InTe", cif="frictionsim2d/data/materials/InTe.cif",
+        pot="frictionsim2d/data/potentials/sw/sw_lammps/InTe.sw", layers=4, lat_c=8.5,
         xy=16.0)
     assert _vacuum(slide, zr) >= 12.0 + 2.0 + settings.geometry.z_vacuum_margin - 1e-6
 
 
 def test_internal_lj_potentials_report_their_own_range():
     from frictionsim2d.potentials.utils import internal_pair_cutoff
-    pots = REPO_ROOT / "examples" / "potentials"
+    pots = REPO_ROOT / "frictionsim2d" / "data" / "potentials"
     assert internal_pair_cutoff("rebomos", pots / "rebo" / "MoS.rebomos", 11.0) == \
         pytest.approx(2.5 * 4.2)                          # 2.5 sigma_MM
     assert internal_pair_cutoff(

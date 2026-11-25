@@ -7,7 +7,7 @@
     {
       "name": "h-MoS2",
       "role": "sheet",
-      "pot_path": "examples/potentials/sw/MoS2_wen.sw",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/MoS2_wen.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d12d20b09969e7624c7dd6d0844b2e59802282fb3eac876ef18d4dc7e47883"
@@ -15,7 +15,7 @@
     {
       "name": "Si",
       "role": "tip",
-      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -23,7 +23,7 @@
     {
       "name": "Si",
       "role": "substrate",
-      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -39,7 +39,7 @@
   "damp_ev": null,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "a02f0bf7a6583a00506b24e89b426d98c4aa41ee54abd986f66e1673410058dc",
+  "config_hash": "37b5116b477d148103cb7d337f8a03aa602caf36f3be381e620a6e31214f5722",
   "lammps_version": null,
   "layer_type_map": {},
   "unloaded_reference_z": null,

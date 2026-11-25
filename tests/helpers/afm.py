@@ -144,7 +144,7 @@ def build_example_afm(tmp_path: Path, monkeypatch, ini: str, builder_cls=AFMSimu
     """
     from frictionsim2d.core.config import GlobalSettings, read_config  # pylint: disable=import-outside-toplevel
     monkeypatch.chdir(REPO_ROOT)
-    raw = read_config(REPO_ROOT / "examples" / ini)
+    raw = read_config(REPO_ROOT / "tests" / "fixtures" / "examples" / ini)
     for section, values in sections.items():
         raw.setdefault(section, {}).update(values)
     settings = GlobalSettings()

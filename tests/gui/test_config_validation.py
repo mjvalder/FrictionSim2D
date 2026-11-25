@@ -108,7 +108,7 @@ def test_missing_potential_is_located_on_the_right_field(monkeypatch):
     """
     monkeypatch.chdir(REPO_ROOT)
     raw = _raw('afm_flake_config.ini')
-    raw['tip']['pot_path'] = 'examples/potentials/sw/not_a_real_potential.sw'
+    raw['tip']['pot_path'] = 'frictionsim2d/data/potentials/sw/not_a_real_potential.sw'
 
     result = validate_config(raw, AFMSimulationConfig)
     assert not result.ok
@@ -177,25 +177,45 @@ def test_type_errors_are_reported_with_a_location(monkeypatch):
     assert issues_for(result, 'tip', 'r'), result.render()
 
 
+def _repo_relative(raw):
+    """``raw`` with every library name spelled as a repo-relative path
+    (``frictionsim2d/data/...``): a path the library lookup cannot rescue, so
+    only the working directory or ``base_dir`` can resolve it."""
+    for section in raw.values():
+        if not isinstance(section, dict):
+            continue
+        for key in ('cif_path', 'pot_path'):
+            value = section.get(key)
+            if isinstance(value, str) and value.startswith(('materials/', 'potentials/')):
+                section[key] = f'frictionsim2d/data/{value}'
+    return raw
+
+
 class TestBaseDirResolution:
     """Config-relative paths must resolve from any working directory."""
 
     def test_relative_paths_fail_from_an_unrelated_cwd(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        result = validate_config(_raw('indent_config.ini'), AFMSimulationConfig)
+        result = validate_config(_repo_relative(_raw('indent_config.ini')),
+                                 AFMSimulationConfig)
         assert not result.ok
         assert any(i.kind == 'missing_file' for i in result.issues)
+
+    def test_library_names_resolve_from_any_cwd(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = validate_config(_raw('indent_config.ini'), AFMSimulationConfig)
+        assert result.ok, result.render()
 
     def test_base_dir_makes_them_resolve(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = validate_config(
-            _raw('indent_config.ini'), AFMSimulationConfig, base_dir=REPO_ROOT
+            _repo_relative(_raw('indent_config.ini')), AFMSimulationConfig, base_dir=REPO_ROOT
         )
         assert result.ok, result.render()
 
     def test_preflight_alone_reports_the_same(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        raw = parse_config(EXAMPLES / 'indent_config.ini')
+        raw = _repo_relative(parse_config(EXAMPLES / 'indent_config.ini'))
         assert preflight_paths(raw) != []
         assert preflight_paths(raw, base_dir=REPO_ROOT) == []
 

@@ -14,7 +14,7 @@ import pytest
 
 from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 LMP = shutil.which("lmp_serial")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

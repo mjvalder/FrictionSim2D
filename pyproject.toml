@@ -101,10 +101,11 @@ markers = [
 [tool.hatch.build.targets.wheel]
 packages = ["frictionsim2d"]
 
-# The shipped plot-settings presets are data, not modules, so
-# `packages` alone does not carry them into the wheel.
-[tool.hatch.build.targets.wheel.force-include]
-"frictionsim2d/postprocessing/presets" = "frictionsim2d/postprocessing/presets"
+# `packages` carries every git-tracked file under frictionsim2d/, data included:
+# the plot presets, the material and potential library (data/materials,
+# data/potentials) and the shipped amorphous Si block. (A force-include of
+# postprocessing/presets used to add those files a second time, which hatchling
+# refuses, so no wheel could be built.)
 
 [tool.hatch.build.targets.sdist]
 include = ["frictionsim2d/**"]

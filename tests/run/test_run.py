@@ -11,8 +11,8 @@ from frictionsim2d.run.naming import LAMMPS_LOOP_PARAMS, LOOPABILITY, output_dir
 from frictionsim2d.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
-SI_SW = str(EXAMPLES / 'potentials' / 'sw' / 'Si.sw')
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
+SI_SW = str(REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'Si.sw')
 
 
 def _minimal_afm_raw_dict(tmp_path: Path) -> dict:
@@ -226,16 +226,16 @@ class TestAngleSplitWithAForceGate:
 
         monkeypatch.chdir(REPO_ROOT)
         sheet_1 = {
-            'mat': 'h-MoS2', 'cif_path': 'examples/materials/h-MoS2.cif',
-            'pot_path': 'examples/potentials/sw/MoS2_wen.sw', 'pot_type': 'sw',
+            'mat': 'h-MoS2', 'cif_path': 'frictionsim2d/data/materials/h-MoS2.cif',
+            'pot_path': 'frictionsim2d/data/potentials/sw/MoS2_wen.sw', 'pot_type': 'sw',
             'x': 12.0, 'y': 12.0, 'layers': [2],
         }
         raw = {
             '2D': dict(sheet_1),
             '2D-1': dict(sheet_1),
             '2D-2': {
-                'mat': 'h-WS2', 'cif_path': 'examples/materials/h-WS2.cif',
-                'pot_path': 'examples/potentials/sw/sw_lammps/t-WS2.sw',
+                'mat': 'h-WS2', 'cif_path': 'frictionsim2d/data/materials/h-WS2.cif',
+                'pot_path': 'frictionsim2d/data/potentials/sw/sw_lammps/t-WS2.sw',
                 'pot_type': 'sw', 'x': 12.0, 'y': 12.0, 'layers': [2],
             },
             'general': {
@@ -288,14 +288,14 @@ class TestLoadedSlideRequiresAPressure:
     builders: the same ``[general]`` without a pressure is a valid pes-sheet
     scan (no load)."""
 
-    _SHEET = {'mat': 'h-MoS2', 'cif_path': 'examples/materials/h-MoS2.cif',
-              'pot_path': 'examples/potentials/sw/MoS2_wen.sw', 'pot_type': 'sw',
+    _SHEET = {'mat': 'h-MoS2', 'cif_path': 'frictionsim2d/data/materials/h-MoS2.cif',
+              'pot_path': 'frictionsim2d/data/potentials/sw/MoS2_wen.sw', 'pot_type': 'sw',
               'x': 12.0, 'y': 12.0, 'layers': [2]}
 
     @classmethod
     def _hetero(cls, **general):
-        ws2 = {**cls._SHEET, 'mat': 'h-WS2', 'cif_path': 'examples/materials/h-WS2.cif',
-               'pot_path': 'examples/potentials/sw/sw_lammps/t-WS2.sw'}
+        ws2 = {**cls._SHEET, 'mat': 'h-WS2', 'cif_path': 'frictionsim2d/data/materials/h-WS2.cif',
+               'pot_path': 'frictionsim2d/data/potentials/sw/sw_lammps/t-WS2.sw'}
         return {'2D': dict(cls._SHEET), '2D-1': dict(cls._SHEET), '2D-2': ws2,
                 'general': {'temp': 300, 'scan_speed': 1, **general}}
 
@@ -745,7 +745,7 @@ class TestOrderedPairSweeps:
         assert [conf['2D']['mat'] for conf in out] == ['h-MoS2', 'h-WS2']
 
     def test_the_shipped_pair_sweep_still_expands(self, monkeypatch) -> None:
-        """examples/hetero_pair_sweep.ini is the correctly-templated reference:
+        """tests/fixtures/examples/hetero_pair_sweep.ini is the correctly-templated reference:
         three distinct ordered pairs, unaffected by the guard."""
         from frictionsim2d.core.config import parse_config
 

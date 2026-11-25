@@ -14,7 +14,7 @@ from frictionsim2d.core.config import GlobalSettings, redact_secrets, redact_sec
 from frictionsim2d.run.artifacts import generate_package
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 PASSWORD = 'hunter2-central-db-password'
 API_KEY = 'sk-central-api-key-0123456789'

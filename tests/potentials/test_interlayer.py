@@ -7,14 +7,14 @@ from pydantic import ValidationError
 
 from frictionsim2d.core.config import (AFMSimulationConfig, GeneralConfig,
                              SheetOnSheetSimulationConfig, load_settings)
-from frictionsim2d.potentials.interlayer import (EXAMPLES_POTENTIALS_DIR,
+from frictionsim2d.potentials.interlayer import (BUNDLED_POTENTIALS_DIR,
                                        default_interlayer_file, gaussian_g,
                                        ilp_substyle, mixed_g,
                                        resolve_interlayer_file)
 
 from frictionsim2d.interfaces.lammps import lammps_pair_styles as REAL_PAIR_STYLES  # before the autouse patch
 
-MATERIALS = Path(__file__).resolve().parents[2] / 'examples' / 'materials'
+MATERIALS = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'materials'
 
 
 def test_default_file_tmd():
@@ -39,7 +39,7 @@ def test_resolve_prefers_working_dir(tmp_path):
     empty = tmp_path / 'empty'
     empty.mkdir()
     got = resolve_interlayer_file('TMD.ILP', 'ilp', empty)
-    assert got == EXAMPLES_POTENTIALS_DIR / 'ilp' / 'TMD.ILP'
+    assert got == BUNDLED_POTENTIALS_DIR / 'ilp' / 'TMD.ILP'
     assert got.exists()
     assert resolve_interlayer_file('CC.KC-full', 'kc', empty).exists()
 
@@ -48,7 +48,7 @@ def test_resolve_unknown_raises(tmp_path):
     with pytest.raises(FileNotFoundError) as exc:
         resolve_interlayer_file('nope.ILP', 'ilp', tmp_path)
     assert str(tmp_path) in str(exc.value)
-    assert str(EXAMPLES_POTENTIALS_DIR / 'ilp') in str(exc.value)
+    assert str(BUNDLED_POTENTIALS_DIR / 'ilp') in str(exc.value)
 
 
 def test_gaussian_g_lookup():
@@ -205,8 +205,8 @@ def test_hetero_component_splits_under_ilp(tmp_path):
     pm = PotentialManager(GlobalSettings())
     pm.set_interlayer('ilp')
     sheet = SheetConfig(mat="h-MoS2", pot_type="sw", x=4.0, y=4.0, layers=[1],
-                        cif_path="examples/materials/h-MoS2.cif",
-                        pot_path="examples/potentials/sw/MoS2_wen.sw")
+                        cif_path="frictionsim2d/data/materials/h-MoS2.cif",
+                        pot_path="frictionsim2d/data/potentials/sw/MoS2_wen.sw")
     pm.register_component("sheet_1", sheet)
     pm.register_component("tip_1", sheet)
     assert pm.components["sheet_1"]["split_chalcogens"] == {"S"}

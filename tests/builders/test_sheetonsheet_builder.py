@@ -494,8 +494,8 @@ def test_hpc_job_name_goes_through_the_material_id_hook(tmp_path: Path) -> None:
 # bookkeeping plus a file write.
 # --------------------------------------------------------------------------- #
 
-MAT = "examples/materials"
-POT = "examples/potentials"
+MAT = "frictionsim2d/data/materials"
+POT = "frictionsim2d/data/potentials"
 
 
 def _real_material_config(
@@ -837,7 +837,7 @@ def test_sheetonsheet_reaxff_renders_the_charge_atom_style(tmp_path):
 # --------------------------------------------------------------------------- #
 # Interlayer styles (interlayer-potential-choice Task 4): molecule IDs and the
 # friction branch. The `lj` snapshot under data/sheet_lj_snapshot/ was captured
-# from `examples/sheet_config.ini` BEFORE any of this was wired in, so the
+# from `tests/fixtures/examples/sheet_config.ini` BEFORE any of this was wired in, so the
 # default path is pinned byte-identical to the pre-feature output.
 # --------------------------------------------------------------------------- #
 
@@ -849,14 +849,14 @@ SHEET_LJ_SNAPSHOT = Path(__file__).parent / "data" / "sheet_lj_snapshot"
 
 def _build_example_sheet(tmp_path: Path, monkeypatch, *, general=None,
                          sheet=None) -> Path:
-    """Build `examples/sheet_config.ini` (with overrides) and return the run dir.
+    """Build `tests/fixtures/examples/sheet_config.ini` (with overrides) and return the run dir.
 
     Default `GlobalSettings()` (no user settings file), so the output depends
     only on the code. Absolute run-dir paths and the two per-build seeds are
     normalised by :func:`_normalised_lammps_files`.
     """
     monkeypatch.chdir(REPO_ROOT)
-    raw = read_config(REPO_ROOT / "examples" / "sheet_config.ini")
+    raw = read_config(REPO_ROOT / "tests" / "fixtures" / "examples" / "sheet_config.ini")
     raw["general"].update(general or {})
     raw["2D"].update(sheet or {})
     settings = GlobalSettings()

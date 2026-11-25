@@ -41,11 +41,11 @@ def captured(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("subcommand, config, model", [
-    ("afm", "examples/afm_config.ini", "afm"),
-    ("sheetonsheet", "examples/sheet_config.ini", "sheetonsheet"),
-    ("pes-sheet", "examples/pes_sheet_config.ini", "pes_sheet"),
-    ("pes-tip", "examples/pes_tip_config.ini", "pes_tip"),
-    ("indent", "examples/indent_config.ini", "indent"),
+    ("afm", "tests/fixtures/examples/afm_config.ini", "afm"),
+    ("sheetonsheet", "tests/fixtures/examples/sheet_config.ini", "sheetonsheet"),
+    ("pes-sheet", "tests/fixtures/examples/pes_sheet_config.ini", "pes_sheet"),
+    ("pes-tip", "tests/fixtures/examples/pes_tip_config.ini", "pes_tip"),
+    ("indent", "tests/fixtures/examples/indent_config.ini", "indent"),
 ])
 def test_each_run_subcommand_selects_its_model(runner, captured, tmp_path,
                                                 subcommand, config, model):
@@ -59,7 +59,7 @@ def test_each_run_subcommand_selects_its_model(runner, captured, tmp_path,
 
 
 def test_output_dir_option_reaches_the_runner(runner, captured, tmp_path):
-    runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
+    runner.invoke(cli_module.cli, ["run", "afm", "tests/fixtures/examples/afm_config.ini",
                                    "--output-dir", str(tmp_path)])
     assert captured[0]["output_root"] == Path(tmp_path)
 
@@ -68,7 +68,7 @@ def test_settings_file_option_reaches_the_runner(runner, captured, tmp_path):
     settings_file = tmp_path / "settings.yaml"
     settings_file.write_text("output: {}\n", encoding="utf-8")
 
-    runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
+    runner.invoke(cli_module.cli, ["run", "afm", "tests/fixtures/examples/afm_config.ini",
                                    "--output-dir", str(tmp_path),
                                    "--settings-file", str(settings_file)])
 
@@ -85,14 +85,14 @@ def test_run_commands_have_no_aiida_options(runner, model, flag):
 
 
 def test_the_runner_is_not_told_about_aiida(runner, captured, tmp_path):
-    runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
+    runner.invoke(cli_module.cli, ["run", "afm", "tests/fixtures/examples/afm_config.ini",
                                    "--output-dir", str(tmp_path)])
     assert "use_aiida" not in captured[0]
 
 
 @pytest.mark.parametrize("flag, expected", [(["--hpc-scripts"], True), ([], False)])
 def test_hpc_scripts_flag_maps_to_generate_hpc(runner, captured, tmp_path, flag, expected):
-    result = runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
+    result = runner.invoke(cli_module.cli, ["run", "afm", "tests/fixtures/examples/afm_config.ini",
                                              "--output-dir", str(tmp_path), *flag])
     assert result.exit_code == 0, result.output
     assert captured[0]["generate_hpc"] is expected

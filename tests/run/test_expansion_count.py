@@ -20,8 +20,8 @@ from frictionsim2d.run.naming import loopability
 from frictionsim2d.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
-MATERIALS, SW = 'examples/materials', 'examples/potentials/sw'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
+MATERIALS, SW = 'frictionsim2d/data/materials', 'frictionsim2d/data/potentials/sw'
 
 #: (config, model, expected configs, builds, jobs) -- measured from real trees.
 CASES = [

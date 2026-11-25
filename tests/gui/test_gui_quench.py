@@ -38,7 +38,7 @@ from frictionsim2d.gui.schema.simulation_types import (  # noqa: E402
 from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-EXAMPLE = REPO / 'examples' / 'quench_config.ini'
+EXAMPLE = REPO / 'tests' / 'fixtures' / 'examples' / 'quench_config.ini'
 
 
 @pytest.fixture(scope='module', name='qt_app')
@@ -87,9 +87,9 @@ def _window(qt_app, tmp_path, monkeypatch):
 def _quench_ini(tmp_path, **extra) -> Path:
     lines = {
         'material': 'Si',
-        'potential': f'{REPO}/examples/potentials/sw/{{mat}}.sw',
+        'potential': f'{REPO}/frictionsim2d/data/potentials/sw/{{mat}}.sw',
         'pot_type': 'sw',
-        'cif': f'{REPO}/examples/materials/{{mat}}.cif',
+        'cif': f'{REPO}/frictionsim2d/data/materials/{{mat}}.cif',
         'slab': '[12, 12, 12]',
         'melt_temp': '3000',
         **{k: str(v) for k, v in extra.items()},
@@ -111,7 +111,7 @@ def _miss_payload(tmp_path, monkeypatch) -> dict:
     settings.write_text(yaml.safe_dump(
         {'quench': {'melt_temp': 3000, 'quench_slab_dims': [12, 12, 12]}}), encoding='utf-8')
     result = generate_worker.run({
-        'config_file': 'examples/afm_config.ini', 'model': 'afm',
+        'config_file': 'tests/fixtures/examples/afm_config.ini', 'model': 'afm',
         'output_root': str(tmp_path / 'out'), 'settings_file': str(settings)})
     assert result['ok'] is False and result['quench_members']
     return result
@@ -474,8 +474,8 @@ class TestRunLocally:
         monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'xdg'))
         pid_file = self._fake_lmp(tmp_path, monkeypatch)
         members = amorphous.expand_quench_config(
-            {'material': 'Si', 'potential': str(REPO / 'examples/potentials/sw/{mat}.sw'),
-             'pot_type': 'sw', 'cif': str(REPO / 'examples/materials/{mat}.cif'),
+            {'material': 'Si', 'potential': str(REPO / 'frictionsim2d/data/potentials/sw/{mat}.sw'),
+             'pot_type': 'sw', 'cif': str(REPO / 'frictionsim2d/data/materials/{mat}.cif'),
              'slab': [12, 12, 12], 'melt_temp': 3000}, load_settings())
         root = amorphous.write_quench_root(members, tmp_path / 'out', load_settings())
 

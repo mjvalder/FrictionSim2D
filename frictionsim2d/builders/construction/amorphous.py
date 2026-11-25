@@ -34,13 +34,16 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
-from importlib import resources
 from pathlib import Path
 from typing import (Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple,
                     Union)
 
 from ...core.config import GlobalSettings, QuenchRunConfig, QuenchSettings
 from ...core.mlip import is_mlip
+# materials_pack_dir is re-exported: callers and tests reach the roots through here.
+from ...core.utils.paths import (amorphous_library_dir, find_existing,  # pylint: disable=unused-import
+                                 materials_pack_dir, packaged_dir)
+from ...core.utils.paths import library_roots as paths_library_roots
 
 logger = logging.getLogger(__name__)
 
@@ -221,32 +224,19 @@ def quench_nsteps(key: QuenchKey) -> int:
 
 # ---------------------------------------------------------------- the roots
 
-def _data_home() -> Path:
-    # Read the same way as agent/knowledge_index.py.
-    return Path(os.environ.get('XDG_DATA_HOME') or str(Path.home() / '.local' / 'share'))
-
-
-def amorphous_library_dir() -> Path:
-    """``$XDG_DATA_HOME/FrictionSim2D/amorphous``: the only place blocks are written."""
-    return _data_home() / 'FrictionSim2D' / 'amorphous'
-
-
-def materials_pack_dir() -> Path:
-    """``$XDG_DATA_HOME/FrictionSim2D/materials-pack`` (read-only here)."""
-    return _data_home() / 'FrictionSim2D' / 'materials-pack'
-
-
 def packaged_materials_dir() -> Path:
     """The packaged ``frictionsim2d/data/materials`` (read-only, always)."""
-    # `data/materials` has no __init__.py: resolve it under the `data` package,
-    # whose files() is a plain path (a namespace package's is a MultiplexedPath).
-    return Path(str(resources.files('frictionsim2d.data'))) / 'materials'
+    return packaged_dir('materials')
 
 
 def library_roots() -> List[Tuple[str, Path]]:
-    """``[(name, dir)]`` in lookup order: packaged, pack, user."""
-    return [('packaged', packaged_materials_dir()), ('pack', materials_pack_dir()),
-            ('user', amorphous_library_dir())]
+    """``[(name, dir)]`` in lookup order: packaged, pack, user.
+
+    The same roots, from the same definition, as every material lookup
+    (:func:`frictionsim2d.core.utils.paths.library_roots`), minus the legacy
+    ``examples/`` folder.
+    """
+    return paths_library_roots('materials', legacy=False)
 
 
 def read_data_header(path: PathLike) -> Tuple[Optional[Dims], Optional[int]]:
@@ -489,12 +479,8 @@ def _as_list(value: Any) -> List[Any]:
 
 
 def _resolve(name: str, base_dir: Optional[Path]) -> Path:
-    # pylint: disable-next=import-outside-toplevel
-    from ...core.utils.paths import search_paths
-    for candidate in search_paths(name, base_dir):
-        if candidate.is_file():
-            return candidate
-    return Path(name)
+    found = find_existing(name, base_dir)
+    return found if found is not None and found.is_file() else Path(name)
 
 
 def expand_quench_config(section: Mapping[str, Any], settings: GlobalSettings,

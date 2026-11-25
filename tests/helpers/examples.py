@@ -15,6 +15,12 @@ from frictionsim2d.run.artifacts import generate_package
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
+#: A frozen copy of ``examples/`` as of the Task 22 rewrite (2026-11-25): the
+#: deck snapshot and every test that asserts an example's exact values read
+#: this, so rewriting ``examples/`` never moves them. Identical to the
+#: originals except that ``materials_list`` names the copy's own list file
+#: (repo-root relative, as the build resolves it against the working directory).
+FROZEN_EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 #: (config file, model, expected members). "Members" is
 #: ``GenerationResult.created`` -- one per expanded config, not per layer.
@@ -45,16 +51,16 @@ HETERO: Tuple[str, str, int] = ('hetero_pair_sweep.ini', 'sheetonsheet', 3)
 CAMPAIGN_NAMES = {name for name, _, _ in CAMPAIGNS}
 
 
-def one_material_copy(name: str, dest: Path) -> Path:
+def one_material_copy(name: str, dest: Path, source: Path = EXAMPLES) -> Path:
     """A campaign config restricted to the first material of its list.
 
     Only ``materials_list`` changes; every other line, including the ``{mat}``
     markers, is the original's, so the member this builds is the one the real
     campaign would build first.
     """
-    original = (EXAMPLES / name).read_text(encoding='utf-8')
+    original = (source / name).read_text(encoding='utf-8')
     first = next(line for line in
-                 (EXAMPLES / 'material_list.txt').read_text(
+                 (source / 'material_list.txt').read_text(
                      encoding='utf-8').splitlines() if line.strip())
     short_list = dest / 'one_material.txt'
     short_list.write_text(f"{first}\n", encoding='utf-8')
@@ -67,18 +73,20 @@ def one_material_copy(name: str, dest: Path) -> Path:
     return out
 
 
-def build(name: str, model: str, root: Path, **overrides):
+def build(name: str, model: str, root: Path, source: Path = EXAMPLES, **overrides):
     """Generate one example into ``root`` and return the ``GenerationResult``.
 
-    ``overrides`` are passed straight through to ``generate_package`` (e.g.
+    ``source`` is the folder the config is read from: the live ``examples/``
+    (the parses-and-renders contract) or :data:`FROZEN_EXAMPLES` (a test that
+    asserts the example's exact values). ``overrides`` are passed straight through to ``generate_package`` (e.g.
     ``settings_file=``); the defaults below are what the tier wants everywhere.
 
     ``os.chdir`` to the repo root is required, not cosmetic: the example configs
-    spell ``cif_path``/``pot_path`` relative to it, the same way
+    spell ``materials_list`` relative to it, the same way
     ``tests/run/test_orchestration.py`` does it.
     """
-    config = (one_material_copy(name, root) if name in CAMPAIGN_NAMES
-              else EXAMPLES / name)
+    config = (one_material_copy(name, root, source) if name in CAMPAIGN_NAMES
+              else source / name)
     cwd = os.getcwd()
     os.chdir(REPO_ROOT)
     try:

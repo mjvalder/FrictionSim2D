@@ -4,7 +4,7 @@
   "files": [
     {
       "filename": "b-SiGe.cif",
-      "original_path": "<REPO>/examples/materials/b-SiGe.cif",
+      "original_path": "<REPO>/frictionsim2d/data/materials/b-SiGe.cif",
       "stored_path": "provenance/cif/b-SiGe.cif",
       "category": "cif",
       "components": [
@@ -15,7 +15,7 @@
     },
     {
       "filename": "1989_SiGe.tersoff",
-      "original_path": "<REPO>/examples/potentials/tersoff/1989_SiGe.tersoff",
+      "original_path": "<REPO>/frictionsim2d/data/potentials/tersoff/1989_SiGe.tersoff",
       "stored_path": "provenance/potentials/1989_SiGe.tersoff",
       "category": "potential",
       "components": [
@@ -26,7 +26,7 @@
     },
     {
       "filename": "Si.cif",
-      "original_path": "<REPO>/examples/materials/Si.cif",
+      "original_path": "<REPO>/frictionsim2d/data/materials/Si.cif",
       "stored_path": "provenance/cif/Si.cif",
       "category": "cif",
       "components": [
@@ -37,7 +37,7 @@
     },
     {
       "filename": "Si.sw",
-      "original_path": "<REPO>/examples/potentials/sw/Si.sw",
+      "original_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
       "stored_path": "provenance/potentials/Si.sw",
       "category": "potential",
       "components": [

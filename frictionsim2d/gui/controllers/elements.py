@@ -158,7 +158,7 @@ def _parse_atom_site_loop(text: str) -> Set[str]:
     A minimal CIF ``loop_`` reader: a tag block (lines starting with `_`)
     followed by whitespace-separated data rows until the next tag, loop, or
     blank line. Good enough for the CIFs this project writes (ASE's own CIF
-    writer, see examples/materials/*.cif) without pulling in a real parser.
+    writer, see frictionsim2d/data/materials/*.cif) without pulling in a real parser.
     """
     lines = text.splitlines()
     i, n = 0, len(lines)

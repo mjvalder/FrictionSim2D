@@ -19,8 +19,8 @@ from frictionsim2d.core.config import GlobalSettings, SheetConfig
 from frictionsim2d.potentials.manager import PotentialManager
 
 REPO = Path(__file__).resolve().parents[2]
-MAT = REPO / "examples" / "materials"
-SW = REPO / "examples" / "potentials" / "sw"
+MAT = REPO / "frictionsim2d" / "data" / "materials"
+SW = REPO / "frictionsim2d" / "data" / "potentials" / "sw"
 SNAPSHOT = Path(__file__).parent / "data" / "sheet_lj_jiang3_snapshot"
 
 
@@ -140,7 +140,7 @@ def test_lj_unchanged_with_jiang(tmp_path, monkeypatch):
     out = _build_example_sheet(
         tmp_path, monkeypatch,
         sheet={"x": 12, "y": 12, "lat_c": 6.15,
-               "pot_path": "examples/potentials/sw/mos2_jiang3.sw"})
+               "pot_path": "frictionsim2d/data/potentials/sw/mos2_jiang3.sw"})
     got = _normalised_lammps_files(out)
     got.update({f"build/{p.name}": p.read_text(encoding="utf-8")
                 for p in (out / "build").glob("*.lmp")})

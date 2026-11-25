@@ -20,7 +20,7 @@ from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 pytestmark = [pytest.mark.lammps, pytest.mark.integration]
 
 LMP = shutil.which("lmp_serial")
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 
 
 def _afm_smoke_raw():

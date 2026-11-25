@@ -31,8 +31,8 @@ from frictionsim2d.builders.construction.amorphous import (
 from frictionsim2d.core.config import GlobalSettings, QuenchSettings
 
 REPO = Path(__file__).resolve().parents[2]
-SI_CIF = REPO / 'examples' / 'materials' / 'Si.cif'
-SI_POT = REPO / 'examples' / 'potentials' / 'sw' / 'Si.sw'
+SI_CIF = REPO / 'frictionsim2d' / 'data' / 'materials' / 'Si.cif'
+SI_POT = REPO / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'Si.sw'
 PACKAGED = Path(str(resources.files('frictionsim2d.data'))) / 'materials'
 SI_SHA = 'c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad'
 
@@ -167,9 +167,9 @@ def test_quench_run_length_is_at_least_one_step():
 # --------------------------------------------------------------- the miss
 
 def _afm_config(tmp_path) -> Path:
-    """examples/afm_config.ini with absolute paths (amorphous Si substrate)."""
-    text = (REPO / 'examples' / 'afm_config.ini').read_text(encoding='utf-8')
-    text = text.replace('examples/', f'{REPO}/examples/')
+    """tests/fixtures/examples/afm_config.ini with absolute paths (amorphous Si substrate)."""
+    text = (REPO / 'tests' / 'fixtures' / 'examples' / 'afm_config.ini').read_text(encoding='utf-8')
+    text = text.replace('examples/', f'{REPO}/frictionsim2d/data/')
     path = tmp_path / 'afm.ini'
     path.write_text(text, encoding='utf-8')
     return path
@@ -179,9 +179,9 @@ def test_run_without_block_raises_with_command(tmp_path):
     settings = GlobalSettings(quench=QuenchSettings(melt_temp=3000))
     members = quench_members_for(_afm_config(tmp_path), settings)
     assert [m.material for m in members] == ['Si']
-    exc = AmorphousMissing(members, config_file='examples/afm_config.ini',
+    exc = AmorphousMissing(members, config_file='tests/fixtures/examples/afm_config.ini',
                            settings_file='my.yaml')
-    assert 'run quench --for examples/afm_config.ini' in exc.command
+    assert 'run quench --for tests/fixtures/examples/afm_config.ini' in exc.command
     assert '--settings-file my.yaml' in exc.command
     text = str(exc)
     assert 'No amorphous Si block matches this run.' in text
@@ -378,7 +378,7 @@ def test_legacy_tree_rebuilds_onto_the_shipped_block(tmp_path, lammps_replay, mo
 
     monkeypatch.chdir(REPO)
     settings_file = _legacy_settings_file(tmp_path)
-    config = REPO / 'examples' / 'afm_config.ini'
+    config = REPO / 'tests' / 'fixtures' / 'examples' / 'afm_config.ini'
     with pytest.raises(AmorphousMissing):
         generate_package(config, 'afm', output_root=tmp_path / 'live',
                          settings_file=settings_file, simulation_root_name='sim')
@@ -401,8 +401,8 @@ def test_preflight_sizes_the_periodic_substrate_as_built():
     """A 214.9 A request tiles to 67 whole h-MoS2 cells (213.3 A), which the
     214.8 A shipped block covers; the request alone would have refused."""
     run = {
-        '2D': {'mat': 'MoS2', 'pot_type': 'sw', 'cif_path': 'examples/materials/h-MoS2.cif',
-               'pot_path': 'examples/potentials/sw/MoS2_wen.sw', 'x': 214.9, 'y': 100.0,
+        '2D': {'mat': 'MoS2', 'pot_type': 'sw', 'cif_path': 'frictionsim2d/data/materials/h-MoS2.cif',
+               'pot_path': 'frictionsim2d/data/potentials/sw/MoS2_wen.sw', 'x': 214.9, 'y': 100.0,
                'layers': [1]},
         'sub': {'mat': 'Si', 'amorph': 'a', 'thickness': 12.0, 'pot_type': 'sw',
                 'pot_path': str(SI_POT), 'cif_path': str(SI_CIF)},

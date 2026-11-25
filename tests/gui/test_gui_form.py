@@ -449,7 +449,7 @@ class TestTipPositionGate:
         assert doc.get('tip', 'tip_x') is None
 
     def test_opening_the_example_config_stays_clean_after_a_commit(self, qt_app):
-        """examples/afm_config.ini ships an explicit `tip_x_offset = 0.0` --
+        """tests/fixtures/examples/afm_config.ini ships an explicit `tip_x_offset = 0.0` --
         equal to the field's own spec default. `_load_gates` reads that as
         untouched and ticks no box, so `commit()` pops it right back out;
         that pop is a no-op (the builder already treats an absent offset as
@@ -460,7 +460,7 @@ class TestTipPositionGate:
         from frictionsim2d.gui.widgets.form import SectionForm
 
         doc = ConfigDocument.from_file(
-            REPO_ROOT / 'examples' / 'afm_config.ini', 'afm')
+            REPO_ROOT / 'tests' / 'fixtures' / 'examples' / 'afm_config.ini', 'afm')
         assert not doc.dirty
         form = SectionForm(doc.section('tip'), doc)
         form.commit()
@@ -592,7 +592,7 @@ class TestPairConfigSurvivesTheForm:
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.from_file(
-            REPO_ROOT / 'examples' / 'hetero_pair_sweep.ini', 'sheetonsheet')
+            REPO_ROOT / 'tests' / 'fixtures' / 'examples' / 'hetero_pair_sweep.ini', 'sheetonsheet')
         before = doc.to_dict()
 
         form = ConfigForm(doc)
@@ -678,10 +678,10 @@ class TestAddASecondMaterial:
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.from_file(
-            REPO_ROOT / 'examples' / 'sheet_config.ini', 'sheetonsheet')
-        doc.set('2D', 'materials_list', 'examples/material_list.txt')
-        doc.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
-        doc.set('2D', 'pot_path', 'examples/potentials/sw/sw_lammps/{mat}.sw')
+            REPO_ROOT / 'tests' / 'fixtures' / 'examples' / 'sheet_config.ini', 'sheetonsheet')
+        doc.set('2D', 'materials_list', 'tests/fixtures/examples/material_list.txt')
+        doc.set('2D', 'cif_path', 'frictionsim2d/data/materials/{mat}.cif')
+        doc.set('2D', 'pot_path', 'frictionsim2d/data/potentials/sw/sw_lammps/{mat}.sw')
         doc.set('2D', 'mat', '{mat}')
         form = ConfigForm(doc)
 
@@ -911,7 +911,7 @@ class TestSweepDirectoriesFromPairTemplates:
 
         monkeypatch.chdir(REPO_ROOT)
         doc = ConfigDocument.from_file(
-            REPO_ROOT / 'examples' / 'hetero_pair_sweep.ini', 'sheetonsheet')
+            REPO_ROOT / 'tests' / 'fixtures' / 'examples' / 'hetero_pair_sweep.ini', 'sheetonsheet')
         form = ConfigForm(doc)
 
         structures, potentials, extension = form.sections['2D']._sweep_directories()
@@ -979,7 +979,7 @@ class TestInterlayerControls:
         from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
-        doc = ConfigDocument.from_file(REPO_ROOT / 'examples' / 'sheet_config.ini',
+        doc = ConfigDocument.from_file(REPO_ROOT / 'tests' / 'fixtures' / 'examples' / 'sheet_config.ini',
                                        'sheetonsheet')
         doc.values['general'].update(general)
         return ConfigForm(doc)

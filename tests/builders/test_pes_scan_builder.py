@@ -65,7 +65,7 @@ def test_cell_period_subtracts_lo_not_just_hi():
     # buggy `hi`-only implementation, since they'd return the same number --
     # the flaw in an earlier version of this test. Both bounds are non-zero
     # here so the subtraction is actually exercised. The period values
-    # themselves are h-MoS2's own lattice constant (examples/materials/
+    # themselves are h-MoS2's own lattice constant (frictionsim2d/data/materials/
     # h-MoS2.cif, a=3.1840664646845926) orthogonalized the way this
     # codebase's own hex-to-orthogonal conversions scale y by sqrt(3)
     # (frictionsim2d/builders/construction/components.py:156,220,225-226) -- real
@@ -293,7 +293,7 @@ def test_pes_tip_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):
 # --- interlayer styles (spec 2026-11-11 §7, Task 7) -------------------------
 
 def _build_example_pes_sheet(tmp_path, monkeypatch, **general) -> Path:
-    """Build ``examples/pes_sheet_config.ini`` small (lat_c given).
+    """Build ``tests/fixtures/examples/pes_sheet_config.ini`` small (lat_c given).
 
     12 x 12, or 20 x 20 under ilp/kc: the build refuses a cell narrower than
     their 16 A cutoff + skin (tests/builders/test_interlayer_box_guard.py).
@@ -301,7 +301,7 @@ def _build_example_pes_sheet(tmp_path, monkeypatch, **general) -> Path:
     from frictionsim2d.core.config import GlobalSettings, read_config
     repo = Path(__file__).resolve().parents[2]
     monkeypatch.chdir(repo)
-    raw = read_config(repo / "examples" / "pes_sheet_config.ini")
+    raw = read_config(repo / "tests" / "fixtures" / "examples" / "pes_sheet_config.ini")
     raw["general"].update(general)
     size = 20 if general.get("interlayer_style") in ("ilp", "kc") else 12
     raw["2D"].update({"x": size, "y": size, "lat_c": 6.15})

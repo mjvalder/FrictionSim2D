@@ -36,7 +36,7 @@ def test_scan_elements_from_cif():
     from frictionsim2d.gui.controllers.elements import scan_config_elements
 
     doc = ConfigDocument.blank('sheetonsheet')
-    doc.set('2D', 'cif_path', 'examples/materials/h-MoS2.cif')
+    doc.set('2D', 'cif_path', 'frictionsim2d/data/materials/h-MoS2.cif')
     doc.source_path = Path('.').resolve() / 'x.ini'   # base_dir = repo root
 
     assert set(scan_config_elements(doc)) >= {'Mo', 'S'}

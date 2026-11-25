@@ -25,8 +25,8 @@
   "sheet": {
     "mat": "h-MoS2",
     "pot_type": "reaxff",
-    "pot_path": "examples/potentials/reaxff/ffield_ost.reax.MoS",
-    "cif_path": "examples/materials/h-MoS2.cif",
+    "pot_path": "<REPO>/frictionsim2d/data/potentials/reaxff/ffield_ost.reax.MoS",
+    "cif_path": "<REPO>/frictionsim2d/data/materials/h-MoS2.cif",
     "x": 24.0,
     "y": 24.0,
     "layers": [
@@ -44,8 +44,8 @@
     {
       "mat": "h-MoS2",
       "pot_type": "reaxff",
-      "pot_path": "examples/potentials/reaxff/ffield_ost.reax.MoS",
-      "cif_path": "examples/materials/h-MoS2.cif",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/reaxff/ffield_ost.reax.MoS",
+      "cif_path": "<REPO>/frictionsim2d/data/materials/h-MoS2.cif",
       "x": 24.0,
       "y": 24.0,
       "layers": [

@@ -43,8 +43,8 @@ def test_get_material_path_missing_file_names_the_material():
         get_material_path('no-such-material')
 
 
-def test_get_potential_path_missing_file_mentions_examples_potentials():
-    with pytest.raises(FileNotFoundError, match='examples/potentials'):
+def test_get_potential_path_missing_file_names_the_library():
+    with pytest.raises(FileNotFoundError, match=r"'nothing\.sw'.*potential library .*data/potentials"):
         get_potential_path('nothing.sw')
 
 

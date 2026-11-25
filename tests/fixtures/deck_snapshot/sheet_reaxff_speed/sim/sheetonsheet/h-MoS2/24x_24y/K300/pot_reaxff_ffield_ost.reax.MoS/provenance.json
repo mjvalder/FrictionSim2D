@@ -7,7 +7,7 @@
     {
       "name": "h-MoS2",
       "role": "sheet",
-      "pot_path": "examples/potentials/reaxff/ffield_ost.reax.MoS",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/reaxff/ffield_ost.reax.MoS",
       "pot_type": "reaxff",
       "pot_resolution_route": null,
       "pot_file_sha256": "9c0e337ccae0f5e7f77746d03404db1801c363ae925022d2e787387e27721c04"
@@ -23,7 +23,7 @@
   "damp_ev": null,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "d28d9e746ffcee9ab4f39c8ab12b067f9c559daeaff60379b05cd4ecc3f9c380",
+  "config_hash": "f9bdd8f8fb07245c1c96cf1728565e87ea661792d5abb29ecd33874eccee7567",
   "lammps_version": null,
   "layer_type_map": {
     "layer_1": [

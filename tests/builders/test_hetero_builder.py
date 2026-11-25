@@ -43,9 +43,9 @@ from frictionsim2d.lattice.matching import find_coincidence_lattice
 LMP = shutil.which("lmp_serial")
 
 
-MOS2_CIF = "examples/materials/h-MoS2.cif"
-WS2_CIF = "examples/materials/h-WS2.cif"
-MOS2_POT = "examples/potentials/sw/MoS2_wen.sw"
+MOS2_CIF = "frictionsim2d/data/materials/h-MoS2.cif"
+WS2_CIF = "frictionsim2d/data/materials/h-WS2.cif"
+MOS2_POT = "frictionsim2d/data/potentials/sw/MoS2_wen.sw"
 # ws2_jrmidas.sw defines a third element ('C', for graphene coupling) that is
 # not present in h-WS2.cif and is rejected by get_potential_element_order, so
 # a plain WS2-only SW potential is used instead. Both this file and
@@ -53,7 +53,7 @@ MOS2_POT = "examples/potentials/sw/MoS2_wen.sw"
 # splitting), so both monolayers' orthogonalized unit cells are a plain 1x2
 # doubling of their CIF primitive cell -- i.e. directly comparable to each
 # other and matched (internally) from the real orthogonalized cells.
-WS2_POT = "examples/potentials/sw/sw_lammps/t-WS2.sw"
+WS2_POT = "frictionsim2d/data/potentials/sw/sw_lammps/t-WS2.sw"
 
 
 def _sheet_config(mat: str, cif_path: str, pot_path: str) -> SheetConfig:
@@ -1093,10 +1093,10 @@ def test_finite_hetero_with_prefix_keeps_edge_types(tmp_path):
 # Interlayer styles in heterostructures (spec 2026-11-11, Task 6)
 # =============================================================================
 
-WSE2_CIF = "examples/materials/h-WSe2.cif"
-WSE2_POT = "examples/potentials/sw/sw_lammps/h-WSe2.sw"
-MOSE2_CIF = "examples/materials/h-MoSe2.cif"
-MOSE2_POT = "examples/potentials/sw/MoSe2_sevik.sw"
+WSE2_CIF = "frictionsim2d/data/materials/h-WSe2.cif"
+WSE2_POT = "frictionsim2d/data/potentials/sw/sw_lammps/h-WSe2.sw"
+MOSE2_CIF = "frictionsim2d/data/materials/h-MoSe2.cif"
+MOSE2_POT = "frictionsim2d/data/potentials/sw/MoSe2_sevik.sw"
 HETERO_LJ_SNAPSHOT = Path(__file__).parent / "data" / "hetero_lj_snapshot"
 
 

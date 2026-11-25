@@ -24,7 +24,7 @@ from frictionsim2d.gui.preview.init_script import parse_assembly
 from frictionsim2d.gui.preview.settings_file import parse_identity
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 CASES = [
     ('indent_config.ini', 'indent', {'sub', 'tip', '2D'}),

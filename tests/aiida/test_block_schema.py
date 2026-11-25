@@ -224,8 +224,8 @@ def _quench_nsteps(tmp_path, rate):
     from frictionsim2d.builders.construction.amorphous import QuenchMember, write_quench_root
     settings = load_settings().model_copy(deep=True)
     settings.quench.quench_rate = rate
-    mat = REPO / 'examples' / 'materials' / 'Si.cif'
-    pot = REPO / 'examples' / 'potentials' / 'sw' / 'Si.sw'
+    mat = REPO / 'frictionsim2d' / 'data' / 'materials' / 'Si.cif'
+    pot = REPO / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'Si.sw'
     member = QuenchMember.make('Si', pot, 'sw', mat, (8.0, 8.0, 8.0), settings.quench)
     root = write_quench_root([member], tmp_path, settings, root_name=f'r{rate:g}')
     deck = next(root.rglob('quench.in')).read_text(encoding='utf-8')

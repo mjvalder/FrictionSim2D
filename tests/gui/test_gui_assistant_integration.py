@@ -400,8 +400,8 @@ def test_undo_restores_document_and_settings_latest_first(window):
     assert window.form.highlights() == {}
 
 
-SW = REPO_ROOT / 'examples' / 'potentials' / 'sw' / 'sw_lammps'
-CIF = REPO_ROOT / 'examples' / 'materials'
+SW = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'sw_lammps'
+CIF = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
 
 
 def _sweep(window):

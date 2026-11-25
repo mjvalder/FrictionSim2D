@@ -25,8 +25,8 @@ from frictionsim2d.core.config import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MAT = REPO_ROOT / 'examples' / 'materials'
-POT = REPO_ROOT / 'examples' / 'potentials' / 'sw'
+MAT = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
+POT = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw'
 
 #: The flake/hetero builders assemble their stacks by shelling out to LAMMPS.
 LMP = shutil.which('lmp_serial') or shutil.which('lmp')

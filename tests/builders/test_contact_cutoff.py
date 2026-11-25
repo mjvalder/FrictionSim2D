@@ -7,7 +7,7 @@ from frictionsim2d.builders.afm import AFMSimulation, K_CONTACT
 from frictionsim2d.potentials.utils import lj_params
 from tests.helpers.afm import _make_afm_config
 
-MATERIALS = Path(__file__).parents[2] / 'examples' / 'materials'
+MATERIALS = Path(__file__).parents[2] / 'frictionsim2d' / 'data' / 'materials'
 
 
 def max_sigma_si_pair(sheet_elements):

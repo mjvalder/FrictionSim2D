@@ -119,10 +119,11 @@ SCENARIO_CASES: List[RenderCase] = [
 
 
 def render_set() -> List[RenderCase]:
-    """Every ``examples/*.ini`` that is a run config, plus ``EXTRA_CASES`` and
-    the scenario matrix's own configs."""
-    from tests.helpers.examples import CASES, CAMPAIGNS, HETERO, EXAMPLES
-    cases = [RenderCase(Path(n).stem, m, EXAMPLES / n) for n, m, _ in CASES + CAMPAIGNS + [HETERO]]
+    """Every frozen ``examples/*.ini`` copy (``tests/fixtures/examples``) that is
+    a run config, plus ``EXTRA_CASES`` and the scenario matrix's own configs."""
+    from tests.helpers.examples import CASES, CAMPAIGNS, HETERO, FROZEN_EXAMPLES
+    cases = [RenderCase(Path(n).stem, m, FROZEN_EXAMPLES / n)
+             for n, m, _ in CASES + CAMPAIGNS + [HETERO]]
     extra = list(EXTRA_CASES)
     return cases + extra + [c for c in SCENARIO_CASES if c not in extra]
 
@@ -161,7 +162,8 @@ def render(case: RenderCase, out: Path) -> Dict[str, str]:
     from tests.helpers.examples import CAMPAIGN_NAMES, one_material_copy
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    ini = one_material_copy(case.ini.name, out) if case.ini.name in CAMPAIGN_NAMES else case.ini
+    ini = (one_material_copy(case.ini.name, out, case.ini.parent)
+           if case.ini.name in CAMPAIGN_NAMES else case.ini)
     cwd = os.getcwd()
     os.chdir(_REPO_ROOT)
     try:

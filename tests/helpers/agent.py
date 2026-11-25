@@ -6,7 +6,7 @@ from frictionsim2d.agent.sandbox import SearchRoots
 from frictionsim2d.gui.controllers.document import ConfigDocument
 from frictionsim2d.gui.controllers.settings_document import SettingsDocument
 
-EXAMPLES = Path(__file__).resolve().parents[2] / 'examples'
+EXAMPLES = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data'
 
 
 def make_deps(tmp_path, settings, model='afm', with_examples=True):

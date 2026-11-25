@@ -819,7 +819,7 @@ def test_afm_bilayer_other_styles(tmp_path, monkeypatch, style):
     extra = {}
     if style == "kc":
         # No KC-full parametrisation ships for MoS2: the carbon one, relabelled.
-        cc = (REPO_ROOT / "examples" / "potentials" / "kc" / "CC.KC-full").read_text(
+        cc = (REPO_ROOT / "frictionsim2d" / "data" / "potentials" / "kc" / "CC.KC-full").read_text(
             encoding="utf-8").splitlines()
         params = next(ln for ln in cc if ln.strip() and not ln.startswith("#")).split()[2:]
         kc = tmp_path / "MoS2.KC-full"

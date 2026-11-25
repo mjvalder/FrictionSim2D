@@ -22,8 +22,8 @@
   "tip": {
     "mat": "Si",
     "pot_type": "sw",
-    "pot_path": "examples/potentials/sw/Si.sw",
-    "cif_path": "examples/materials/Si.cif",
+    "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
+    "cif_path": "<REPO>/frictionsim2d/data/materials/Si.cif",
     "r": 10.0,
     "amorph": "c",
     "dspring": 0.0,
@@ -37,8 +37,8 @@
   "sheet": {
     "mat": "b-SiGe",
     "pot_type": "tersoff",
-    "pot_path": "examples/potentials/tersoff/1989_SiGe.tersoff",
-    "cif_path": "examples/materials/b-SiGe.cif",
+    "pot_path": "<REPO>/frictionsim2d/data/potentials/tersoff/1989_SiGe.tersoff",
+    "cif_path": "<REPO>/frictionsim2d/data/materials/b-SiGe.cif",
     "x": 40.0,
     "y": 40.0,
     "layers": [
@@ -56,8 +56,8 @@
     {
       "mat": "b-SiGe",
       "pot_type": "tersoff",
-      "pot_path": "examples/potentials/tersoff/1989_SiGe.tersoff",
-      "cif_path": "examples/materials/b-SiGe.cif",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/tersoff/1989_SiGe.tersoff",
+      "cif_path": "<REPO>/frictionsim2d/data/materials/b-SiGe.cif",
       "x": 40.0,
       "y": 40.0,
       "layers": [

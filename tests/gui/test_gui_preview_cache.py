@@ -26,7 +26,7 @@ from frictionsim2d.gui.controllers.preview import (  # noqa: E402
     PreviewController, PreviewRequest, cache_key)
 from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
-EXAMPLES = Path(__file__).resolve().parents[2] / 'examples'
+EXAMPLES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures' / 'examples'
 
 
 @pytest.fixture(scope='module', name='qt_app')

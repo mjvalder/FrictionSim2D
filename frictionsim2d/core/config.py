@@ -637,7 +637,8 @@ class ComponentConfig(BaseModel):
 
         A ``base_dir`` passed through the validation context
         (``model_validate(..., context={'base_dir': ...})``) resolves relative
-        paths, so ``examples/potentials/...`` works from any working directory.
+        paths, and library names (``potentials/sw/...``, ``materials/...``) resolve
+        through the packaged library from any working directory.
         Unresolvable values are returned unchanged.
         """
         if v is None:
@@ -652,7 +653,6 @@ class ComponentConfig(BaseModel):
 
         resolver = get_potential_path if info.field_name == 'pot_path' else get_material_path
         resolved = resolver(v) if base_dir is None else resolver(v, base_dir)
-
         return str(resolved) if resolved.exists() else v
 
     @model_validator(mode='after')

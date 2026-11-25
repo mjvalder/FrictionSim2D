@@ -1,6 +1,6 @@
 # MLIP models — how to get them
 
-Unlike every other directory under `examples/potentials/`, **this one ships no
+Unlike every other directory under `frictionsim2d/data/potentials/`, **this one ships no
 model files.** Classical potentials here are KB-scale text you can read and
 diff; MLIP foundation models are 18 MB–120 MB of third-party binary weights with
 their own licences and release channels. Putting them in the repository would

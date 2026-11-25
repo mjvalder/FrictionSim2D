@@ -24,7 +24,7 @@ from frictionsim2d.gui.preview.init_script import (
 from frictionsim2d.gui.preview.settings_file import expand_type_range, parse_identity
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 #: (config, model, expected component groups)
 CASES = [

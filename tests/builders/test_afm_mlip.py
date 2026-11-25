@@ -28,8 +28,8 @@ from frictionsim2d.builders.afm import AFMSimulation
 from frictionsim2d.core.config import AFMSimulationConfig, load_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MATERIALS = REPO_ROOT / 'examples' / 'materials'
-POTENTIALS = REPO_ROOT / 'examples' / 'potentials' / 'sw'
+MATERIALS = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
+POTENTIALS = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw'
 
 
 def _model(tmp_path: Path, name: str) -> str:

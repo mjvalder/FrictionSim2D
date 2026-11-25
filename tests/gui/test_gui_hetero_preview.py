@@ -67,8 +67,8 @@ from frictionsim2d.gui.preview.settings_file import parse_identity  # noqa: E402
 from frictionsim2d.gui.preview_worker import run as run_preview_build  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MATERIALS = REPO_ROOT / 'examples' / 'materials'
-POTENTIALS = REPO_ROOT / 'examples' / 'potentials' / 'sw'
+MATERIALS = REPO_ROOT / 'frictionsim2d' / 'data' / 'materials'
+POTENTIALS = REPO_ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'sw'
 
 #: `frictionsim2d.builders.construction.hetero_stack.run_lammps` shells out to this by name. Without it
 #: the whole build half of this file is skipped -- see `_require_lammps`.

@@ -564,15 +564,15 @@ def test_flake_sections_fold_into_flake_sheets():
     from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
     raw = {
         "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
-        "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
-               "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+        "2D": {"mat": "h-MoS2", "cif_path": "frictionsim2d/data/materials/h-MoS2.cif",
+               "pot_path": "frictionsim2d/data/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
                "x": 30.0, "y": 30.0, "layers": [1]},
         "Flake": {"shape": "hexagon", "edge_length": 12.0, "corner_radius": 3.0},
-        "Flake-1": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
-                    "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+        "Flake-1": {"mat": "h-MoS2", "cif_path": "frictionsim2d/data/materials/h-MoS2.cif",
+                    "pot_path": "frictionsim2d/data/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
                     "x": 12.0, "y": 12.0, "layers": [1]},
-        "Flake-2": {"mat": "h-WS2", "cif_path": "examples/materials/h-WS2.cif",
-                    "pot_path": "examples/potentials/sw/sw_lammps/t-WS2.sw", "pot_type": "sw",
+        "Flake-2": {"mat": "h-WS2", "cif_path": "frictionsim2d/data/materials/h-WS2.cif",
+                    "pot_path": "frictionsim2d/data/potentials/sw/sw_lammps/t-WS2.sw", "pot_type": "sw",
                     "x": 12.0, "y": 12.0, "layers": [1]},
     }
     cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
@@ -584,8 +584,8 @@ def test_flake_sections_fold_into_flake_sheets():
 def test_no_flake_sections_leaves_flake_sheets_empty():
     from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
     raw = {"general": {"temp": 300, "scan_speed": 1},
-           "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
-                  "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+           "2D": {"mat": "h-MoS2", "cif_path": "frictionsim2d/data/materials/h-MoS2.cif",
+                  "pot_path": "frictionsim2d/data/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
                   "x": 12.0, "y": 12.0, "layers": [1]}}
     cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
     assert cfg.flake_sheets == []
@@ -610,7 +610,7 @@ def test_afm_flake_missing_material_fields_is_rejected():
 
 
 def test_afm_flake_with_material_fields_still_validates():
-    """The fully-specified AFM flake (examples/afm_flake_config.ini) is untouched."""
+    """The fully-specified AFM flake (tests/fixtures/examples/afm_flake_config.ini) is untouched."""
     from frictionsim2d.core.config import AFMSimulationConfig, load_settings
     from tests.helpers.hetero import _afm_flake_raw
     cfg = AFMSimulationConfig(**_afm_flake_raw(), settings=load_settings())
@@ -625,8 +625,8 @@ def test_sheetonsheet_flake_may_still_omit_its_material():
     """
     from frictionsim2d.core.config import SheetOnSheetSimulationConfig, load_settings
     raw = {"general": {"temp": 300, "scan_speed": 1},
-           "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
-                  "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+           "2D": {"mat": "h-MoS2", "cif_path": "frictionsim2d/data/materials/h-MoS2.cif",
+                  "pot_path": "frictionsim2d/data/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
                   "x": 30.0, "y": 30.0, "layers": [1]},
            "Flake": {"shape": "hexagon", "edge_length": 5.0}}
     cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
@@ -1269,7 +1269,7 @@ class TestSheetSectionsAgreeOnDispersion:
         model.write_bytes(b'\x00')
         base = dict(mat='h-MoS2', pot_type='deepmd', pot_path=str(model),
                     cif_path=str(Path(__file__).resolve().parents[2]
-                                 / 'examples' / 'materials' / 'h-MoS2.cif'),
+                                 / 'frictionsim2d' / 'data' / 'materials' / 'h-MoS2.cif'),
                     x=30.0, y=30.0, layers=[1], lat_c=6.112)
         base.update(over)
         return base
@@ -1311,7 +1311,7 @@ class TestSheetSectionsAgreeOnDispersion:
 
     def test_classical_hetero_may_differ_on_allow_unbound(self, tmp_path):
         sw = lambda **o: self._sheet(tmp_path, pot_type='sw', pot_path=str(
-            Path(__file__).resolve().parents[2] / 'examples' / 'potentials' / 'sw' / 'MoS2_wen.sw'),
+            Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'MoS2_wen.sw'),
             lat_c=None, **o)
         cfg = self._config(tmp_path, {'2D-1': sw(), '2D-2': sw(allow_unbound=True)})
         assert len(cfg.sheets) == 2
@@ -1321,8 +1321,8 @@ class TestSheetSectionsAgreeOnDispersion:
         cfg = AFMSimulationConfig(**{
             'general': {'temp': 300.0, 'force': 5.0, 'scan_speed': 2.0},
             'tip': {'mat': 'Si', 'pot_type': 'sw', 'r': 5.0, 'dspring': 0.1,
-                    'pot_path': str(Path(__file__).resolve().parents[2] / 'examples' / 'potentials' / 'sw' / 'Si.sw'),
-                    'cif_path': str(Path(__file__).resolve().parents[2] / 'examples' / 'materials' / 'Si.cif')},
+                    'pot_path': str(Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'potentials' / 'sw' / 'Si.sw'),
+                    'cif_path': str(Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'materials' / 'Si.cif')},
             '2D': self._sheet(tmp_path, dispersion='d3'),
             'Flake-1': self._sheet(tmp_path, dispersion='none'),
             'Flake-2': self._sheet(tmp_path, dispersion='none'),

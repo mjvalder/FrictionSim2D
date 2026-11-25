@@ -40,9 +40,9 @@ def _fake_model(tmp_path, name):
 
 #: Real CIFs shipped with the examples: the MLIP tests read element lists
 #: from genuine structures instead of patching the readers.
-_MATERIALS = Path(__file__).resolve().parents[2] / 'examples' / 'materials'
+_MATERIALS = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'materials'
 _REAL_CIFS = {'Si.cif': 'Si.cif', 'MoS2.cif': 'h-MoS2.cif'}
-_SW = Path(__file__).resolve().parents[2] / 'examples' / 'potentials' / 'sw'
+_SW = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'potentials' / 'sw'
 
 
 def _shipped_cif(name):

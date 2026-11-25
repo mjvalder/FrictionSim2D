@@ -20,7 +20,7 @@ from frictionsim2d.run.artifacts import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 #: (config, model, expected assembly script, expected layers)
 CASES = [

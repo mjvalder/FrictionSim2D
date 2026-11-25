@@ -8,12 +8,12 @@ from frictionsim2d.core.config import SheetConfig
 from frictionsim2d.potentials.manager import PotentialManager, TypeRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
-REAXFF = ROOT / 'examples' / 'potentials' / 'reaxff' / 'ffield_Wang.reax.MoS'
+REAXFF = ROOT / 'frictionsim2d' / 'data' / 'potentials' / 'reaxff' / 'ffield_Wang.reax.MoS'
 
 
 def _reaxff_pm(mock_settings, tmp_path, virtual=False, cross=False):
     config = SheetConfig(mat='h-MoS2', pot_type='reaxff', pot_path=str(REAXFF),
-                         cif_path=str(ROOT / 'examples' / 'materials' / 'h-MoS2.cif'),
+                         cif_path=str(ROOT / 'frictionsim2d' / 'data' / 'materials' / 'h-MoS2.cif'),
                          x=50.0, y=50.0, layers=[1])
     pm = PotentialManager(mock_settings, use_langevin=False, potentials_dir=tmp_path / 'pots')
     pm.register_component('sheet', config)

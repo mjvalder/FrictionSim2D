@@ -16,7 +16,7 @@ from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
 from frictionsim2d.builders.simulation_base import SimulationBase
 from frictionsim2d.core.observables import FAMILIES
 from frictionsim2d.run.tree import discover_runs
-from tests.helpers.examples import build
+from tests.helpers.examples import FROZEN_EXAMPLES, build
 
 FAMILY_BY_CLASS = [
     (AFMSimulation, 'afm'),
@@ -49,7 +49,7 @@ def test_every_builder_declares_a_known_family(cls, family):
 ])
 def test_the_written_record_carries_the_builders_family(tmp_path, config, model, family):
     """The family is read back from provenance.json, not from the class constant."""
-    result = build(config, model, tmp_path)
+    result = build(config, model, tmp_path, source=FROZEN_EXAMPLES)
     assert not result.failures
     for loc in discover_runs(result.simulation_root):
         record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
@@ -115,7 +115,7 @@ def test_afm_run_records_sheet_tip_and_substrate(tmp_path):
     # examples/afm_config.ini sweeps layers=[1,2,3] -> 3 discovered runs
     # (R15); every one of them must carry the same family/model/materials
     # shape, so check them all rather than unpacking a single result.
-    result = build('afm_config.ini', 'afm', tmp_path)
+    result = build('afm_config.ini', 'afm', tmp_path, source=FROZEN_EXAMPLES)
     assert not result.failures
 
     runs = list(discover_runs(result.simulation_root))
@@ -135,7 +135,7 @@ def test_afm_run_records_sheet_tip_and_substrate(tmp_path):
 
 @pytest.mark.integration
 def test_settings_yaml_is_written_beside_config_json(tmp_path):
-    result = build('sheet_config.ini', 'sheetonsheet', tmp_path)
+    result = build('sheet_config.ini', 'sheetonsheet', tmp_path, source=FROZEN_EXAMPLES)
     assert not result.failures
     loc, = discover_runs(result.simulation_root)
 

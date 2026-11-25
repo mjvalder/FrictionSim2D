@@ -23,7 +23,7 @@ from frictionsim2d.gui.controllers.document import ConfigDocument  # noqa: E402
 from frictionsim2d.gui.workspace import Workspace  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 
 @pytest.fixture(scope='module', name='qt_app')
@@ -46,7 +46,7 @@ def _swept(materials_file, monkeypatch):
     document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
     document.set('2D', 'materials_list', str(materials_file))
     document.set('2D', 'mat', '{mat}')
-    document.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
+    document.set('2D', 'cif_path', 'frictionsim2d/data/materials/{mat}.cif')
     return document
 
 
@@ -590,7 +590,7 @@ class TestWindowIntegration:
             EXAMPLES / 'indent_config.ini', 'indent')
         window.document.set('2D', 'materials_list', str(materials_file))
         window.document.set('2D', 'mat', '{mat}')
-        window.document.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
+        window.document.set('2D', 'cif_path', 'frictionsim2d/data/materials/{mat}.cif')
         window.form.document = window.document
         window.form.rebuild()
 
@@ -614,7 +614,7 @@ class TestWindowIntegration:
 
         window.document.set('2D', 'materials_list', str(bad_materials))
         window.document.set('2D', 'mat', '{mat}')
-        window.document.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
+        window.document.set('2D', 'cif_path', 'frictionsim2d/data/materials/{mat}.cif')
         window.form.document = window.document
         window.form.rebuild()
 
@@ -678,7 +678,7 @@ class TestWindowIntegration:
         missing = tmp_path / 'typo_materials.txt'
         window.document.set('2D', 'materials_list', str(missing))
         window.document.set('2D', 'mat', '{mat}')
-        window.document.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
+        window.document.set('2D', 'cif_path', 'frictionsim2d/data/materials/{mat}.cif')
         window.form.document = window.document
         window.form.rebuild()
 

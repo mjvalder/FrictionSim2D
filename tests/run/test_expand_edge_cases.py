@@ -12,7 +12,7 @@ import pytest
 from frictionsim2d.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps
 from frictionsim2d.run.naming import output_dir_for
 
-ROOT = Path('examples/potentials')
+ROOT = Path('frictionsim2d/data/potentials')
 
 
 def _base_config(**general_overrides) -> dict:
@@ -73,7 +73,7 @@ def test_two_sweeps_produce_the_cartesian_product_in_documented_order() -> None:
             "mat": "h-MoS2",
             "pot_type": "sw",
             "pot_path": ["sw/sw_lammps/h-MoS2.sw", "sw/mos2_jiang2.sw"],
-            "cif_path": "examples/materials/h-MoS2.cif",
+            "cif_path": "frictionsim2d/data/materials/h-MoS2.cif",
             "x": 100, "y": 100, "layers": [2],
         },
     }

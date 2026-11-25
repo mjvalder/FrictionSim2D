@@ -22,8 +22,8 @@
   "sheet": {
     "mat": "h-MoTe2",
     "pot_type": "sw",
-    "pot_path": "examples/potentials/sw/sw_lammps/h-MoTe2.sw",
-    "cif_path": "examples/materials/h-MoTe2.cif",
+    "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/h-MoTe2.sw",
+    "cif_path": "<REPO>/frictionsim2d/data/materials/h-MoTe2.cif",
     "x": 12.0,
     "y": 12.0,
     "layers": [
@@ -41,8 +41,8 @@
     {
       "mat": "h-MoTe2",
       "pot_type": "sw",
-      "pot_path": "examples/potentials/sw/sw_lammps/h-MoTe2.sw",
-      "cif_path": "examples/materials/h-MoTe2.cif",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/h-MoTe2.sw",
+      "cif_path": "<REPO>/frictionsim2d/data/materials/h-MoTe2.cif",
       "x": 12.0,
       "y": 12.0,
       "layers": [
@@ -59,8 +59,8 @@
     {
       "mat": "h-WTe2",
       "pot_type": "sw",
-      "pot_path": "examples/potentials/sw/sw_lammps/h-WTe2.sw",
-      "cif_path": "examples/materials/h-WTe2.cif",
+      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/h-WTe2.sw",
+      "cif_path": "<REPO>/frictionsim2d/data/materials/h-WTe2.cif",
       "x": 12.0,
       "y": 12.0,
       "layers": [

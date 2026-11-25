@@ -211,7 +211,7 @@ class TestCustomPotType:
 
 # --- potential/CIF compatibility, internal cutoffs, D3 slug ------------------
 
-_MATERIALS = Path(__file__).resolve().parents[2] / 'examples' / 'materials'
+_MATERIALS = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'materials'
 
 
 def _potential(tmp_path, *triplets):
@@ -238,7 +238,7 @@ def test_cif_compatibility_inconsistent_ratios_raise(tmp_path):
         check_potential_cif_compatibility(cif, mixed)
 
 
-_POTS = Path(__file__).resolve().parents[2] / 'examples' / 'potentials'
+_POTS = Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'data' / 'potentials'
 
 
 @pytest.mark.parametrize('pot_type, expected', [

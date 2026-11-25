@@ -361,7 +361,7 @@ def test_the_hetero_example_builds_and_renders(build_example):
 # --------------------------------------------------------------------------
 
 #: One lattice constant's slack, either way. The largest cell in
-#: examples/materials is under 7 A, and the builder replicates whole cells to the
+#: frictionsim2d/data/materials is under 7 A, and the builder replicates whole cells to the
 #: count nearest the request, so a realised span sits within one cell of it.
 _LATTICE_TOL = 7.0
 

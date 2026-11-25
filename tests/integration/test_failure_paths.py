@@ -21,7 +21,7 @@ import pytest
 from frictionsim2d.core.config import GlobalSettings
 from frictionsim2d.run.artifacts import generate_package
 from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root
-from tests.helpers.examples import EXAMPLES, REPO_ROOT
+from tests.helpers.examples import FROZEN_EXAMPLES as EXAMPLES, REPO_ROOT
 
 pytestmark = pytest.mark.integration
 
@@ -88,14 +88,14 @@ def test_a_missing_material_file_is_refused_by_name(tmp_path):
     hands the missing path downstream, and it does not say which of the three
     `cif_path` entries in an AFM config is wrong."""
     config = _edited(tmp_path, AFM_BASE, '2D', 'cif_path',
-                     'examples/materials/not_a_real_material.cif')
+                     'frictionsim2d/data/materials/not_a_real_material.cif')
     _expect_rejection(config, tmp_path / 'out',
                       r'not_a_real_material\.cif.*not found')
 
 
 def test_a_missing_potential_file_is_refused_by_name(tmp_path):
     config = _edited(tmp_path, AFM_BASE, '2D', 'pot_path',
-                     'examples/potentials/sw/not_a_real_potential.sw')
+                     'frictionsim2d/data/potentials/sw/not_a_real_potential.sw')
     _expect_rejection(config, tmp_path / 'out',
                       r'not_a_real_potential\.sw.*not found')
 

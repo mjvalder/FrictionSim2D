@@ -147,13 +147,13 @@ def temp_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def materials_path() -> Path:
     """Returns the path to examples materials directory."""
-    return Path(__file__).resolve().parents[1] / 'examples' / 'materials'
+    return Path(__file__).resolve().parents[1] / 'frictionsim2d' / 'data' / 'materials'
 
 
 @pytest.fixture
 def potentials_path() -> Path:
     """Returns the path to examples potentials directory."""
-    return Path(__file__).resolve().parents[1] / 'examples' / 'potentials'
+    return Path(__file__).resolve().parents[1] / 'frictionsim2d' / 'data' / 'potentials'
 
 
 # =========================================================================

@@ -123,7 +123,7 @@ def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):
     from frictionsim2d.builders.construction.components import build_flake_component
     from frictionsim2d.lattice.apply import rotate_flake_in_plane
 
-    MAT, POT = "examples/materials", "examples/potentials/sw"
+    MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
     flake_cfg = FlakeConfig(shape="hexagon", edge_length=14.0, corner_radius=3.0,
                             mat="h-MoS2", cif_path=f"{MAT}/h-MoS2.cif",
                             pot_path=f"{POT}/MoS2_wen.sw", pot_type="sw")

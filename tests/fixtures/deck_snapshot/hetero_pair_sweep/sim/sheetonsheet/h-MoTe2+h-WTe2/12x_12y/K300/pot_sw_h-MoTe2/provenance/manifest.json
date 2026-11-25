@@ -4,7 +4,7 @@
   "files": [
     {
       "filename": "h-MoTe2.cif",
-      "original_path": "<REPO>/examples/materials/h-MoTe2.cif",
+      "original_path": "<REPO>/frictionsim2d/data/materials/h-MoTe2.cif",
       "stored_path": "provenance/cif/h-MoTe2.cif",
       "category": "cif",
       "components": [
@@ -15,7 +15,7 @@
     },
     {
       "filename": "h-MoTe2.sw",
-      "original_path": "<REPO>/examples/potentials/sw/sw_lammps/h-MoTe2.sw",
+      "original_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/h-MoTe2.sw",
       "stored_path": "provenance/potentials/h-MoTe2.sw",
       "category": "potential",
       "components": [
@@ -26,7 +26,7 @@
     },
     {
       "filename": "h-WTe2.cif",
-      "original_path": "<REPO>/examples/materials/h-WTe2.cif",
+      "original_path": "<REPO>/frictionsim2d/data/materials/h-WTe2.cif",
       "stored_path": "provenance/cif/h-WTe2.cif",
       "category": "cif",
       "components": [
@@ -37,7 +37,7 @@
     },
     {
       "filename": "h-WTe2.sw",
-      "original_path": "<REPO>/examples/potentials/sw/sw_lammps/h-WTe2.sw",
+      "original_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/h-WTe2.sw",
       "stored_path": "provenance/potentials/h-WTe2.sw",
       "category": "potential",
       "components": [

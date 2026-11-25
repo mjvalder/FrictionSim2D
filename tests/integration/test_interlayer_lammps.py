@@ -35,8 +35,8 @@ from tests.helpers.examples import REPO_ROOT
 
 pytestmark = pytest.mark.integration
 
-MAT = REPO_ROOT / "examples" / "materials"
-SW = REPO_ROOT / "examples" / "potentials" / "sw"
+MAT = REPO_ROOT / "frictionsim2d" / "data" / "materials"
+SW = REPO_ROOT / "frictionsim2d" / "data" / "potentials" / "sw"
 G_MOS2_MEV = 175.68
 
 
@@ -275,7 +275,7 @@ def test_pes_sheet_ilp_z_relax_runs(tmp_path, monkeypatch):
     from frictionsim2d.builders.sheetonsheet.pes_sheet import PESSheetSimulation
     from frictionsim2d.core.config import SheetOnSheetSimulationConfig, read_config
     monkeypatch.chdir(REPO_ROOT)
-    raw = read_config(REPO_ROOT / "examples" / "pes_sheet_config.ini")
+    raw = read_config(REPO_ROOT / "tests" / "fixtures" / "examples" / "pes_sheet_config.ini")
     raw["general"]["interlayer_style"] = "ilp"
     raw["2D"].update({"x": 20, "y": 20, "lat_c": 6.15,
                       "pot_path": str(SW / "MoS2_sevik.sw")})
@@ -311,7 +311,7 @@ def test_pes_sheet_ilp_z_relax_runs(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 def test_example_interlayer_builds(build_example):
-    """examples/sheet_config_interlayer.ini: three runs, one per style, all on
+    """tests/fixtures/examples/sheet_config_interlayer.ini: three runs, one per style, all on
     the reaction-force branch (comparison mode), each with its own term."""
     result = build_example("sheet_config_interlayer.ini", "sheetonsheet")
     assert result.ok, result.render()

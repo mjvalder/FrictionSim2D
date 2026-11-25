@@ -4,7 +4,7 @@
   "files": [
     {
       "filename": "h-MoS2.cif",
-      "original_path": "<REPO>/examples/materials/h-MoS2.cif",
+      "original_path": "<REPO>/frictionsim2d/data/materials/h-MoS2.cif",
       "stored_path": "provenance/cif/h-MoS2.cif",
       "category": "cif",
       "components": [

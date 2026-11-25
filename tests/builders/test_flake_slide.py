@@ -22,7 +22,7 @@ from tests.helpers.hetero import (
     _staged_potential_paths,
 )
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
+MAT, POT = "frictionsim2d/data/materials", "frictionsim2d/data/potentials/sw"
 LMP = shutil.which("lmp_serial")
 
 

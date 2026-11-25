@@ -16,7 +16,7 @@ from frictionsim2d.run.artifacts import generate_package
 from frictionsim2d.run.hpc_dispatch import generate_hpc_scripts_for_root, hpc_generation_blocker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+EXAMPLES = REPO_ROOT / 'tests' / 'fixtures' / 'examples'
 
 
 def _settings_with_modules() -> GlobalSettings:

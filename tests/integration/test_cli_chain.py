@@ -22,7 +22,7 @@ import yaml
 from click.testing import CliRunner
 
 from frictionsim2d import cli as cli_module
-from tests.helpers.examples import EXAMPLES, REPO_ROOT
+from tests.helpers.examples import FROZEN_EXAMPLES as EXAMPLES, REPO_ROOT
 
 pytestmark = pytest.mark.integration
 
