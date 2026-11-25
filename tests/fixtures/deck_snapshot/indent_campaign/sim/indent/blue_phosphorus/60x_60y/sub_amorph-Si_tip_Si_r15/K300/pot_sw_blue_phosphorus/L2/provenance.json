@@ -7,7 +7,7 @@
     {
       "name": "blue_phosphorus",
       "role": "sheet",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/blue_phosphorus.sw",
+      "pot_path": "potentials/sw/sw_lammps/blue_phosphorus.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "6971456aff7928d92b0aa2809317300e5b77e7bdf6feb930591d1ec192c6907f"
@@ -15,7 +15,7 @@
     {
       "name": "Si",
       "role": "tip",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
+      "pot_path": "potentials/sw/Si.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -23,7 +23,7 @@
     {
       "name": "Si",
       "role": "substrate",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
+      "pot_path": "potentials/sw/Si.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -39,7 +39,7 @@
   "damp_ev": null,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "abecafd0c23bc04b5b65d3270e2419298c3cf02964d2decfc25d7495f741f450",
+  "config_hash": "6eec65fd96d924137e57bbfb30f95c69f0579d152cce2aa7434914bd7e6cd1e1",
   "lammps_version": null,
   "layer_type_map": {
     "layer_1": [

@@ -7,7 +7,7 @@
     {
       "name": "b-SiGe",
       "role": "sheet",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/tersoff/1989_SiGe.tersoff",
+      "pot_path": "potentials/tersoff/1989_SiGe.tersoff",
       "pot_type": "tersoff",
       "pot_resolution_route": null,
       "pot_file_sha256": "c5184cb80d5ea36c75818a8cdc42ffeda8aa86762192559ebda8c3a9224bd76a"
@@ -15,7 +15,7 @@
     {
       "name": "Si",
       "role": "tip",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
+      "pot_path": "potentials/sw/Si.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -31,7 +31,7 @@
   "damp_ev": 0.0,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "a446880fe5e75011f1c5334fa7c0ab33716b1ebd04f29dcf70fd35a0b09a69bb",
+  "config_hash": "2370b167c55dc0c5b1448c0e49fe86935498ecbc12137e1e0bafeb05f69e6fb1",
   "lammps_version": null,
   "layer_type_map": {
     "layer_1": [

@@ -171,6 +171,9 @@ def fetch_materials(progress: Callable[[str], None], *,
             problem = _verified(dest, name, entry)
             if problem:
                 raise FetchError(problem)
+        # hf_hub_download(local_dir=...) keeps its download metadata in
+        # <local_dir>/.cache; it is not part of the pack.
+        shutil.rmtree(staging / '.cache', ignore_errors=True)
         _swap_in(staging, target)
     except FetchError:
         shutil.rmtree(staging, ignore_errors=True)

@@ -7,7 +7,7 @@
     {
       "name": "h-MoS2",
       "role": "sheet",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/MoS2_wen.sw",
+      "pot_path": "potentials/sw/MoS2_wen.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d12d20b09969e7624c7dd6d0844b2e59802282fb3eac876ef18d4dc7e47883"
@@ -15,7 +15,7 @@
     {
       "name": "Si",
       "role": "tip",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
+      "pot_path": "potentials/sw/Si.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -31,7 +31,7 @@
   "damp_ev": 0.0,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "5d5d666aa00401430e7bfa05504c594e47e8a0f8108722d2f79883b0a83246aa",
+  "config_hash": "1f3973504d376634e532121d8c498d9c9c85a7cc5347ba7afc7d9d112775b457",
   "lammps_version": null,
   "layer_type_map": {
     "layer_1": [

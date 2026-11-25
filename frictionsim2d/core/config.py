@@ -10,10 +10,11 @@ import warnings
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any, ClassVar, Literal, Mapping, Sequence, cast
 import yaml
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (BaseModel, Field, ValidationInfo, field_serializer, field_validator,
+                      model_validator)
 
 from .mlip import check_bound_stack, get_mlip, is_mlip
-from .utils.paths import get_material_path, get_potential_path
+from .utils.paths import get_material_path, get_potential_path, library_name
 from .utils.tokens import is_float
 
 logger = logging.getLogger(__name__)
@@ -654,6 +655,16 @@ class ComponentConfig(BaseModel):
         resolver = get_potential_path if info.field_name == 'pot_path' else get_material_path
         resolved = resolver(v) if base_dir is None else resolver(v, base_dir)
         return str(resolved) if resolved.exists() else v
+
+    @field_serializer('pot_path', 'cif_path', when_used='json')
+    def portable_path(self, v: Optional[str]) -> Optional[str]:
+        """A library file serialises as its library name (``materials/...``,
+        ``potentials/...``), so ``config.json`` and ``config_hash`` do not carry
+        the install location and a stored config rebuilds on any machine. The
+        in-memory value stays the resolved path the builders open."""
+        if not v:
+            return v
+        return library_name(v) or v
 
     @model_validator(mode='after')
     def validate_mlip_model_extension(self) -> 'ComponentConfig':

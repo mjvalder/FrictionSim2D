@@ -7,7 +7,7 @@
     {
       "name": "blue_phosphorus",
       "role": "sheet",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/blue_phosphorus.sw",
+      "pot_path": "potentials/sw/sw_lammps/blue_phosphorus.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "6971456aff7928d92b0aa2809317300e5b77e7bdf6feb930591d1ec192c6907f"
@@ -15,7 +15,7 @@
     {
       "name": "Si",
       "role": "tip",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/Si.sw",
+      "pot_path": "potentials/sw/Si.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -31,7 +31,7 @@
   "damp_ev": 0.0,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "be0304af1f48ca3ae17d71712e333579c0a1b8b54b4013ed18886ff5a8abee27",
+  "config_hash": "6bb5038a59393d28b265db925816bb8894bbc46a04bdf26b5a6646d6bca89349",
   "lammps_version": null,
   "layer_type_map": {
     "layer_1": [

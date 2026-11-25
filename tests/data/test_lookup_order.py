@@ -92,13 +92,72 @@ def test_a_file_only_in_the_legacy_dir_is_found_last_with_warning(tmp_path, monk
     assert 'Deprecated path' in caplog.text
 
 
-def test_a_legacy_dir_hit_as_given_still_loses_to_the_library(tmp_path, monkeypatch):
-    """examples/materials/h-MoS2.cif left in a checkout: the packaged file wins."""
+def test_a_legacy_copy_identical_to_the_packaged_file_yields_the_library_file(
+        tmp_path, monkeypatch):
+    """examples/materials/h-MoS2.cif left in a checkout, same bytes: the packaged file."""
     legacy = tmp_path / 'examples'
     monkeypatch.setattr(paths, 'LEGACY_EXAMPLES_DIR', legacy)
-    _put(legacy / 'materials', 'h-MoS2.cif', 'stale')
-    assert find_existing('examples/materials/h-MoS2.cif', None) == \
-        packaged_dir('materials') / 'h-MoS2.cif'
+    packaged = packaged_dir('materials') / 'h-MoS2.cif'
+    _put(legacy / 'materials', 'h-MoS2.cif', packaged.read_text(encoding='utf-8'))
+    assert find_existing('examples/materials/h-MoS2.cif', None) == packaged
+
+
+def test_a_users_own_file_in_the_legacy_dir_wins_with_warning(tmp_path, monkeypatch, caplog):
+    """Different bytes under a packaged name are the user's own file: never replaced."""
+    legacy = tmp_path / 'examples'
+    monkeypatch.setattr(paths, 'LEGACY_EXAMPLES_DIR', legacy)
+    own = _put(legacy / 'materials', 'h-MoS2.cif', 'my edited cell')
+    with caplog.at_level(logging.WARNING, logger=paths.__name__):
+        found = find_existing('examples/materials/h-MoS2.cif', None)
+    assert found is not None and found.resolve() == own.resolve()
+    assert 'Deprecated path' in caplog.text
+
+
+def _fake_install(root: Path) -> Path:
+    """A package directory at ``root`` holding the two library files used below."""
+    package = root / 'frictionsim2d'
+    for rel in ('materials/Si.cif', 'potentials/sw/Si.sw'):
+        src = packaged_dir(rel.split('/')[0]) / rel.split('/', 1)[1]
+        dest = package / 'data' / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(src.read_bytes())
+    return package
+
+
+def test_a_config_dumped_on_one_install_rebuilds_on_another(tmp_path, monkeypatch):
+    """config.json names library files portably, so a stored config re-resolves
+    with the package somewhere else, and config_hash does not move."""
+    from frictionsim2d.core.config import ComponentConfig
+    from frictionsim2d.data.provenance import config_hash
+
+    machine_a = _fake_install(tmp_path / 'a' / 'site-packages')
+    monkeypatch.setattr(paths, '_PACKAGE_DIR', machine_a)
+    built = ComponentConfig(mat='Si', pot_type='sw', pot_path='potentials/sw/Si.sw',
+                            cif_path='materials/Si.cif')
+    assert built.cif_path == str(machine_a / 'data' / 'materials' / 'Si.cif')
+    stored = built.model_dump(mode='json')
+    json_on_a = built.model_dump_json()
+    assert stored['cif_path'] == 'materials/Si.cif'
+    assert stored['pot_path'] == 'potentials/sw/Si.sw'
+
+    machine_b = _fake_install(tmp_path / 'b' / 'env' / 'lib')
+    monkeypatch.setattr(paths, '_PACKAGE_DIR', machine_b)
+    rebuilt = ComponentConfig.model_validate(stored)
+    assert rebuilt.pot_path == str(machine_b / 'data' / 'potentials' / 'sw' / 'Si.sw')
+    assert config_hash(rebuilt.model_dump(mode='json')) == config_hash(stored)
+    assert rebuilt.model_dump_json() == json_on_a
+
+
+def test_an_absolute_path_from_another_install_still_resolves(tmp_path, monkeypatch):
+    """A config.json written before the portable spelling holds an absolute
+    library path; once that install is gone it maps onto this one's library."""
+    here = _fake_install(tmp_path / 'here')
+    monkeypatch.setattr(paths, '_PACKAGE_DIR', here)
+    gone = '/old/env/lib/python3.11/site-packages/frictionsim2d/data/materials/Si.cif'
+    assert get_material_path(gone) == here / 'data' / 'materials' / 'Si.cif'
+    assert paths.library_name(here / 'data' / 'potentials' / 'sw' / 'Si.sw') == \
+        'potentials/sw/Si.sw'
+    assert paths.library_name(tmp_path / 'elsewhere.cif') is None
 
 
 def test_the_pack_comes_after_package_data_and_before_the_user_library(tmp_path):

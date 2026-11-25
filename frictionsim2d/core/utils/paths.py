@@ -19,6 +19,7 @@ A library name is ``materials/<file>`` / ``potentials/<dir>/<file>``, or the bar
 tail. The old spelling ``examples/materials/...`` still resolves, through the
 same roots, with a deprecation warning.
 """
+import hashlib
 import logging
 import os
 from pathlib import Path, PurePosixPath
@@ -123,26 +124,60 @@ def _within(path: Path, root: Path) -> Optional[PurePosixPath]:
     return PurePosixPath(rel.as_posix())
 
 
+def _installed_tail(path: Path) -> Optional[Tuple[str, PurePosixPath]]:
+    """``(kind, tail)`` when ``path`` spells ``.../frictionsim2d/data/<kind>/<tail>``.
+
+    A config written on another machine, or before an environment rebuild,
+    holds the packaged library's absolute path there; the same file is in this
+    install's library.
+    """
+    parts = PurePosixPath(path.as_posix()).parts
+    for i in range(len(parts) - 3):
+        if (parts[i] == 'frictionsim2d' and parts[i + 1] == 'data'
+                and parts[i + 2] in LIBRARY_KINDS):
+            return parts[i + 2], PurePosixPath(*parts[i + 3:])
+    return None
+
+
 def _library_name(name: str) -> Tuple[Tuple[str, ...], PurePosixPath, bool]:
     """``(kinds, tail, legacy_spelling)``: where in a library root ``name`` points.
 
     ``examples/materials/x.cif`` (relative, or absolute inside the legacy
     folder) is the legacy spelling; ``materials/x.cif`` names its kind; any
-    other relative name is tried under both kinds. An absolute name outside the
-    legacy folder has no library form (``kinds`` is empty).
+    other relative name is tried under both kinds. An absolute name that spells
+    a ``frictionsim2d/data/<kind>/`` path maps onto that kind (another install's
+    library); any other absolute name has no library form (``kinds`` is empty).
     """
     path = Path(name)
     if path.is_absolute():
         rel = _within(path, LEGACY_EXAMPLES_DIR)
-        if rel is None or not rel.parts or rel.parts[0] not in LIBRARY_KINDS:
-            return (), PurePosixPath(), False
-        return (rel.parts[0],), PurePosixPath(*rel.parts[1:]), True
+        if rel is not None and rel.parts and rel.parts[0] in LIBRARY_KINDS:
+            return (rel.parts[0],), PurePosixPath(*rel.parts[1:]), True
+        installed = _installed_tail(path)
+        if installed is not None:
+            return (installed[0],), installed[1], False
+        return (), PurePosixPath(), False
     parts = PurePosixPath(path.as_posix()).parts
     if len(parts) >= 2 and parts[0] == 'examples' and parts[1] in LIBRARY_KINDS:
         return (parts[1],), PurePosixPath(*parts[2:]), True
     if parts and parts[0] in LIBRARY_KINDS:
         return (parts[0],), PurePosixPath(*parts[1:]), False
     return LIBRARY_KINDS, PurePosixPath(*parts), False
+
+
+def library_name(path: Union[str, Path]) -> Optional[str]:
+    """``materials/<tail>`` / ``potentials/<tail>`` for a path inside any library
+    root (packaged, pack, user, legacy), else None.
+
+    The portable spelling of a library file: it resolves to the same file
+    (:func:`find_in_library`) on any install, wherever the package lives.
+    """
+    for kind in LIBRARY_KINDS:
+        for _, root in library_roots(kind):
+            rel = _within(Path(path), root)
+            if rel is not None and rel.parts:
+                return f'{kind}/{rel.as_posix()}'
+    return None
 
 
 def _warn_legacy(name: str, found: Path) -> None:
@@ -178,12 +213,28 @@ def find_in_library(name: str) -> Optional[Path]:
     return None
 
 
+def _same_bytes(a: Path, b: Path) -> bool:
+    if not (a.is_file() and b.is_file()) or a.stat().st_size != b.stat().st_size:
+        return a.is_dir() and b.is_dir()
+    return _sha256(a) == _sha256(b)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[Path]:
     """First existing candidate for ``name``, or None.
 
     The name as given and next to ``base_dir`` (:func:`search_paths`) win, so a
-    user's own file is never shadowed by a library one -- except a hit inside
-    the legacy ``examples/`` folder, which only counts after every library root.
+    user's own file is never shadowed by a library one. A hit inside the legacy
+    ``examples/`` folder is the one exception: when the library holds the same
+    bytes under that name the library copy is returned; a file that differs is
+    the user's own and wins, with the deprecation warning.
     """
     legacy_hit = None
     for candidate in search_paths(name, base_dir):
@@ -193,7 +244,7 @@ def find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[P
                 continue
             return candidate
     found = find_in_library(name)
-    if found is not None:
+    if found is not None and (legacy_hit is None or _same_bytes(found, legacy_hit)):
         return found
     if legacy_hit is not None:
         _warn_legacy(name, legacy_hit)

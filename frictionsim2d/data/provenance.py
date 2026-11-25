@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel
 
+from ..core.utils.paths import library_name
+
 logger = logging.getLogger(__name__)
 
 PROVENANCE_SCHEMA_VERSION = '2.2.0'
@@ -177,14 +179,15 @@ def material_provenance(component: Any, role: str) -> MaterialProvenance:
 
     ``component`` is any ``ComponentConfig``-shaped object with at least a
     ``mat`` attribute; one with no ``pot_path`` records every ``pot_*`` field
-    as ``None``.
+    as ``None``. A library potential is recorded by its library name
+    (``potentials/...``), as ``config.json`` records it.
     """
     pot = getattr(component, 'pot_path', None)
     pot_path = Path(str(pot)) if pot else None
     return MaterialProvenance(
         name=str(getattr(component, 'mat', '') or ''),
         role=role,
-        pot_path=str(pot) if pot else None,
+        pot_path=(library_name(str(pot)) or str(pot)) if pot else None,
         pot_type=getattr(component, 'pot_type', None),
         pot_resolution_route=getattr(component, 'pot_resolution_route', None),
         pot_file_sha256=(sha256_file(pot_path)

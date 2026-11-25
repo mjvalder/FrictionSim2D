@@ -22,8 +22,8 @@
   "sheet": {
     "mat": "h-MoS2",
     "pot_type": "sw",
-    "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/MoS2_wen.sw",
-    "cif_path": "<REPO>/frictionsim2d/data/materials/h-MoS2.cif",
+    "pot_path": "potentials/sw/MoS2_wen.sw",
+    "cif_path": "materials/h-MoS2.cif",
     "x": 24.0,
     "y": 24.0,
     "layers": [
@@ -41,8 +41,8 @@
     {
       "mat": "h-MoS2",
       "pot_type": "sw",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/MoS2_wen.sw",
-      "cif_path": "<REPO>/frictionsim2d/data/materials/h-MoS2.cif",
+      "pot_path": "potentials/sw/MoS2_wen.sw",
+      "cif_path": "materials/h-MoS2.cif",
       "x": 24.0,
       "y": 24.0,
       "layers": [
@@ -59,8 +59,8 @@
     {
       "mat": "h-WS2",
       "pot_type": "sw",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/sw_lammps/h-WS2.sw",
-      "cif_path": "<REPO>/frictionsim2d/data/materials/h-WS2.cif",
+      "pot_path": "potentials/sw/sw_lammps/h-WS2.sw",
+      "cif_path": "materials/h-WS2.cif",
       "x": 24.0,
       "y": 24.0,
       "layers": [

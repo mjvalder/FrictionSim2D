@@ -7,7 +7,7 @@
     {
       "name": "h-MoS2",
       "role": "sheet",
-      "pot_path": "<REPO>/frictionsim2d/data/potentials/sw/MoS2_sevik.sw",
+      "pot_path": "potentials/sw/MoS2_sevik.sw",
       "pot_type": "sw",
       "pot_resolution_route": null,
       "pot_file_sha256": "b6e5058c0419272937feaf546fe9b80d0e97181948d455f58cea997fc8186658"
@@ -23,7 +23,7 @@
   "damp_ev": null,
   "git_commit": "<GITHASH>",
   "git_dirty": <GITDIRTY>,
-  "config_hash": "8af50a9d8536fddae55d3ca971f601c4fae72e7c23218efe0fb7a3c0cc078fad",
+  "config_hash": "6ee908ed5c02164a982b9ca1612149ed8d859e5424e947be930d76b3bacc4e06",
   "lammps_version": null,
   "layer_type_map": {
     "layer_1": [
