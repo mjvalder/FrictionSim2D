@@ -44,6 +44,10 @@ def _abs_paths(text: str) -> str:
 
 def normalise_deck(text: str) -> str:
     """Replace seeds, uuids, timestamps, commit hashes and path roots (tails stay)."""
+    # The repo root goes first: a checkout path can itself contain a uuid or a
+    # timestamp (a session scratch dir), which the patterns below would mangle
+    # before <REPO> could match.
+    text = text.replace(_REPO, "<REPO>")
     for pat in _SEED_PATTERNS:
         text = pat.sub(r"\g<1><SEED>", text)
     text = _TIMESTAMP.sub("<TIMESTAMP>", text)
