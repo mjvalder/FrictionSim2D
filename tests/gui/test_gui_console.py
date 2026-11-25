@@ -7,9 +7,12 @@ import pytest
 from frictionsim2d.gui import quiet_console
 
 
+CHATTY = ('httpx', 'httpcore', 'openai', 'google_genai', 'pydantic_ai')
+
+
 @pytest.fixture(name='restore_logging')
 def _restore_logging():
-    names = ('', 'httpx', 'httpcore')
+    names = ('', *CHATTY)
     levels = {name: logging.getLogger(name).level for name in names}
     with warnings.catch_warnings():
         yield
@@ -20,8 +23,11 @@ def _restore_logging():
 def test_quiet_silences_http_logs_banner_and_ovito_warning(restore_logging, monkeypatch):
     monkeypatch.delenv('PYDANTIC_AI_NO_BANNER', raising=False)
     logging.getLogger().setLevel(logging.INFO)
+    for name in CHATTY:
+        logging.getLogger(name).setLevel(logging.INFO)
     quiet_console()
-    assert not logging.getLogger('httpx').isEnabledFor(logging.INFO)
+    for name in CHATTY:
+        assert not logging.getLogger(name).isEnabledFor(logging.INFO), name
     assert not logging.getLogger().isEnabledFor(logging.INFO)
     assert logging.getLogger().isEnabledFor(logging.WARNING)
     assert __import__('os').environ['PYDANTIC_AI_NO_BANNER'] == '1'

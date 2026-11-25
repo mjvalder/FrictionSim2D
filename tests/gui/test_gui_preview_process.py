@@ -21,7 +21,7 @@ pytest.importorskip('PySide6')
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
+from PySide6.QtCore import QEventLoop, QProcess, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from frictionsim2d.gui.controllers.preview import PreviewController, PreviewRequest  # noqa: E402
@@ -108,16 +108,39 @@ class TestPartialBuildWarnings:
         system = SimpleNamespace(warnings=['skipped x'])
         monkeypatch.setattr(preview_module, 'parse_assembly', lambda *a: object())
         monkeypatch.setattr(preview_module, 'assemble', lambda *a: system)
-        result_file = tmp_path / 'result.json'
+
+        controller = PreviewController(Workspace.open(tmp_path / 'ws'))
+        request = PreviewRequest(
+            config={'2D': {'mat': 'h_MoS2', 'x': 60, 'y': 60}}, model='indent')
+        result_file = controller.workspace.preview_path(request.key()) / 'preview.json'
+        result_file.parent.mkdir(parents=True)
         result_file.write_text(json.dumps({
             'ok': True, 'init_script': 'in.x', 'simulation_root': str(tmp_path),
             'settings_file': None, 'warnings': ['afm/b: build failed'],
         }), encoding='utf-8')
 
-        controller = PreviewController(Workspace.open(tmp_path / 'ws'))
         delivered = []
         controller.finished.connect(delivered.append)
-        controller._deliver(result_file)  # pylint: disable=protected-access
+        controller.start(request)
 
         assert delivered == [system]
         assert system.warnings == ['skipped x', 'afm/b: build failed']
+
+
+class TestErrorsThatStillFinish:
+    """Only a failed start skips ``finished``; every other error is followed by it."""
+
+    def test_a_crash_does_not_emit_failed_on_its_own(self, tmp_path):
+        QApplication.instance() or QApplication([])
+        controller = PreviewController(Workspace.open(tmp_path / 'ws'))
+        controller._process = QProcess()  # pylint: disable=protected-access
+        failures = []
+        controller.failed.connect(failures.append)
+
+        # Qt emits errorOccurred(Crashed) and then finished; _on_finished
+        # reports the failure, so the error slot must stay silent and keep
+        # the process for it.
+        controller._on_error(QProcess.Crashed)  # pylint: disable=protected-access
+
+        assert failures == []
+        assert controller.running

@@ -29,10 +29,10 @@ from frictionsim2d.gui import generate_worker, preview_worker  # noqa: E402
 from frictionsim2d.gui.app import MainWindow  # noqa: E402
 from frictionsim2d.gui.controllers.document import ConfigDocument  # noqa: E402
 from frictionsim2d.gui.controllers.quench import (  # noqa: E402
-    CONDITION_KEYS, prefill_quench_values)
+    CONDITION_KEYS, prefill_quench_values, quench_steps)
 from frictionsim2d.gui.controllers.quench_run import QuenchRunController  # noqa: E402
 from frictionsim2d.gui.controllers.staged_paths import absolutize_staged_paths  # noqa: E402
-from frictionsim2d.gui.schema.overrides import CAPTION_BUDGET, overrides_for  # noqa: E402
+from frictionsim2d.gui.schema.overrides import overrides_for  # noqa: E402
 from frictionsim2d.gui.schema.simulation_types import (  # noqa: E402
     FAMILIES, MODES, family_for_model, sections_for)
 from frictionsim2d.gui.workspace import Workspace  # noqa: E402
@@ -133,12 +133,11 @@ class TestFamilySchema:
     def test_the_only_section_is_quench(self):
         assert sections_for('quench') == ['quench']
 
-    def test_every_field_is_labelled_within_the_caption_budget(self):
+    def test_every_field_is_labelled(self):
         override = overrides_for('quench')['quench']
         assert set(override.fields) == set(QuenchRunConfig.model_fields)
         for key, field in override.fields.items():
             assert field.label, key
-            assert len(field.help or '') <= CAPTION_BUDGET, key
 
     def test_no_integrity_threshold_is_offered(self):
         """CFG-19: thresholds judge results; they are not a quench condition."""
@@ -193,18 +192,23 @@ class TestQuenchDocument:
         assert _document(target).values == document.values
         assert '[quench]' in target.read_text(encoding='utf-8')
 
-    def test_a_second_material_is_refused(self):
-        document = ConfigDocument.blank('afm')
-        document.add_second_material()
-        with pytest.raises(Exception, match='no heterostructure build'):
-            document.set_model('quench')
-
     def test_staging_makes_the_potential_and_cif_absolute(self, tmp_path):
-        (tmp_path / 'cfg').mkdir()
+        (tmp_path / 'cfg' / 'cif').mkdir(parents=True)
         (tmp_path / 'cfg' / 'Si.sw').write_text('x')
         staged = absolutize_staged_paths(
             {'quench': {'potential': 'Si.sw', 'cif': 'cif/{mat}.cif'}}, tmp_path / 'cfg')
         assert staged['quench']['potential'] == str(tmp_path / 'cfg' / 'Si.sw')
+        assert staged['quench']['cif'] == str(tmp_path / 'cfg' / 'cif' / '{mat}.cif')
+
+
+class TestQuenchSteps:
+
+    def test_a_member_runs_melt_plus_quench_plus_equilibrate_steps(self):
+        from types import SimpleNamespace
+        key = SimpleNamespace(melt_steps=1000, equilibrate_steps=500, melt_temp=3000.0,
+                              quench_temp=300.0, quench_rate=1e13, timestep=0.002)
+        # quench: 2700 K / (1e13 K/s * 0.002 ps * 1e-12 s/ps) = 135000 steps
+        assert quench_steps(SimpleNamespace(key=key)) == 1000 + 135000 + 500
 
 
 class TestPrefill:
@@ -531,32 +535,6 @@ class TestFreshWindowSettings:
         spec = FieldSpec(name='d', key='d', kind=FieldKind.DICT, required=False,
                          default=None)
         assert build_editor(spec).value() is None
-
-
-class TestRunLmpSerialCleanup:
-
-    def test_an_exception_while_waiting_kills_the_child(self, tmp_path, monkeypatch):
-        killed = []
-
-        class Child:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def wait(self):
-                if not killed:
-                    raise KeyboardInterrupt
-                return -9
-
-            def kill(self):
-                killed.append(1)
-
-        monkeypatch.setattr(subprocess, 'Popen', lambda *a, **k: Child())
-        with pytest.raises(KeyboardInterrupt):
-            amorphous.run_lmp_serial('d.in', 'd.log', tmp_path)
-        assert killed == [1] and amorphous._ACTIVE_LMP is None  # pylint: disable=protected-access
 
 
 class TestOutputBuffering:

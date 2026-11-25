@@ -351,49 +351,58 @@ class TestRequiredStars:
         form.set_settings(_settings_with_drive('virtual_atom'))
         assert form.editors['driving_spring'].value() not in (None, '', [])
 
-    def test_force_is_required_and_blocks(self):
-        from frictionsim2d.gui.schema.overrides import overrides_for
-
-        force = overrides_for('afm')['general'].fields['force']
-        assert force.required is True
-        assert force.required_blocks is True
-
-    def test_pressure_is_required_and_blocks(self):
-        """The `[0.0]` fallback only exists in the two outer_loop branches
-        (sheetonsheet.py:341,359); the default single-script path passes
-        `general.pressure` straight through unguarded, so an absent pressure
-        renders `variable pressure equal None` in slide.lmp -- the same
-        unparseable-LAMMPS failure class as an empty force list."""
-        from frictionsim2d.gui.schema.overrides import overrides_for
-
-        pressure = overrides_for('sheetonsheet')['general'].fields['pressure']
-        assert pressure.required is True
-        assert pressure.required_blocks is True
-
-    def test_missing_required_reports_force_as_blocking(self, qt_app, monkeypatch):
+    @pytest.mark.parametrize('model,key', [('afm', 'force'), ('sheetonsheet', 'pressure')])
+    def test_missing_required_blocks(self, qt_app, monkeypatch, model, key):
+        """`force`: an empty list is unparseable LAMMPS. `pressure`: the `[0.0]`
+        fallback only exists in the two outer_loop branches; the default
+        single-script path passes `general.pressure` straight through, so an
+        absent pressure renders `variable pressure equal None` in slide.lmp."""
         from frictionsim2d.gui.controllers.document import ConfigDocument
         from frictionsim2d.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
-        form = ConfigForm(ConfigDocument.blank('afm'))
-        entries = {(sec, key): blocks for sec, key, _label, blocks
-                  in form.missing_required()}
-        assert entries[('general', 'force')] is True
-        form.deleteLater()
-
-    def test_missing_required_reports_pressure_as_blocking(self, qt_app,
-                                                            monkeypatch):
-        from frictionsim2d.gui.controllers.document import ConfigDocument
-        from frictionsim2d.gui.widgets.form import ConfigForm
-
-        monkeypatch.chdir(REPO_ROOT)
-        doc = ConfigDocument.blank('sheetonsheet')
-        doc.set('general', 'pressure', None)
+        doc = ConfigDocument.blank(model)
+        doc.set('general', key, None)
         form = ConfigForm(doc)
-        entries = {(sec, key): blocks for sec, key, _label, blocks
-                  in form.missing_required()}
-        assert entries[('general', 'pressure')] is True
+        entries = {(sec, k): blocks for sec, k, _label, blocks in form.missing_required()}
+        assert entries[('general', key)] is True
         form.deleteLater()
+
+    def test_a_required_but_non_blocking_field_is_reported_as_such(self, qt_app, monkeypatch):
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets.form import ConfigForm
+
+        import dataclasses
+
+        from frictionsim2d.gui.schema.overrides import section_override
+
+        monkeypatch.chdir(REPO_ROOT)
+        # No shipped field warns instead of blocking, so make one that does.
+        table = section_override('general').fields
+        monkeypatch.setitem(
+            table, 'temp', dataclasses.replace(table['temp'], required_blocks=False))
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.set('general', 'temp', None)
+        form = ConfigForm(doc)
+        entries = {(sec, k): blocks for sec, k, _label, blocks in form.missing_required()}
+        assert entries[('general', 'temp')] is False
+        form.deleteLater()
+
+    def test_a_field_behind_a_closed_gate_is_not_reported(self, qt_app, monkeypatch):
+        from frictionsim2d.gui.controllers.document import ConfigDocument
+        from frictionsim2d.gui.widgets import form as form_module
+
+        monkeypatch.chdir(REPO_ROOT)
+        # Pretend every field is starred so the gate is the only thing in play.
+        monkeypatch.setattr(form_module.SectionForm, 'effective_required',
+                            lambda self, key: True)
+        config_form = form_module.ConfigForm(ConfigDocument.blank('afm'))
+        tip = config_form.sections['tip']
+        assert not tip.gate_is_open('tip_x')
+        reported = {(sec, k) for sec, k, _l, _b in config_form.missing_required()}
+        assert ('tip', 'tip_x') not in reported
+        assert ('tip', 'r') in reported
+        config_form.deleteLater()
 
 
 class TestStarredFieldPrefill:

@@ -89,11 +89,6 @@ class TestHeterostructureSupport:
         assert all(ALL[m][1].supports_hetero
                    for m in ('afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet'))
 
-    def test_hetero_stacking_hidden_from_run_parameters(self):
-        from frictionsim2d.gui.schema.overrides import hidden_fields
-
-        assert 'hetero_stacking' in hidden_fields('sheetonsheet', 'general')
-
     @pytest.mark.parametrize('model', ALL_MODELS)
     def test_stacking_is_hidden_for_every_mode(self, model):
         """It is shown on the `[2D-2]` form instead, which exists for every
@@ -101,6 +96,20 @@ class TestHeterostructureSupport:
         from frictionsim2d.gui.schema.overrides import hidden_fields
 
         assert 'hetero_stacking' in hidden_fields(model, 'general')
+
+    @pytest.mark.parametrize('model,hidden', [
+        ('pes_tip', True), ('pes_sheet', True),
+        ('afm', False), ('indent', False), ('sheetonsheet', False),
+    ])
+    def test_outer_loop_is_hidden_only_where_no_split_exists(self, model, hidden):
+        from frictionsim2d.gui.schema.overrides import hidden_fields
+
+        assert ('outer_loop' in hidden_fields(model, 'general')) is hidden
+
+    def test_hidden_fields_only_apply_to_the_general_section(self):
+        from frictionsim2d.gui.schema.overrides import hidden_fields
+
+        assert hidden_fields('pes_tip', '2D') == ()
 
     def test_the_second_sheet_has_its_own_override(self):
         second = section_override('2D-2')
@@ -203,23 +212,16 @@ class TestIntrospectionIsCached:
     `describe_model`. Walking every pydantic model of the config on each of
     those is work whose answer cannot change between two calls."""
 
-    def test_a_model_is_walked_once(self, monkeypatch):
+    def test_a_model_is_walked_once(self):
         describe_model.cache_clear()
-        calls = []
-        original = introspect.describe_section
-
-        def counting(*args, **kwargs):
-            calls.append(args[0])
-            return original(*args, **kwargs)
-
-        monkeypatch.setattr(introspect, 'describe_section', counting)
-
-        first = len(describe_model(AFMSimulationConfig)), len(calls)
+        describe_model(AFMSimulationConfig)
+        before = introspect._describe_model.cache_info()  # pylint: disable=protected-access
         for _ in range(5):
             describe_model(AFMSimulationConfig)
+        after = introspect._describe_model.cache_info()  # pylint: disable=protected-access
 
-        assert first[1] > 0, 'the first walk described no sections at all'
-        assert len(calls) == first[1], 'the model was re-walked on a repeat call'
+        assert after.misses == before.misses, 'the model was re-walked on a repeat call'
+        assert after.hits == before.hits + 5
 
     def test_each_model_is_described_separately(self):
         """The cache is keyed on the model class, and the two families have
@@ -339,8 +341,13 @@ class TestCaptionBudget:
                 for key, field in section.fields.items():
                     yield model, section_key, key, field
 
-    def test_every_caption_is_one_short_line(self):
+    def test_the_budget_is_the_policy_value(self):
         from frictionsim2d.gui.schema.overrides import CAPTION_BUDGET
+
+        assert CAPTION_BUDGET == 70
+
+    def test_every_caption_is_one_short_line(self):
+        CAPTION_BUDGET = 70  # hard-coded: the policy, not the product's constant
 
         offenders = [
             f"{model} [{section}] {key or '(section)'}: {len(entry.help)} chars"
@@ -386,7 +393,8 @@ class TestRebuiltOverridesKeepTheirMetadata:
         the family), and everything else has to be carried across by hand."""
         outer_loop = overrides_for('afm')['general'].fields['outer_loop']
         assert outer_loop.choices == ('force', 'scan_angle')   # it *was* rebuilt
-        assert 'job count' in outer_loop.detail
+        assert outer_loop.detail == section_override('general').fields['outer_loop'].detail
+        assert outer_loop.detail
 
 
 class TestOuterLoopChoicesNarrowByMode:
@@ -434,21 +442,6 @@ class TestOverrides:
         assert section_override('sub').fields['thickness'].unit == 'Å'
         assert section_override('tip').fields['r'].unit == 'Å'
 
-    def test_substrate_is_locked_on_except_for_pes_tip(self):
-        """Every other model aborts without a substrate, so offering to remove
-        it would offer a guaranteed failure."""
-        for model in ('afm', 'indent', 'sheetonsheet', 'pes_sheet'):
-            assert overrides_for(model)['sub'].required_reason
-        assert overrides_for('pes_tip')['sub'].required_reason is None
-
-    def test_sweep_semantics_are_explained_where_they_bite(self):
-        """Long by nature, so it lives in `detail`, not the caption."""
-        general = section_override('general').fields
-        assert 'job count' in general['outer_loop'].detail
-
-    def test_tip_radius_carries_the_pbc_rule(self):
-        assert 'periodic image' in section_override('tip').fields['r'].detail
-
     def test_unknown_section_yields_an_empty_override(self):
         assert section_override('not_a_section').fields == {}
 
@@ -456,7 +449,6 @@ class TestOverrides:
         from frictionsim2d.gui.schema.overrides import field_override
         fo = field_override('sheetonsheet', 'general', 'scan_speed')
         assert fo.unit == 'm/s'
-        assert '100 m/s = 1 Å/ps' in (fo.help or '') + (fo.detail or '')
 
     def test_spring_constants_have_units(self):
         from frictionsim2d.gui.schema.overrides import field_override

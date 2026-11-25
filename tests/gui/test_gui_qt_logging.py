@@ -43,6 +43,18 @@ def test_renderer_noise_is_not_printed(filtered, message):
     assert 'line_thick_picking' not in filtered.readouterr().err
 
 
+@pytest.mark.parametrize('pattern', [
+    'OpenGLShaderHelper::bindBuffer',
+    'Failed to bind OpenGL vertex buffer',
+    'line_thick_picking',
+])
+def test_each_pattern_alone_suppresses(filtered, pattern):
+    """A message carrying only one pattern is still collapsed."""
+    qWarning(f'prefix {pattern} suffix')
+    assert pattern not in filtered.readouterr().err
+    assert qt_logging.suppressed_summary() is not None
+
+
 def test_noise_is_counted_rather_than_discarded(filtered):
     for message in NOISE * 3:
         qWarning(message)

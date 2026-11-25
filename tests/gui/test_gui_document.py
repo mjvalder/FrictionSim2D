@@ -293,6 +293,12 @@ class TestModelSwitchingWithASecondMaterial:
         document.set_model('afm', drop_second=True)
         assert not document.has_second_material()
 
+    def test_a_mode_without_a_hetero_build_refuses_the_second_material(self):
+        document = ConfigDocument.blank('afm')
+        document.add_second_material()
+        with pytest.raises(DocumentError, match='no heterostructure build'):
+            document.set_model('quench')
+
 
 class TestConflicts:
 
@@ -601,13 +607,6 @@ class TestPairBuiltInTheGui:
         document.add_second_material()
         document.write_material_names([('h-MoS2', 'h-WS2'), ('h-MoSe2', 'h-WSe2')])
         return document
-
-    def test_adding_the_material_last_still_templates_both_sheets(self, tmp_path):
-        document = self._pair_sweep_reversed(tmp_path)
-        assert document.get('2D', 'mat') == '{mat1}'
-        assert document.get('2D-2', 'mat') == '{mat2}'
-        assert document.get('2D-2', 'cif_path').endswith('{mat2}.cif')
-        assert document.get('2D-2', 'pot_path').endswith('{mat2}.sw')
 
     def test_either_click_order_gives_the_same_document(self, tmp_path):
         (tmp_path / 'a').mkdir()
@@ -955,9 +954,10 @@ class TestSections:
         document.enable_section('flake', False)
         assert not document.has_section('flake')
 
-    def test_substrate_cannot_be_removed_except_for_pes_tip(self):
+    @pytest.mark.parametrize('model', ['afm', 'indent'])
+    def test_substrate_cannot_be_removed_except_for_pes_tip(self, model):
         """Other models abort without one."""
-        document = ConfigDocument.blank('afm')
+        document = ConfigDocument.blank(model)
         assert document.is_section_locked('sub')
         with pytest.raises(DocumentError, match='freestanding'):
             document.enable_section('sub', False)
@@ -1251,6 +1251,7 @@ class TestMaterialListTarget:
                                                               tmp_path):
         monkeypatch.chdir(tmp_path)
         document = ConfigDocument.blank('indent')
+        assert document.material_list_target() is None
         assert document.write_material_names(['h-MoS2']) is None
         assert document.get('2D', 'materials_list') is None
         assert not (tmp_path / 'materials.txt').exists()
@@ -1349,10 +1350,6 @@ def test_material_list_target_predicts_the_write_location(tmp_path):
     assert target == tmp_path / 'configs' / 'materials.txt'
     assert not target.exists()
     assert doc.write_material_names(['h-MoS2']) == target
-
-
-def test_material_list_target_is_none_with_nowhere_to_write():
-    assert ConfigDocument.blank('afm').material_list_target() is None
 
 
 class TestInterlayerValidation:

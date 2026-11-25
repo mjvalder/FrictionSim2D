@@ -299,41 +299,31 @@ class TestPathEditorBrowse:
     `changed` -- see SectionForm._wire_material_sweep) never refreshes the
     listing after a browse pick."""
 
-    def test_a_file_browse_selection_raises_editing_finished(self, qt_app, monkeypatch):
+    @pytest.mark.parametrize('directory', [False, True], ids=['file', 'dir'])
+    def test_a_browse_selection_raises_editing_finished_and_changed(
+            self, qt_app, monkeypatch, directory):
         from PySide6.QtWidgets import QFileDialog
 
         from frictionsim2d.gui.widgets.fields import build_editor
 
         ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
                                     kind=FieldKind.PATH, required=True))
-        monkeypatch.setattr(QFileDialog, 'getOpenFileName',
-                            lambda *a, **k: ('/some/chosen/path.cif', ''))
+        if directory:
+            ed.set_directory_mode(True)
+            monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
+                                lambda *a, **k: '/some/chosen/path')
+        else:
+            monkeypatch.setattr(QFileDialog, 'getOpenFileName',
+                                lambda *a, **k: ('/some/chosen/path', ''))
 
-        fired = []
+        fired, changed = [], []
         ed.edit.editingFinished.connect(lambda: fired.append(1))
+        ed.changed.connect(lambda *a: changed.append(1))
         ed._browse()
 
         assert fired
-        assert ed.edit.text() == '/some/chosen/path.cif'
-
-    def test_a_directory_browse_selection_raises_editing_finished(self, qt_app,
-                                                                   monkeypatch):
-        from PySide6.QtWidgets import QFileDialog
-
-        from frictionsim2d.gui.widgets.fields import build_editor
-
-        ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
-                                    kind=FieldKind.PATH, required=True))
-        ed.set_directory_mode(True)
-        monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
-                            lambda *a, **k: '/some/chosen/dir')
-
-        fired = []
-        ed.edit.editingFinished.connect(lambda: fired.append(1))
-        ed._browse()
-
-        assert fired
-        assert ed.edit.text() == '/some/chosen/dir'
+        assert changed
+        assert ed.edit.text() == '/some/chosen/path'
 
     def test_a_cancelled_browse_does_not_raise_editing_finished(self, qt_app,
                                                                  monkeypatch):
@@ -348,9 +338,12 @@ class TestPathEditorBrowse:
 
         fired = []
         ed.edit.editingFinished.connect(lambda: fired.append(1))
+        changed = []
+        ed.changed.connect(lambda *a: changed.append(1))
         ed._browse()
 
         assert not fired
+        assert not changed
 
 
 class TestSetErrorIdempotence:
@@ -551,6 +544,23 @@ class TestPlainEditorsRoundTrip:
                                     item_kind=kind))
         editor.set_value(value)
         assert editor.value() == value
+
+    @pytest.mark.parametrize('kind,extra,value', [
+        (FieldKind.STR, {}, 'WS2'),
+        (FieldKind.FLOAT, {}, 25.0),
+        (FieldKind.FLOAT, {}, None),          # empty is None, never ''
+        (FieldKind.ENUM, {'choices': ('a', 'c')}, 'a'),
+        (FieldKind.BOOL, {}, True),
+        (FieldKind.SCALAR_OR_LIST, {'item_kind': FieldKind.FLOAT}, 5.0),
+        (FieldKind.SCALAR_OR_LIST, {'item_kind': FieldKind.FLOAT}, [5.0, 10.0, 20.0]),
+    ])
+    def test_editor_round_trip(self, qt_app, kind, extra, value):
+        from frictionsim2d.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(key='k', kind=kind, **extra))
+        editor.set_value(value)
+        assert editor.value() == value
+        assert type(editor.value()) is type(value)  # 5.0 stays a float, [..] a list
 
     def test_scalar_or_list_empty_is_none(self, qt_app):
         from frictionsim2d.gui.widgets.fields import build_editor

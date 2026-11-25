@@ -306,15 +306,6 @@ class TestPlotsPane:
         yield pane
         pane.close()
 
-    def test_the_widgets_are_the_declared_ones(self, pane):
-        assert isinstance(pane.dataset_list, QListWidget)
-        assert isinstance(pane.plot_list, QListWidget)
-        assert isinstance(pane.type_combo, QComboBox)
-        assert isinstance(pane.preset_combo, QComboBox)
-        assert isinstance(pane.preview_label, QLabel)
-        assert isinstance(pane.render_button, QPushButton)
-        assert pane.preview_label.parent() is not None
-
     def test_the_preview_is_a_scrolled_label_not_a_canvas(self, pane):
         """G4: no live matplotlib canvas anywhere in the widget tree."""
         scrolls = pane.findChildren(QScrollArea)
@@ -423,6 +414,9 @@ class TestPlotsPane:
         assert target.is_file()
         assert pane.current_path == target
         assert len(load_plot_document(target).plots) == 2
+        # What the GUI writes is exactly what `postprocess plot` reads.
+        assert load_plot_document(target).model_dump(exclude_unset=True) == \
+            pane.document().model_dump(exclude_unset=True)
         assert 'Saved kept.json' in pane.status_label.text()
 
         pane.add_plot('rank_friction')
@@ -486,14 +480,6 @@ class TestPlotsPane:
 
         assert stub.requests[-1].plot_indices is None
 
-    def test_the_export_button_exists(self, pane):
-        assert isinstance(pane.export_button, QPushButton)
-        assert isinstance(pane.add_dataset_button, QPushButton)
-        assert isinstance(pane.available_list, QListWidget)
-        assert isinstance(pane.open_button, QPushButton)
-        assert isinstance(pane.save_button, QPushButton)
-        assert isinstance(pane.save_as_button, QPushButton)
-
     def test_the_lists_reflect_the_document(self, pane):
         assert pane.dataset_list.count() == 1
         assert pane.dataset_list.item(0).text() == 'ds'
@@ -536,21 +522,6 @@ class TestPlotsPane:
 
         assert pane.document().plots[0].plot_type == 'timeseries'
         assert pane.document().plots[0].filter_size == '100x100y'
-
-    def test_save_and_load_round_trip_the_same_json(self, pane, tmp_path):
-        """G3: the GUI reads and writes exactly what `postprocess plot` reads."""
-        from frictionsim2d.postprocessing.plot_config import load_plot_document
-
-        path = pane.save_document(tmp_path / 'plots.json')
-
-        assert path.is_file()
-        reloaded = load_plot_document(path)
-        assert reloaded.model_dump(exclude_unset=True) == \
-            pane.document().model_dump(exclude_unset=True)
-
-        pane.add_plot('correlation')
-        pane.load_document(path)
-        assert len(pane.document().plots) == 1
 
     def test_render_shows_the_png_and_never_opens_a_modal(self, pane):
         """An unpatched modal in this directory blocks the suite forever."""

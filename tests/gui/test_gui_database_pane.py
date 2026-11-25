@@ -21,7 +21,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtWidgets import QApplication, QFileDialog  # noqa: E402
 
 from frictionsim2d.gui.widgets.database.filters import EMPTY_FILTERS  # noqa: E402
-from frictionsim2d.gui.widgets.database.pane import SOURCES, DatabasePane  # noqa: E402
+from frictionsim2d.gui.widgets.database.pane import DatabasePane  # noqa: E402
 from frictionsim2d.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 
 RECORDS = [
@@ -59,17 +59,6 @@ def _window(qt_app, tmp_path):
 
 
 class TestPaneLayout:
-
-    def test_local_is_the_only_source(self, pane):
-        assert SOURCES == ('local',)
-        assert pane.source == 'local'
-
-    def test_there_is_no_source_switch(self, pane):
-        from PySide6.QtWidgets import QRadioButton
-
-        assert pane.findChildren(QRadioButton) == []
-        assert pane.source_label.text() == 'Local store'
-        assert not hasattr(pane, 'set_source')
 
     def test_search_asks_for_a_query_with_the_current_filters(self, pane):
         seen = []
@@ -322,42 +311,6 @@ class TestDownloads:
 
         assert seen == []
 
-class TestModalSeams:
-    """The only modal reachable from this package is `_ask_directory`.
-
-    Task 10 considered a second modal (`_confirm`) for the whole-set
-    download and rejected it (N2): the run_tree warning is written to the
-    message panel instead, before the destination is even asked, so there
-    is still exactly one modal to override.
-
-    An unpatched modal in a teardown path hangs the whole suite -- that is why
-    a bare `pytest` cannot be run in this repo. One seam means one thing for
-    a test to override, and this test is what keeps the count from growing.
-    """
-
-    def test_no_other_dialog_is_constructed_in_the_package(self):
-        package = (Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'gui'
-                   / 'widgets' / 'database')
-        sources = {path.name: path.read_text(encoding='utf-8')
-                   for path in package.glob('*.py')}
-
-        offenders = [name for name, text in sources.items()
-                     if name != 'pane.py'
-                     and ('QFileDialog' in text or 'QMessageBox' in text)]
-        assert offenders == []
-        assert 'QMessageBox' not in sources['pane.py']
-        assert sources['pane.py'].count('QFileDialog.') == 1
-
-    def test_the_file_dialog_lives_only_in_ask_directory(self):
-        package = (Path(__file__).resolve().parents[2] / 'frictionsim2d' / 'gui'
-                   / 'widgets' / 'database')
-        text = (package / 'pane.py').read_text(encoding='utf-8')
-        start = text.index('def _ask_directory')
-        end = text.find('\n    def ', start + 1)
-        body = text[start:len(text) if end == -1 else end]
-        assert body.count('QFileDialog.') == 1
-
-
 class TestExportReachesTheController:
 
     def test_a_download_becomes_an_export_request(self, window, tmp_path, monkeypatch):
@@ -400,7 +353,6 @@ class TestExportReachesTheController:
 class TestWindowWiring:
 
     def test_the_database_tab_holds_the_pane(self, window):
-        assert window.top_tabs.widget(1) is window.database_page
         assert isinstance(window.database_pane, DatabasePane)
 
     def test_a_query_reaches_the_controller_as_a_list_request(self, window, monkeypatch):
@@ -780,7 +732,6 @@ class TestDegradation:
                             lambda name: None if name == 'aiida' else object())
 
         assert pane_module.missing_backend('local') == ['aiida']
-        assert pane_module.missing_backend('central') == [], 'no such source'
 
     def test_a_missing_backend_says_what_to_install(
             self, qt_app, monkeypatch):

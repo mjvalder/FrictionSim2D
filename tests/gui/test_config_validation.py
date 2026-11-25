@@ -198,3 +198,13 @@ class TestBaseDirResolution:
         raw = parse_config(EXAMPLES / 'indent_config.ini')
         assert preflight_paths(raw) != []
         assert preflight_paths(raw, base_dir=REPO_ROOT) == []
+
+    def test_a_missing_file_names_the_directory_it_was_searched_from(self, tmp_path):
+        raw = parse_config(EXAMPLES / 'indent_config.ini')
+        raw['tip']['pot_path'] = 'no/such/potential.sw'
+        issues = [i for i in preflight_paths(raw, base_dir=tmp_path)
+                  if i.kind == 'missing_file' and i.key == 'pot_path']
+        assert issues
+        assert f'searched relative to {tmp_path}' in issues[0].message
+        bare = [i for i in preflight_paths(raw) if i.kind == 'missing_file' and i.key == 'pot_path']
+        assert 'searched relative to' not in bare[0].message

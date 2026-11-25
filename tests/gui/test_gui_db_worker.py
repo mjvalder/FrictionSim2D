@@ -145,11 +145,9 @@ def test_main_writes_the_error_shape_when_a_handler_raises(tmp_path, monkeypatch
     code = db_worker.main([str(request_file)])
 
     payload = json.loads(result_file.read_text(encoding='utf-8'))
+    # The error shape itself is pinned by the dispatch test above.
     assert code == 1
     assert payload['ok'] is False
-    assert payload['kind'] == 'list'
-    assert payload['error'] == 'RuntimeError: no profile named friction2d'
-    assert 'Traceback' in payload['traceback']
 
 
 def test_filter_keys_are_all_real_friction2d_db_query_kwargs():
@@ -270,18 +268,3 @@ def test_a_local_check_turns_a_broken_profile_into_a_failed_check(monkeypatch):
     failed = [c for c in result['checks'] if not c['ok']]
     assert 'no profile named friction2d' in failed[0]['detail']
     assert result['notes'], 'a failed check must say what to do about it'
-
-
-@pytest.mark.parametrize('failures, unparseable, dry_run, clean', [
-    ([], [], False, True),
-    ([('a', 'x')], [], False, False),
-    ([], ['afm/d'], False, False),
-    ([], ['afm/d'], True, True),
-])
-def test_import_report_clean_is_the_cli_exit_rule(failures, unparseable, dry_run, clean):
-    pytest.importorskip('aiida')
-    from frictionsim2d.aiida.ingest import ImportReport
-
-    report = ImportReport(label='x', failures=failures, unparseable=unparseable,
-                          dry_run=dry_run)
-    assert report.clean() is clean

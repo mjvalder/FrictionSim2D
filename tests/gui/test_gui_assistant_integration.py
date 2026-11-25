@@ -620,6 +620,26 @@ def test_undo_over_later_user_edits_asks_and_no_keeps_everything(window):
     assert pane.undo_state(entry) == 'enabled'
 
 
+def test_the_listed_later_edits_are_capped_at_six(window):
+    pane = _open_assistant(window)
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'loads',
+                                          [Op('set', 'general', 'force', [5, 10])]))
+    entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    general = window.document.values['general']
+    numeric = [k for k, v in general.items()
+               if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    assert len(numeric) >= 7, numeric
+    for key in numeric[:7]:
+        window.document.set('general', key, general[key] + 1)
+    window.form.rebuild()
+    asked = []
+    window._confirm_undo = lambda text: asked.append(text) or False  # pylint: disable=protected-access
+    window._undo_assistant_change(entry)  # pylint: disable=protected-access
+    assert asked
+    assert asked[0].count('[general]') == 6
+    assert '…' in asked[0]
+
+
 def test_undo_over_later_user_edits_yes_reverts(window):
     pane = _open_assistant(window)
     temp = window.document.get('general', 'temp')

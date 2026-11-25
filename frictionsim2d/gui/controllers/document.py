@@ -157,12 +157,12 @@ def _write_atomically(target: Path, text: str) -> None:
 def hetero_support_error(model: str) -> Optional[str]:
     """Why ``model`` cannot hold a second material, or None when it can.
 
-    Every mode the GUI offers routes a two-material config to a
-    heterostructure builder (see ``SimulationMode.supports_hetero``), so this
-    returns None for every real model today and the refusal below is currently
-    unreachable. It is asked rather than assumed so that a mode added without
-    a hetero build path refuses the second material instead of dropping it on
-    the way to a builder that ignores ``sheets``.
+    Every friction mode routes a two-material config to a heterostructure
+    builder (see ``SimulationMode.supports_hetero``) and returns None here; the
+    amorphous ``quench`` mode has no sheets and returns the refusal below. It is
+    asked rather than assumed so that a mode without a hetero build path
+    refuses the second material instead of dropping it on the way to a builder
+    that ignores ``sheets``.
     """
     entry = MODES.get(model)
     if entry is None:
@@ -552,18 +552,14 @@ class ConfigDocument:
         switch, because every mode builds a heterostructure. Pass
         ``drop_second`` to discard it deliberately.
 
-        ``drop_second`` has no caller in the GUI, and cannot get one while
-        every mode supports a heterostructure -- the mode combo has no reason
-        to throw a material away. It is kept because it is the far side of
-        the refusal below: a mode that could not build one would make
-        `set_model` raise rather than lose a material silently, and this is
-        the argument that says "yes, drop it" instead. Deleting it would
-        leave that refusal with no documented way past it.
+        ``drop_second`` is the way past the refusal below: a mode that cannot
+        build a heterostructure (``quench``) makes `set_model` raise rather
+        than lose a material silently, and passing it says "yes, drop it"
+        instead. Nothing in the GUI passes it today.
 
         Raises:
             DocumentError: If the target model is unknown, or (see
-                `hetero_support_error` -- currently unreachable) has no
-                heterostructure build while a second material is present.
+                `hetero_support_error`) has no heterostructure build while a second material is present.
                 Losing a whole material to a dropdown change would be silent
                 and unrecoverable.
         """

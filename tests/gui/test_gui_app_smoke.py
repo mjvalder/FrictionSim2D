@@ -25,7 +25,6 @@ from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
 
 from frictionsim2d.gui.controllers.document import ConfigDocument, ExpansionDirs  # noqa: E402
-from frictionsim2d.gui.controllers.preview import cache_key, code_fingerprint  # noqa: E402
 from frictionsim2d.gui.preview.assemble import AssembledSystem, ComponentSlice  # noqa: E402
 from frictionsim2d.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 
@@ -111,43 +110,6 @@ class TestWorkspace:
         recent.add(gone)
         gone.rmdir()
         assert recent.load() == []
-
-
-class TestCacheKey:
-    """A preview may only be reused when it would be rebuilt identically."""
-
-    def test_same_input_same_key(self):
-        config = {'2D': {'mat': 'MoS2'}}
-        assert cache_key(config, 'afm', 1) == cache_key(config, 'afm', 1)
-
-    def test_config_change_changes_the_key(self):
-        assert cache_key({'2D': {'mat': 'MoS2'}}, 'afm', 1) != \
-            cache_key({'2D': {'mat': 'WS2'}}, 'afm', 1)
-
-    def test_model_change_changes_the_key(self):
-        config = {'2D': {'mat': 'MoS2'}}
-        assert cache_key(config, 'afm', 1) != cache_key(config, 'indent', 1)
-
-    def test_layer_change_changes_the_key(self):
-        config = {'2D': {'mat': 'MoS2'}}
-        assert cache_key(config, 'afm', 1) != cache_key(config, 'afm', 2)
-
-    def test_referenced_file_change_changes_the_key(self, tmp_path):
-        potential = tmp_path / 'p.sw'
-        potential.write_text('a', encoding='utf-8')
-        config = {'2D': {'mat': 'MoS2'}}
-        before = cache_key(config, 'afm', 1, [potential])
-        potential.write_text('bb', encoding='utf-8')
-        assert cache_key(config, 'afm', 1, [potential]) != before
-
-    def test_the_code_is_part_of_the_key(self):
-        """Otherwise editing a template and re-rendering would show a system
-        built by the previous code."""
-        config = {'2D': {'mat': 'MoS2'}}
-        assert code_fingerprint() in ''.join([
-            code_fingerprint(),
-        ])
-        assert cache_key(config, 'afm', 1)  # smoke: fingerprint is included
 
 
 class TestRawIniTruthiness:
@@ -1326,7 +1288,8 @@ class TestPairOverrides:
 
 
 class TestFormEditors:
-    """Values must round-trip through the widgets unchanged."""
+    """The form commits what its editors hold (per-kind round trips live in
+    test_gui_field_editors.py)."""
 
     @pytest.fixture(name='form')
     def _form(self, qt_app, monkeypatch):
@@ -1334,47 +1297,6 @@ class TestFormEditors:
         from frictionsim2d.gui.widgets.form import ConfigForm
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         return ConfigForm(document)
-
-    def test_string_round_trip(self, form):
-        editor = form.sections['2D'].editors['mat']
-        editor.set_value('WS2')
-        assert editor.value() == 'WS2'
-
-    def test_float_round_trip(self, form):
-        editor = form.sections['tip'].editors['r']
-        editor.set_value(25.0)
-        assert editor.value() == 25.0
-
-    def test_list_round_trip(self, form):
-        editor = form.sections['2D'].editors['layers']
-        editor.set_value([1, 2, 3])
-        assert editor.value() == [1, 2, 3]
-
-    def test_scalar_or_list_keeps_a_scalar_scalar(self, form):
-        editor = form.sections['general'].editors['force']
-        editor.set_value(5.0)
-        assert editor.value() == 5.0
-
-    def test_scalar_or_list_keeps_a_list_a_list(self, form):
-        editor = form.sections['general'].editors['force']
-        editor.set_value([5, 10, 20])
-        assert editor.value() == [5.0, 10.0, 20.0]
-
-    def test_empty_is_none_not_empty_string(self, form):
-        """The writer emits None as an empty value; '' would round-trip wrong."""
-        editor = form.sections['2D'].editors['lat_c']
-        editor.set_value(None)
-        assert editor.value() is None
-
-    def test_enum_round_trip(self, form):
-        editor = form.sections['tip'].editors['amorph']
-        editor.set_value('a')
-        assert editor.value() == 'a'
-
-    def test_bool_round_trip(self, form):
-        editor = form.sections['general'].editors['finite_sheet']
-        editor.set_value(True)
-        assert editor.value() is True
 
     def test_committing_writes_through_to_the_document(self, form):
         form.sections['2D'].editors['mat'].set_value('WSe2')

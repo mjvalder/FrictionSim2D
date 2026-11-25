@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from frictionsim2d.gui.controllers.staged_paths import absolutize_staged_paths
 
 
@@ -32,28 +34,22 @@ def _make_material_dirs(tmp_path: Path) -> Path:
     return config_dir
 
 
+@pytest.mark.parametrize('key,relative', [
+    ('cif_path', 'cif/h_MoS2.cif'),
+    ('pot_path', 'sw_lammps/h_MoS2.sw'),
+])
+def test_plain_relative_path_resolves_to_the_original_directory(tmp_path, key, relative):
+    config_dir = _make_material_dirs(tmp_path)
+
+    result = absolutize_staged_paths({'2D': {key: relative}}, config_dir)
+
+    resolved = Path(result['2D'][key])
+    assert resolved.is_absolute()
+    assert resolved == (config_dir / relative).resolve()
+
+
 class TestPlainRelativePaths:
     """A plain (non-templated) relative path resolves against base_dir."""
-
-    def test_cif_path_resolves_to_the_original_directory(self, tmp_path):
-        config_dir = _make_material_dirs(tmp_path)
-        config = {'2D': {'cif_path': 'cif/h_MoS2.cif'}}
-
-        result = absolutize_staged_paths(config, config_dir)
-
-        resolved = Path(result['2D']['cif_path'])
-        assert resolved.is_absolute()
-        assert resolved == (config_dir / 'cif' / 'h_MoS2.cif').resolve()
-
-    def test_pot_path_resolves_to_the_original_directory(self, tmp_path):
-        config_dir = _make_material_dirs(tmp_path)
-        config = {'2D': {'pot_path': 'sw_lammps/h_MoS2.sw'}}
-
-        result = absolutize_staged_paths(config, config_dir)
-
-        resolved = Path(result['2D']['pot_path'])
-        assert resolved.is_absolute()
-        assert resolved == (config_dir / 'sw_lammps' / 'h_MoS2.sw').resolve()
 
     def test_resolves_even_when_staged_into_an_unrelated_directory(self, tmp_path):
         """The whole point: the result must not depend on where the config is
@@ -83,29 +79,28 @@ class TestPlainRelativePaths:
 class TestTemplatedRelativePaths:
     """A `{mat}`-templated relative path resolves its directory only."""
 
-    def test_templated_cif_path_resolves_directory_and_keeps_placeholder(self, tmp_path):
+    @pytest.mark.parametrize('key,relative', [
+        ('cif_path', 'cif/{mat}.cif'),
+        ('pot_path', 'sw_lammps/{mat}.sw'),
+    ])
+    def test_templated_path_resolves_directory_and_keeps_placeholder(
+            self, tmp_path, key, relative):
         config_dir = _make_material_dirs(tmp_path)
-        config = {'2D': {'cif_path': 'cif/{mat}.cif'}}
 
-        result = absolutize_staged_paths(config, config_dir)
+        result = absolutize_staged_paths({'2D': {key: relative}}, config_dir)
 
-        resolved = result['2D']['cif_path']
+        resolved = result['2D'][key]
         assert '{mat}' in resolved, 'the placeholder must survive -- it is not substituted yet'
         assert Path(resolved).is_absolute()
         assert Path(resolved.replace('{mat}', 'h_MoS2')) == \
-            (config_dir / 'cif' / 'h_MoS2.cif').resolve()
+            (config_dir / relative.replace('{mat}', 'h_MoS2')).resolve()
 
-    def test_templated_pot_path_resolves_directory_and_keeps_placeholder(self, tmp_path):
+    def test_templated_name_without_a_directory_sits_in_base_dir(self, tmp_path):
         config_dir = _make_material_dirs(tmp_path)
-        config = {'2D': {'pot_path': 'sw_lammps/{mat}.sw'}}
 
-        result = absolutize_staged_paths(config, config_dir)
+        result = absolutize_staged_paths({'2D': {'cif_path': '{mat}.cif'}}, config_dir)
 
-        resolved = result['2D']['pot_path']
-        assert '{mat}' in resolved
-        assert Path(resolved).is_absolute()
-        assert Path(resolved.replace('{mat}', 'h_MoS2')) == \
-            (config_dir / 'sw_lammps' / 'h_MoS2.sw').resolve()
+        assert result['2D']['cif_path'] == str(config_dir / '{mat}.cif')
 
     def test_templated_path_still_resolves_once_staged_elsewhere(self, tmp_path):
         config_dir = _make_material_dirs(tmp_path)
@@ -125,6 +120,8 @@ class TestMaterialsList:
 
     def test_materials_list_resolves_to_the_original_directory(self, tmp_path):
         config_dir = _make_material_dirs(tmp_path)
+        unrelated = tmp_path / 'staging' / 'xyz'
+        unrelated.mkdir(parents=True)
         config = {'2D': {'materials_list': 'materials.txt'}}
 
         result = absolutize_staged_paths(config, config_dir)
@@ -132,15 +129,7 @@ class TestMaterialsList:
         resolved = Path(result['2D']['materials_list'])
         assert resolved.is_absolute()
         assert resolved == (config_dir / 'materials.txt').resolve()
-
-    def test_materials_list_still_resolves_once_staged_elsewhere(self, tmp_path):
-        config_dir = _make_material_dirs(tmp_path)
-        unrelated = tmp_path / 'staging' / 'xyz'
-        unrelated.mkdir(parents=True)
-
-        config = {'2D': {'materials_list': 'materials.txt'}}
-        result = absolutize_staged_paths(config, config_dir)
-
+        # ... and still resolves once the config is staged elsewhere.
         from frictionsim2d.core.utils.paths import find_existing
         assert find_existing(result['2D']['materials_list'], unrelated) is not None
 
@@ -148,39 +137,24 @@ class TestMaterialsList:
 class TestPassThroughs:
     """Values this module must never touch."""
 
-    def test_absolute_path_is_left_unchanged(self, tmp_path):
+    @pytest.mark.parametrize('templated', [False, True])
+    def test_absolute_path_is_left_unchanged(self, tmp_path, templated):
         config_dir = _make_material_dirs(tmp_path)
-        absolute = str((config_dir / 'cif' / 'h_MoS2.cif').resolve())
+        name = '{mat}.cif' if templated else 'h_MoS2.cif'
+        absolute = str((config_dir / 'cif').resolve()) + '/' + name
         config = {'2D': {'cif_path': absolute}}
 
         result = absolutize_staged_paths(config, config_dir)
 
         assert result['2D']['cif_path'] == absolute
 
-    def test_absolute_templated_path_is_left_unchanged(self, tmp_path):
+    @pytest.mark.parametrize('value', ['nonexistent_dir/h_MoS2.cif', 'nonexistent_dir/{mat}.cif'])
+    def test_unresolvable_path_is_left_unchanged(self, tmp_path, value):
         config_dir = _make_material_dirs(tmp_path)
-        absolute = str((config_dir / 'cif').resolve()) + '/{mat}.cif'
-        config = {'2D': {'cif_path': absolute}}
 
-        result = absolutize_staged_paths(config, config_dir)
+        result = absolutize_staged_paths({'2D': {'cif_path': value}}, config_dir)
 
-        assert result['2D']['cif_path'] == absolute
-
-    def test_unresolvable_path_is_left_unchanged(self, tmp_path):
-        config_dir = _make_material_dirs(tmp_path)
-        config = {'2D': {'cif_path': 'nonexistent_dir/h_MoS2.cif'}}
-
-        result = absolutize_staged_paths(config, config_dir)
-
-        assert result['2D']['cif_path'] == 'nonexistent_dir/h_MoS2.cif'
-
-    def test_unresolvable_templated_path_is_left_unchanged(self, tmp_path):
-        config_dir = _make_material_dirs(tmp_path)
-        config = {'2D': {'cif_path': 'nonexistent_dir/{mat}.cif'}}
-
-        result = absolutize_staged_paths(config, config_dir)
-
-        assert result['2D']['cif_path'] == 'nonexistent_dir/{mat}.cif'
+        assert result['2D']['cif_path'] == value
 
     def test_none_base_dir_leaves_relative_values_untouched(self, tmp_path):
         del tmp_path
@@ -250,3 +224,22 @@ class TestLaunchedFromTheConfigDirectory:
         result = absolutize_staged_paths({'2D': {'cif_path': 'cif/{mat}.cif'}}, config_dir)
 
         assert result['2D']['cif_path'] == str((config_dir / 'cif').resolve() / '{mat}.cif')
+
+
+class TestQuenchSection:
+    """``[quench]`` names its files ``potential`` and ``cif`` -- both resolve."""
+
+    def test_potential_and_cif_resolve_and_keep_placeholders(self, tmp_path):
+        config_dir = _make_material_dirs(tmp_path)
+        config = {'quench': {'potential': 'sw_lammps/{mat}.sw', 'cif': 'cif/h_MoS2.cif'}}
+
+        result = absolutize_staged_paths(config, config_dir)
+
+        assert result['quench']['potential'] == str((config_dir / 'sw_lammps').resolve() / '{mat}.sw')
+        assert result['quench']['cif'] == str((config_dir / 'cif' / 'h_MoS2.cif').resolve())
+
+    def test_the_quench_keys_are_not_touched_in_other_sections(self, tmp_path):
+        config_dir = _make_material_dirs(tmp_path)
+        config = {'2D': {'cif': 'cif/h_MoS2.cif'}}
+
+        assert absolutize_staged_paths(config, config_dir) == config

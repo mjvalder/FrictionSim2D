@@ -92,30 +92,68 @@ def live_panel(qt_app, monkeypatch):
     return instance
 
 
-def test_visibility_survives_rerender(panel, two_component_system):
-    panel.show_system(two_component_system)
-    panel._visibility['tip'] = False
-    panel.show_system(two_component_system)
-    assert panel._visibility['tip'] is False
+@pytest.fixture(name='reframes')
+def _reframes(live_panel, monkeypatch):
+    """Counts the camera re-frames the panel performs (the real method still runs)."""
+    from frictionsim2d.gui.preview import viewport as vp
+    seen = []
+    original = vp.ViewportPanel._frame_and_refresh
+
+    def counting(self):
+        seen.append(1)
+        original(self)
+
+    monkeypatch.setattr(vp.ViewportPanel, '_frame_and_refresh', counting)
+    return seen
 
 
-def test_framing_only_needed_once(panel, two_component_system):
-    assert panel._needs_framing()
-    panel.show_system(two_component_system)
-    # What _frame_and_refresh sets together in the real path: _last_cell is
-    # anchored there, alongside _framed, so the two never disagree about
-    # whether -- and against what -- the view was last framed.
-    panel._framed = True
-    panel._last_cell = two_component_system.cell
-    panel.show_system(two_component_system)
-    assert not panel._needs_framing()
+def _cell_less(system):
+    return AssembledSystem(
+        positions=system.positions, type_ids=system.type_ids,
+        group_ids=system.group_ids, cell=None,
+        components=system.components, legend=system.legend)
+
+
+def test_visibility_survives_rerender(live_panel, two_component_system, monkeypatch):
+    from PySide6.QtWidgets import QCheckBox
+
+    from frictionsim2d.gui.preview import viewport as vp
+
+    shown = []
+    monkeypatch.setattr(vp, 'build_data_collection',
+                        lambda subset, colours=None, radii=None: shown.append(subset.count))
+    live_panel.show_system(two_component_system)
+    tip_box = next(b for b in live_panel.findChildren(QCheckBox) if b.text() == 'tip')
+    tip_box.setChecked(False)                    # as the user would
+    live_panel.show_system(two_component_system)
+
+    assert shown[0] == 4
+    assert shown[-1] == 2                        # the tip's two atoms stay hidden
+    assert not tip_box.isChecked()
+
+
+def test_framing_only_needed_once(live_panel, two_component_system, reframes):
+    live_panel.show_system(two_component_system)
+    live_panel.show_system(two_component_system)
+    live_panel.show_system(two_component_system)
+    assert reframes == [1]
+
+
+def test_a_cleared_panel_owes_a_reframe(live_panel, two_component_system, reframes):
+    """After `clear()` nothing is framed any more (the `_UNFRAMED` state): the
+    next system must be framed again rather than trusted as already framed."""
+    live_panel.show_system(two_component_system)
+    live_panel.clear()
+    live_panel._pipeline = _StubPipeline()     # clear() tore the stub down
+    live_panel.show_system(two_component_system)
+    assert reframes == [1, 1]
 
 
 def test_unknown_last_cell_owes_a_reframe_even_if_marked_framed(panel, two_component_system):
-    """`_framed` and `_last_cell` are meant to be set together by
-    `_frame_and_refresh`; if they ever disagree (`_framed` True but no
-    `_last_cell` on record -- the `_UNFRAMED` sentinel), that is an unknown
-    state and must not be silently trusted as "already correctly framed"."""
+    """Characterisation: no public path leaves `_framed` True with the
+    `_UNFRAMED` sentinel in `_last_cell` (`clear()` resets both), so the guard
+    is only reachable by setting the state directly. An unknown state must not
+    be silently trusted as "already correctly framed"."""
     from frictionsim2d.gui.preview.viewport import _UNFRAMED
 
     panel.show_system(two_component_system)
@@ -124,25 +162,24 @@ def test_unknown_last_cell_owes_a_reframe_even_if_marked_framed(panel, two_compo
     assert panel._needs_framing()
 
 
-def test_cell_less_system_is_not_reframed_forever(panel, two_component_system):
-    """A real (non-sentinel) `None` `_last_cell` means the last system that
-    was actually framed had no cell -- e.g. a multi-placement build with no
-    explicit box (`Assembly.effective_cell()` returns `None`). Following it
-    with another cell-less system must not force a re-frame: the old code
-    read any `_last_cell is None` as "unknown" and reframed forever, silently
-    reinstating the camera-reset bug Task 4 fixed."""
-    system = AssembledSystem(
-        positions=two_component_system.positions,
-        type_ids=two_component_system.type_ids,
-        group_ids=two_component_system.group_ids,
-        cell=None,
-        components=two_component_system.components,
-        legend=two_component_system.legend,
-    )
-    panel.show_system(system)
-    panel._framed = True
-    panel._last_cell = None
-    assert not panel._needs_framing()
+def test_cell_less_system_is_not_reframed_forever(live_panel, two_component_system,
+                                                  reframes):
+    """A cell-less system (a multi-placement build with no explicit box)
+    followed by another must not force a re-frame: reading `None` as
+    "unknown" would reinstate the camera-reset bug."""
+    system = _cell_less(two_component_system)
+    live_panel.show_system(system)
+    live_panel.show_system(system)
+    live_panel.show_system(system)
+    assert reframes == [1]
+
+
+def test_gaining_or_losing_a_cell_reframes(live_panel, two_component_system, reframes):
+    live_panel.show_system(_cell_less(two_component_system))
+    live_panel.show_system(two_component_system)        # no cell -> cell
+    assert reframes == [1, 1]
+    live_panel.show_system(_cell_less(two_component_system))   # cell -> no cell
+    assert reframes == [1, 1, 1]
 
 
 def test_cumulative_drift_from_the_last_framed_cell_triggers_a_reframe(

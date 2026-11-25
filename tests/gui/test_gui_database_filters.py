@@ -124,6 +124,19 @@ def test_unparseable_range_text_is_ignored_rather_than_raising(bar):
     assert bar.value()['force_range'] is None
 
 
+def test_the_open_ended_sentinels_are_plus_minus_1e30(bar):
+    """The sentinels are what the worker receives for a half-filled range."""
+    assert (LOW_SENTINEL, HIGH_SENTINEL) == (-1e30, 1e30)
+
+
+def test_set_value_restores_an_open_end_as_an_empty_box(bar):
+    bar.set_value(dict(EMPTY_FILTERS, force_range=(20.0, HIGH_SENTINEL),
+                       temperature_range=(LOW_SENTINEL, 350.0)))
+
+    assert (bar.load_min.text(), bar.load_max.text()) == ('20.0', '')
+    assert (bar.temp_min.text(), bar.temp_max.text()) == ('', '350.0')
+
+
 def test_set_value_round_trips_a_stored_filter_block(bar):
     stored = dict(EMPTY_FILTERS, family='afm', materials=['h-MoS2'], layers=1,
                   force_range=(10.0, 40.0))

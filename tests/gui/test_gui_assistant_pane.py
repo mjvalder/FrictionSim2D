@@ -583,12 +583,6 @@ def test_shutdown_stops_our_server(qt_app, env):
     assert server.stopped == 1 and server.grace <= 1.0  # closing never waits 5 s
 
 
-def test_ollama_server_is_a_required_keyword(qt_app, env):
-    with pytest.raises(TypeError):
-        AssistantPane(FakeSession([]), lambda: object(), AgentSettings(),
-                      save_settings=lambda *a, **k: None)
-
-
 class SlowServer(FakeServer):
     def ensure_running(self, settings):
         import time
@@ -690,16 +684,16 @@ def test_missing_default_finetune_is_kept_and_offered_for_download(qt_app, env):
     assert pane.chat.toPlainText() == ''
 
 
-def test_old_experiment_names_are_left_alone(qt_app, env):
+def test_unpublished_finetune_names_are_left_alone(qt_app, env):
     s = AgentSettings(provider='ollama')
-    s.ollama.model = 'fs2d-assistant:q35-4b'
+    s.ollama.model = 'fs2d-assistant:experiment-x'
     pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3.5:4b'])
-    assert s.ollama.model == 'fs2d-assistant:q35-4b'
+    assert s.ollama.model == 'fs2d-assistant:experiment-x'
     assert pane.install_button.isHidden()
-    assert pane.status_label.text() == ('fs2d-assistant:q35-4b is not a published fine-tune'
+    assert pane.status_label.text() == ('fs2d-assistant:experiment-x is not a published fine-tune'
                                         ' — see Details')
     details = pane.details_label.text()
-    assert 'pull fs2d-assistant:q35-4b' not in details
+    assert 'pull fs2d-assistant:experiment-x' not in details
     assert 'fs2d-assistant:qwen3.5-4b' in details and 'Download' in details
 
 
@@ -833,63 +827,41 @@ def test_applied_line_can_offer_a_show_link(qt_app, env):
     assert 'Show' in pane.chat.toPlainText() and undone == []
 
 
-def test_claude_asks_for_and_stores_its_own_key(qt_app, env, monkeypatch):
-    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-    stored = []
+@pytest.mark.parametrize('provider,env_var,label,key', [
+    ('anthropic', 'ANTHROPIC_API_KEY', 'Claude', 'sk-ant'),
+    ('openai', 'OPENAI_API_KEY', 'OpenAI', 'sk-o'),
+])
+def test_cloud_provider_asks_for_and_stores_its_key(qt_app, env, monkeypatch,
+                                                    provider, env_var, label, key):
+    monkeypatch.delenv(env_var, raising=False)
+    stored, consent = [], []
     session = FakeSession([TurnEvent('done')])
-    s = AgentSettings(provider='anthropic')
-    s.anthropic.consent_given = True
+    s = AgentSettings(provider=provider)
     pane = AssistantPane(session, lambda: object(), s, save_settings=lambda *a, **k: None,
-                         ask_key=lambda: 'sk-ant', confirm_consent=lambda: True,
-                         store_key=lambda key, provider: stored.append((key, provider)),
+                         ask_key=lambda: key, confirm_consent=lambda: consent.append(1) or True,
+                         store_key=lambda k, p: stored.append((k, p)),
                          ollama_server=FakeServer())
     _PANES.append(pane)
-    assert pane.provider_box.currentData() == 'anthropic'
-    assert pane.status_label.text() == 'Claude: no API key yet (you will be asked)'
+    assert pane.provider_box.currentData() == provider
+    assert pane.status_label.text() == f'{label}: no API key yet (you will be asked)'
     assert not pane.cloud_badge.isHidden() and pane.check_button.isHidden()
     pane.send('x')
     QApplication.processEvents()
-    assert stored == [('sk-ant', 'anthropic')]
+    assert consent == [1] and getattr(s, provider).consent_given
+    assert stored == [(key, provider)]
 
 
-def test_claude_offers_opus_sonnet_and_haiku(qt_app, env):
-    s = AgentSettings(provider='anthropic')
+@pytest.mark.parametrize('provider', ['anthropic', 'openai'])
+def test_cloud_provider_offers_its_model_list(qt_app, env, provider):
+    from frictionsim2d.agent import settings as agent_settings
+    models = {'anthropic': agent_settings.ANTHROPIC_MODELS,
+              'openai': agent_settings.OPENAI_MODELS}[provider]
+    s = AgentSettings(provider=provider)
     pane = _pane([], settings=s)
-    assert [pane.model_box.itemText(i) for i in range(pane.model_box.count())] == [
-        'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']
-    pane.model_box.setCurrentIndex(2)
-    pane.model_box.activated.emit(2)
-    assert s.anthropic.model == 'claude-haiku-5-5'
-
-
-def test_openai_asks_for_and_stores_its_own_key(qt_app, env, monkeypatch):
-    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
-    stored, consent = [], []
-    session = FakeSession([TurnEvent('done')])
-    s = AgentSettings(provider='openai')
-    pane = AssistantPane(session, lambda: object(), s, save_settings=lambda *a, **k: None,
-                         ask_key=lambda: 'sk-o', confirm_consent=lambda: consent.append(1) or True,
-                         store_key=lambda key, provider: stored.append((key, provider)),
-                         ollama_server=FakeServer())
-    _PANES.append(pane)
-    assert pane.provider_box.currentData() == 'openai'
-    assert pane.status_label.text() == 'OpenAI: no API key yet (you will be asked)'
-    assert not pane.cloud_badge.isHidden()
-    pane.send('x')
-    QApplication.processEvents()
-    assert consent == [1] and s.openai.consent_given
-    assert stored == [('sk-o', 'openai')]
-
-
-def test_openai_offers_its_model_list(qt_app, env):
-    from frictionsim2d.agent.settings import OPENAI_MODELS
-    s = AgentSettings(provider='openai')
-    pane = _pane([], settings=s)
-    assert tuple(pane.model_box.itemText(i)
-                 for i in range(pane.model_box.count())) == OPENAI_MODELS
-    pane.model_box.setCurrentIndex(1)
-    pane.model_box.activated.emit(1)
-    assert s.openai.model == OPENAI_MODELS[1]
+    assert tuple(pane.model_box.itemText(i) for i in range(pane.model_box.count())) == models
+    pane.model_box.setCurrentIndex(len(models) - 1)
+    pane.model_box.activated.emit(len(models) - 1)
+    assert getattr(s, provider).model == models[-1]
 
 
 # ---------------------------------------------------------------- fine-tunes

@@ -237,9 +237,8 @@ class TestPairSweepIsSubstitutedToo:
 
         label = request.preview_label()
 
-        assert label is not None
-        assert 'h_MoS2' in label and 'h_WS2' in label
-        assert '1 of 1' not in label
+        assert label == ('Previewing pair h_MoS2 + h_WS2 '
+                         '(the only pair in the sweep).')
 
     def test_a_multi_pair_sweep_names_the_first_pair_and_counts_the_rest(
             self, two_pairs_txt):
@@ -247,9 +246,21 @@ class TestPairSweepIsSubstitutedToo:
                                  model='sheetonsheet')
 
         assert request.single_member()['2D-1']['mat'] == 'h_MoS2'
-        label = request.preview_label()
-        assert 'h_MoS2' in label and 'h_WS2' in label
-        assert '1 of 2' in label
+        assert request.preview_label() == ('Previewing pair h_MoS2 + h_WS2 '
+                                           '(1 of 2 in the sweep).')
+
+    def test_a_two_member_non_material_sweep_is_still_a_sweep(self):
+        """Two members and no materials_list: the `<= 1` boundary."""
+        config = {
+            '2D-1': {'mat': 'h_MoS2', 'x': 60, 'y': 60},
+            '2D-2': {'mat': 'h_WS2'},
+            'general': {'temp': [300, 400]},
+        }
+        request = PreviewRequest(config=config, model='sheetonsheet')
+
+        assert request.preview_label() == (
+            'Previewing pair h_MoS2 + h_WS2 (1 of 2 in the sweep).')
+        assert request.single_member()['general']['temp'] == 300
 
     def test_a_numbered_config_with_no_list_is_still_not_a_sweep(self):
         """The other half of the discrimination, for numbered sections: no

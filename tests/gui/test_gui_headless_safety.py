@@ -26,51 +26,31 @@ def _run(code: str) -> subprocess.CompletedProcess:
 LEAKY = ('PySide6', 'ovito', 'aiida', 'psycopg2', 'httpx')
 
 
-def test_importing_gui_does_not_import_qt_ovito_aiida_or_psycopg2():
+@pytest.mark.parametrize(
+    'module,forbidden',
+    [
+        ('frictionsim2d.gui', LEAKY),
+        ('frictionsim2d.cli', LEAKY),
+        # Every backend import in the worker is inside a function: the module is
+        # imported by the controller's tests and by `python -m` on machines that
+        # may have only one of the two backends.
+        ('frictionsim2d.gui.db_worker', LEAKY),
+        # The Plots tab renders through a subprocess: a matplotlib import here
+        # would install a second Qt backend beside ovito's.
+        ('frictionsim2d.gui', ('matplotlib',)),
+    ],
+)
+def test_import_leaks_nothing(module, forbidden):
     result = _run(
         "import sys\n"
-        "import frictionsim2d.gui\n"
-        f"leaked = [m for m in {LEAKY!r} if m in sys.modules]\n"
+        f"import {module}\n"
+        f"leaked = [m for m in {forbidden!r} if m in sys.modules]\n"
         "print('LEAKED:' + ','.join(leaked))\n"
     )
     assert result.returncode == 0, result.stderr
     assert "LEAKED:" in result.stdout
     leaked = result.stdout.split("LEAKED:")[1].strip()
-    assert leaked == "", f"frictionsim2d.gui pulled in {leaked} at import time"
-
-
-def test_importing_cli_does_not_import_qt_ovito_aiida_or_psycopg2():
-    result = _run(
-        "import sys\n"
-        "import frictionsim2d.cli\n"
-        f"leaked = [m for m in {LEAKY!r} if m in sys.modules]\n"
-        "print('LEAKED:' + ','.join(leaked))\n"
-    )
-    assert result.returncode == 0, result.stderr
-    leaked = result.stdout.split("LEAKED:")[1].strip()
-    assert leaked == "", f"frictionsim2d.cli pulled in {leaked} at import time"
-
-
-def test_the_db_worker_module_imports_nothing_heavy():
-    """Every backend import in the worker is inside a function: the module is
-    imported by the controller's test suite and by `python -m` on machines
-    that may have only one of the two backends."""
-    result = _run(
-        "import sys\n"
-        "import frictionsim2d.gui.db_worker\n"
-        f"leaked = [m for m in {LEAKY!r} if m in sys.modules]\n"
-        "print('LEAKED:' + ','.join(leaked))\n"
-    )
-    assert result.returncode == 0, result.stderr
-    leaked = result.stdout.split("LEAKED:")[1].strip()
-    assert leaked == "", f"frictionsim2d.gui.db_worker pulled in {leaked} at import time"
-
-
-def test_gui_available_flag_is_a_bool():
-    import frictionsim2d.gui as gui
-
-    assert isinstance(gui.GUI_AVAILABLE, bool)
-    assert gui._GUI_AVAILABLE is gui.GUI_AVAILABLE  # pylint: disable=protected-access
+    assert leaked == "", f"{module} pulled in {leaked} at import time"
 
 
 def test_main_raises_a_helpful_error_when_dependencies_are_missing(monkeypatch):
@@ -81,19 +61,6 @@ def test_main_raises_a_helpful_error_when_dependencies_are_missing(monkeypatch):
         gui.main()
     assert "PySide6" in str(excinfo.value)
     assert "pip install -e '.[gui]'" in str(excinfo.value)
-
-
-def test_importing_gui_does_not_import_matplotlib():
-    """The Plots tab renders through a subprocess (G4). If importing
-    `frictionsim2d.gui` pulled matplotlib in, the GUI process would install a second Qt
-    backend beside ovito's -- which is the whole reason there is a worker."""
-    result = _run(
-        "import sys\n"
-        "import frictionsim2d.gui\n"
-        "print('LEAKED:' + ('matplotlib' if 'matplotlib' in sys.modules else ''))\n"
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.split("LEAKED:")[1].strip() == ""
 
 
 def test_the_plots_widgets_pull_qt_but_never_matplotlib():

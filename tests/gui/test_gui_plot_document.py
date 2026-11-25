@@ -121,6 +121,16 @@ def test_validate_reports_the_offending_field():
 
     assert result.issues
     assert any(issue.key == 'tier' for issue in result.issues)
+    assert {i.section for i in result.issues if i.key == 'tier'} == {COMMON_SECTION}
+
+
+def test_a_type_specific_error_is_located_in_the_type_section():
+    doc = PlotEditorDocument.blank('summary')
+    doc.values['summary']['add_linear_fit'] = 'maybe'
+
+    issues = doc.validate().issues
+
+    assert [(i.section, i.key) for i in issues] == [('summary', 'add_linear_fit')]
 
 
 def test_validate_passes_on_a_good_document():
