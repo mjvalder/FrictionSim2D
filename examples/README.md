@@ -69,6 +69,7 @@ but no fix holds them yet, so it would not do what its name says.
 |---|---|---|
 | `pes-tip/basic.ini` | N x N energy / lateral-force map under a rigid tip | |
 | `pes-tip/freestanding.ini` | the same scan on a freestanding slab, no substrate | |
+| `pes-tip/freestanding_tersoff.ini` | a freestanding buckled SiGe slab with a Tersoff potential | |
 | `pes-tip/freestanding_campaign.ini` | freestanding scans over every material in `lists/material_list.txt` | |
 
 ## pes-sheet/ -- static interlayer PES scans (`run pes-sheet`)
@@ -76,13 +77,14 @@ but no fix holds them yet, so it would not do what its name says.
 | file | shows | needs |
 |---|---|---|
 | `pes-sheet/basic.ini` | N x N interlayer-energy map of a frozen bilayer | |
+| `pes-sheet/lj_g.ini` | the same scan under the lj_g interlayer style | |
 | `pes-sheet/mlip.ini` | the same scan with a full-cell DeePMD model | MLIP model |
 
 ## indent/ -- press, hold, retract (`run indent`)
 
 | file | shows | needs |
 |---|---|---|
-| `indent/basic.ini` | indentation to each load, hold, retract to pull-off | |
+| `indent/basic.ini` | indentation to each load (a `force` list sweeps), hold, retract to pull-off | |
 | `indent/campaign.ini` | indentation over every material in `lists/material_list.txt` | |
 
 ## quench/ -- amorphous blocks (`run quench`)
