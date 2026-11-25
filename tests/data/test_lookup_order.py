@@ -182,3 +182,28 @@ def test_a_missing_name_is_still_missing():
     assert find_existing('materials/not_a_material.cif', None) is None
     with pytest.raises(FileNotFoundError, match='material library'):
         get_material_path('not_a_material.cif')
+
+
+def test_a_differing_legacy_file_keeps_its_real_path(tmp_path, monkeypatch):
+    """A file in the legacy examples/ folder that differs from the library file of
+    the same name is stored by its real path, never as ``materials/<name>`` (which
+    would reload the packaged file), and reloads to its own bytes."""
+    from frictionsim2d.core.config import ComponentConfig
+
+    legacy = tmp_path / 'examples'
+    monkeypatch.setattr(paths, 'LEGACY_EXAMPLES_DIR', legacy)
+    own = _put(legacy / 'materials', 'Si.cif', 'my edited Si cell')
+    assert paths.library_name(own) is None
+    built = ComponentConfig(mat='Si', pot_type='sw', pot_path='potentials/sw/Si.sw',
+                            cif_path=str(own))
+    stored = built.model_dump(mode='json')
+    assert stored['cif_path'] == str(own)
+    rebuilt = ComponentConfig.model_validate(stored)
+    assert Path(rebuilt.cif_path).read_bytes() == own.read_bytes()
+
+
+def test_a_pack_file_shadowed_by_a_different_packaged_one_keeps_its_real_path():
+    shadowed = _put(materials_pack_dir(), 'h-MoS2.cif', 'pack copy, not the packaged cell')
+    assert paths.library_name(shadowed) is None
+    unique = _put(materials_pack_dir(), 'amor_Z__0.lmp', 'pack only')
+    assert paths.library_name(unique) == 'materials/amor_Z__0.lmp'

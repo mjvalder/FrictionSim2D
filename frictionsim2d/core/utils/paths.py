@@ -166,17 +166,26 @@ def _library_name(name: str) -> Tuple[Tuple[str, ...], PurePosixPath, bool]:
 
 
 def library_name(path: Union[str, Path]) -> Optional[str]:
-    """``materials/<tail>`` / ``potentials/<tail>`` for a path inside any library
-    root (packaged, pack, user, legacy), else None.
+    """``materials/<tail>`` / ``potentials/<tail>`` for a path inside a library
+    root (packaged, pack, user), else None.
 
     The portable spelling of a library file: it resolves to the same file
-    (:func:`find_in_library`) on any install, wherever the package lives.
+    (:func:`find_in_library`) on any install, wherever the package lives. So the
+    legacy ``examples/`` folder is not a root here (a file left there can differ
+    from the library file of the same name), and a name is given only when it
+    resolves back to these bytes -- a pack or user file shadowed by a different
+    packaged one keeps its real path.
     """
     for kind in LIBRARY_KINDS:
-        for _, root in library_roots(kind):
+        for _, root in library_roots(kind, legacy=False):
             rel = _within(Path(path), root)
             if rel is not None and rel.parts:
-                return f'{kind}/{rel.as_posix()}'
+                name = f'{kind}/{rel.as_posix()}'
+                found = find_in_library(name)
+                if found is not None and (_within(found, Path(path)) == PurePosixPath('.')
+                                          or _same_bytes(found, Path(path))):
+                    return name
+                return None
     return None
 
 
