@@ -175,29 +175,6 @@ def test_point_table_columns_are_flat_field_paths(campaigns):
     assert len(table) == 7
 
 
-def test_point_table_is_bulk(campaigns, monkeypatch):
-    calls = []
-    real_all = orm.QueryBuilder.all
-    real_init = orm.QueryBuilder.__init__
-
-    def counting_all(self, *args, **kwargs):
-        calls.append('all')
-        return real_all(self, *args, **kwargs)
-
-    built = []
-
-    def counting_init(self, *args, **kwargs):
-        built.append(1)
-        real_init(self, *args, **kwargs)
-
-    monkeypatch.setattr(orm.QueryBuilder, 'all', counting_all)
-    monkeypatch.setattr(orm.QueryBuilder, '__init__', counting_init)
-    table = point_table()
-    assert len(table) == 7
-    assert len(calls) <= 3, calls
-    assert len(built) <= 3, built
-
-
 # --- query / to_dataframe ---------------------------------------------------------
 
 def _checked_set(tmp_path):
@@ -302,6 +279,7 @@ def test_query_module_has_no_per_point_loads(campaigns, monkeypatch):
     def refuse(*_args, **_kwargs):
         raise AssertionError('load_node called')
     monkeypatch.setattr(query_mod.orm, 'load_node', refuse)
+    assert len(point_table()) == 7
     assert Friction2DDB().query().total_count == 7
     a, _b = campaigns
     assert len(related(a[10.0], 'load')) == 2

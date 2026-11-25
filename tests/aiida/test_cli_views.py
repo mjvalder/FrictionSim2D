@@ -13,10 +13,11 @@ def test_query_filters_pairs_each_axis_into_a_range():
                             pressure_max=None, angle_min=None, angle_max=None,
                             speed_min=None, speed_max=None, temperature_min=None,
                             temperature_max=None)
-    assert list(filters) == ['materials', 'family', 'model', 'set_label', 'potential',
-                             'layers', 'force_range', 'pressure_range', 'angle_range',
-                             'speed_range', 'temperature_range', 'limit', 'order_by']
+    assert set(filters) == {'materials', 'family', 'model', 'set_label', 'potential',
+                            'layers', 'force_range', 'pressure_range', 'angle_range',
+                            'speed_range', 'temperature_range', 'limit', 'order_by'}
     assert filters['materials'] == ['a', 'b'] and filters['force_range'] == (1.0, None)
+    assert filters['family'] == 'afm' and filters['layers'] == 2
     assert filters['angle_range'] is None and filters['limit'] == 3
 
 

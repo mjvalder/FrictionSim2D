@@ -29,13 +29,6 @@ def test_afm_decks_and_filters(tmp_path):
     assert [d.writes_structures for d in decks] == [True, False, False]
 
 
-def test_sheet_pressure_deck(tmp_path):
-    loc = _locator(tmp_path, 'sheetonsheet')
-    _touch(loc.lammps_dir / 'slide_p0p5gpa.in')
-    deck = [d for d in discover_decks(loc) if d.name == 'slide_p0p5gpa'][0]
-    assert deck.point_filter == {'load': 0.5}
-
-
 @pytest.mark.parametrize('stem, expected', [
     ('slide_a90', {'angle': 90.0}),
     ('slide_am45', {'angle': -45.0}),
@@ -43,6 +36,7 @@ def test_sheet_pressure_deck(tmp_path):
     ('slide_2ms', {'speed': 2.0}),
     ('slide_0p5ms', {'speed': 0.5}),
     ('slide_p1gpa', {'load': 1.0}),
+    ('slide_p0p5gpa', {'load': 0.5}),
     ('slide_refine', {}),
     ('slide', {}),
 ])

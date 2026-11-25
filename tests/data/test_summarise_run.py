@@ -237,23 +237,6 @@ def test_empty_frames_are_incomplete_not_an_exception():
     assert out.mean_cof is None
 
 
-def test_sheet_lateral_force_pairs_become_extras():
-    """mean |(react_x, react_y)| and |(drive_fx, drive_fy)| over the whole window:
-    the MoS2 figures plot the first (lf_source: sx_sy), so the store must carry it."""
-    df = _window()
-    df['react_x'] = np.full(len(df), 3.0)
-    df['react_y'] = np.full(len(df), 4.0)
-    out = summarise_run({'window': df}, 'sheetonsheet')
-    assert out.extras['mean_lf_sx_sy'] == pytest.approx(5.0)
-    assert 'mean_lf_fx_fy' not in out.extras  # no drive_fx/drive_fy columns
-
-
-def test_afm_gets_no_lateral_force_pairs():
-    df = _window()
-    df['react_x'] = df['react_y'] = np.ones(len(df))
-    assert 'mean_lf_sx_sy' not in summarise_run({'window': df}, 'afm').extras
-
-
 def test_pes_summary_hashes_the_energy_column_alone():
     from frictionsim2d.data.models import compute_time_series_hash
     grid = pd.DataFrame({'dx': [0, 1, 0, 1], 'dy': [0, 0, 1, 1],
@@ -270,3 +253,6 @@ def test_lf_pair_means_are_recorded_for_sheet_families_only():
     assert sheet.extras['mean_lf_sx_sy'] == pytest.approx(5.0)
     assert sheet.extras['mean_lf_fx_fy'] == pytest.approx(10.0)
     assert 'mean_lf_sx_sy' not in summarise_run({'window': window}, 'afm').extras
+    # without the drive columns the second pair is simply absent
+    no_drive = _window(n).assign(react_x=3.0, react_y=4.0)
+    assert 'mean_lf_fx_fy' not in summarise_run({'window': no_drive}, 'sheetonsheet').extras

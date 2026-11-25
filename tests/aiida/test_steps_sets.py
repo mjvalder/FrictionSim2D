@@ -102,6 +102,27 @@ def test_delete_keeps_shared_and_removes_own(aiida_profile_clean, no_profile_swi
     assert {n.pk for n in _calcjobs()} == shared
 
 
+def test_delete_keeps_a_calcjob_whose_deletion_would_cascade_into_another_sets(
+        aiida_profile_clean, no_profile_switch, tmp_path, caplog):
+    """A slide deck consumes its system deck's `structures` outputs, so deleting
+    the system deck would delete the slide deck too. When another set holds that
+    slide deck, the system deck stays (with a warning), though no set holds it
+    but the one being deleted."""
+    from frictionsim2d.aiida.layout import group_label
+    import_root(_tree(tmp_path / 'sim', materials=('h-MoS2',)), label='first')
+    by_name = {n.inputs.parameters['deck_name']: n for n in _calcjobs()}
+    system, slide = by_name['system'], by_name['slide']
+    other = orm.Group(label=group_label('second')).store()
+    other.add_nodes([slide])
+    orm.Group.collection.get(label=group_label('first')).remove_nodes([slide])
+
+    with caplog.at_level('WARNING'):
+        assert delete_simulation_set('first') == 0
+
+    assert {n.pk for n in _calcjobs()} == {system.pk, slide.pk}
+    assert any('Keeping CalcJob' in r.getMessage() for r in caplog.records)
+
+
 def test_clear_removes_everything_and_a_reimport_recreates_it(aiida_profile_clean,
                                                               no_profile_switch, tmp_path):
     root = _tree(tmp_path / 'sim')

@@ -92,6 +92,8 @@ def test_sanitizes_yaml_under_an_uppercase_name():
 
 def test_sanitizes_ini_and_blanks_secret_named_options():
     data = (
+        "[DEFAULT]\n"
+        "api_key = default-section-key\n"
         "[database]\n"
         f"password = {PASSWORD}\n"
         "host = db.example.org\n"
@@ -100,6 +102,7 @@ def test_sanitizes_ini_and_blanks_secret_named_options():
     out = sanitize_document_bytes(data, 'config.ini').decode()
 
     assert PASSWORD not in out
+    assert 'default-section-key' not in out      # [DEFAULT] options are secrets too
     assert 'db.example.org' in out
 
 

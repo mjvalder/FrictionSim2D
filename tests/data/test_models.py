@@ -36,6 +36,24 @@ def test_stats_with_nonpositive_mean_normal_force_report_zero_cof():
     assert out['std_cof'] == 0.0 and np.isfinite(out['std_cof'])
 
 
+def test_stats_drop_the_leading_transient():
+    """The first `skip_fraction` of the samples is discarded: a transient of
+    100 nN / 1000 nN lateral in the first 20 % must not reach any mean."""
+    nf = np.array([100.0] * 2 + [10.0] * 8)
+    lfx = np.array([1000.0] * 2 + [5.0] * 8)
+    out = compute_friction_stats(nf, lfx, np.zeros(10), skip_fraction=0.2)
+    assert out['mean_nf'] == pytest.approx(10.0)
+    assert out['mean_lf'] == pytest.approx(5.0)
+    assert out['mean_cof'] == pytest.approx(0.5)
+    kept_all = compute_friction_stats(nf, lfx, np.zeros(10), skip_fraction=0.0)
+    assert kept_all['mean_nf'] == pytest.approx(28.0)
+
+
+def test_stats_with_a_zero_mean_normal_force_report_zero_cof():
+    out = compute_friction_stats(np.zeros(4), np.ones(4), np.zeros(4), skip_fraction=0.0)
+    assert out['mean_cof'] == 0.0
+
+
 def test_derived_columns_zero_normal_force_gives_zero_cof_and_signed_nf_stays_signed():
     lfx = np.array([3.0, 3.0, 3.0])
     lfy = np.array([4.0, 4.0, 4.0])

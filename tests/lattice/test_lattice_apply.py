@@ -101,6 +101,20 @@ def test_strain_hex_cell_with_xy_tilt_preserves_z_and_returns_strain(tmp_path):
     assert np.allclose(got_cell[:2, :2], target, atol=1e-6)  # box now equals the tilted target
 
 
+def test_strain_an_orthogonal_cell_onto_a_tilted_target_makes_the_box_triclinic(tmp_path):
+    """An orthogonal source has no tilt to change: the output only gets the
+    target's xy if the box is converted to triclinic first."""
+    src = tmp_path / "in.data"
+    out = tmp_path / "tilted.data"
+    _write_square_monolayer(src, a=3.0)                  # orthogonal 6 x 6
+    target = np.array([[6.0, 0.0], [1.5, 6.0]])          # same lengths, sheared
+    strain_monolayer_to_cell(str(src), str(out), target)
+
+    got_cell = np.array(read(str(out), format="lammps-data").cell)
+    assert got_cell[1, 0] == pytest.approx(1.5, abs=1e-6)
+    assert np.allclose(got_cell[:2, :2], target, atol=1e-6)
+
+
 # --- D3b: rotate_flake_in_plane (finite-flake atoms-only twist, cell fixed) ---
 
 def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):

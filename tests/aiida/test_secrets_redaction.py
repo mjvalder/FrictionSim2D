@@ -116,21 +116,6 @@ def _secret_tree(root: Path, material: str, database: dict) -> str:
     return rel
 
 
-@pytest.mark.parametrize('database', [FLAT_DATABASE, LEGACY_DATABASE],
-                         ids=['flat', 'legacy-nested'])
-def test_import_strips_credentials_from_provenance_documents(
-        aiida_profile_clean, tmp_path, database):
-    """Export and archive round trips of the new graph are Task 10's."""
-    root = tmp_path / 'simulation_x'
-    _secret_tree(root, 'h-MoS2', database)
-
-    report = import_root(root, label='secrets-import')
-    assert report.ok(), report.render()
-    assert report.created_decks
-
-    _assert_group_has_no_secrets('secrets-import')
-
-
 def test_group_wide_guard_no_secret_string_anywhere(aiida_profile_clean, tmp_path):
     """Store-wide guard: after importing a tree with BOTH database shapes
     (one run flat, one run legacy-nested), no repository file of any node in

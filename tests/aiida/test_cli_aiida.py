@@ -201,6 +201,24 @@ def test_recheck_reports_flipped_points_and_is_idempotent(store, tmp_path):
     assert 're-checked ' not in again.output
 
 
+def test_recheck_exits_1_when_a_point_cannot_be_checked(store, tmp_path, monkeypatch):
+    """A point whose check raises is reported as a failure, and the command's
+    exit status says so (scripts gate on it)."""
+    root = tmp_path / 'sim'
+    _imported(root, eject=(30.0,))
+    settings = tmp_path / 'settings.yaml'
+    settings.write_text("integrity:\n  version: '1.1.0'\n", encoding='utf-8')
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError('structure unreadable')
+    monkeypatch.setattr('frictionsim2d.aiida.steps.check_integrity', broken)
+
+    result = _run('recheck', 'camp', '--settings-file', str(settings))
+
+    assert result.exit_code == 1, result.output
+    assert 'structure unreadable' in result.output
+
+
 def test_rule_withdraw_pending_drops_a_lost_files_ruling(store, tmp_path):
     root = tmp_path / 'sim'
     _imported(root, eject=(30.0,))

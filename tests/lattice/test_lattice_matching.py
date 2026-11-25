@@ -132,28 +132,16 @@ def test_enumerate_matrices_n3_exact_determinant_multiset():
 class TestFindCoincidenceLatticeIdentical:
     """When both cells are the same material, the 1×1 identity should match."""
 
-    def test_same_cell_finds_match(self):
+    def test_identical_cells_give_the_identity_unit_match(self):
         cell = _hex_cell(3.18)
         result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
         assert result is not None
-
-    def test_same_cell_near_zero_strain(self):
-        cell = _hex_cell(3.18)
-        result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
-        assert result.strain_a < 1e-6
-        assert result.strain_b < 1e-6
-
-    def test_same_cell_identity_matrices(self):
-        cell = _hex_cell(3.18)
-        result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
+        assert result.strain_a < 1e-6 and result.strain_b < 1e-6
         assert np.array_equal(result.matrix_a, np.eye(2, dtype=int))
         assert np.array_equal(result.matrix_b, np.eye(2, dtype=int))
-
-    def test_area_matches_unit_cell(self):
-        cell = _hex_cell(3.18)
-        expected_area = abs(np.linalg.det(cell))
-        result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
-        assert math.isclose(result.area, expected_area, rel_tol=1e-6)
+        assert math.isclose(result.area, abs(np.linalg.det(cell)), rel_tol=1e-6)
+        for matrix in (result.matrix_a, result.matrix_b, result.supercell_a, result.supercell_b):
+            assert matrix.shape == (2, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -187,18 +175,21 @@ class TestFindCoincidenceLatticePairs:
         result = find_coincidence_lattice(cell_a, cell_b, strain_tol=1e-4, max_supercell=3)
         assert result is None
 
-    def test_result_area_positive(self):
-        cell = _hex_cell(3.18)
-        result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
-        assert result.area > 0.0
+@pytest.mark.parametrize("sizes", [(3.2, 3.0), (3.0, 3.2)], ids=["a-larger", "b-larger"])
+def test_either_cell_exceeding_the_strain_tolerance_rejects_the_pair(sizes):
+    """Onto the mean cell the two strains are 3.125 % and 3.333 %: a tolerance
+    between them leaves exactly one side over it, whichever side that is."""
+    cell_a, cell_b = (np.diag([s, s]) for s in sizes)
+    kwargs = dict(max_supercell=1, area_tol=0.2)
+    assert find_coincidence_lattice(cell_a, cell_b, strain_tol=0.032, **kwargs) is None
+    assert find_coincidence_lattice(cell_a, cell_b, strain_tol=0.034, **kwargs) is not None
 
-    def test_supercell_matrices_shape(self):
-        cell = _hex_cell(3.18)
-        result = find_coincidence_lattice(cell, cell, strain_tol=0.01)
-        assert result.matrix_a.shape == (2, 2)
-        assert result.matrix_b.shape == (2, 2)
-        assert result.supercell_a.shape == (2, 2)
-        assert result.supercell_b.shape == (2, 2)
+
+def test_a_pair_whose_areas_differ_by_more_than_area_tol_is_rejected():
+    cell_a, cell_b = np.diag([3.2, 3.2]), np.diag([3.0, 3.0])      # areas 12 % apart
+    kwargs = dict(strain_tol=0.04, max_supercell=1)
+    assert find_coincidence_lattice(cell_a, cell_b, area_tol=0.05, **kwargs) is None
+    assert find_coincidence_lattice(cell_a, cell_b, area_tol=0.2, **kwargs) is not None
 
 
 def test_find_coincidence_lattice_skips_degenerate_sub_angstrom_cells():
@@ -271,30 +262,20 @@ def _graphene_positions() -> Tuple[np.ndarray, np.ndarray]:
 
 
 class TestScanRegistryIndex:
-    def test_returns_stacking_result(self):
-        cart, cell = _graphene_positions()
-        result = scan_registry_index(cart, cart, cell, n_grid=10)
-        assert isinstance(result, StackingResult)
-
-    def test_grid_shape(self):
+    def test_registry_scan_contract(self):
+        """Shape, aa = max = 1 (normalised), ab = min < aa, and the shift grids
+        share the RI grid's shape. The values themselves are pinned by the
+        characterisation fixture in test_ri_reference.py."""
         cart, cell = _graphene_positions()
         result = scan_registry_index(cart, cart, cell, n_grid=12)
+        assert isinstance(result, StackingResult)
         assert result.ri_grid.shape == (12, 12)
-
-    def test_aa_ri_is_maximum(self):
-        cart, cell = _graphene_positions()
-        result = scan_registry_index(cart, cart, cell, n_grid=15)
+        assert result.shifts_x.shape == result.ri_grid.shape
+        assert result.shifts_y.shape == result.ri_grid.shape
         assert math.isclose(result.aa_ri, result.ri_grid.max(), rel_tol=1e-9)
-
-    def test_ab_ri_is_minimum(self):
-        cart, cell = _graphene_positions()
-        result = scan_registry_index(cart, cart, cell, n_grid=15)
-        assert math.isclose(result.ab_ri, result.ri_grid.min(), rel_tol=1e-9)
-
-    def test_ri_normalised_to_one(self):
-        cart, cell = _graphene_positions()
-        result = scan_registry_index(cart, cart, cell, n_grid=15)
         assert math.isclose(result.aa_ri, 1.0, abs_tol=1e-9)
+        assert math.isclose(result.ab_ri, result.ri_grid.min(), rel_tol=1e-9)
+        assert result.ab_ri < result.aa_ri
 
     def test_zero_shift_is_aa_registry_for_same_layer(self):
         """Placing B directly on A (u=0) should give maximum registry (RI=1)."""
@@ -305,17 +286,6 @@ class TestScanRegistryIndex:
             np.argmin(result.shifts_x**2 + result.shifts_y**2), result.ri_grid.shape
         )
         assert result.ri_grid[i0] > 0.9
-
-    def test_ab_ri_less_than_aa_ri(self):
-        cart, cell = _graphene_positions()
-        result = scan_registry_index(cart, cart, cell, n_grid=15)
-        assert result.ab_ri < result.aa_ri
-
-    def test_shifts_x_y_same_shape_as_grid(self):
-        cart, cell = _graphene_positions()
-        result = scan_registry_index(cart, cart, cell, n_grid=10)
-        assert result.shifts_x.shape == result.ri_grid.shape
-        assert result.shifts_y.shape == result.ri_grid.shape
 
     def test_all_zero_grid_is_returned_unscaled(self):
         """raw_max == 0 must not divide by zero and must return a valid,
@@ -366,13 +336,13 @@ def test_match_to_fixed_box_fails_loud_when_incommensurate():
 # D3: commensurate twist search + orthorhombic wrapper
 # =============================================================================
 
-def _hex_cell(a=3.16):
+def _hex_cell_60deg(a=3.16):
     return np.array([[a, 0.0], [a * 0.5, a * np.sqrt(3) / 2]])
 
 
 def test_find_commensurate_twist_emits_orthorhombic_box_near_target():
     from frictionsim2d.lattice.matching import find_commensurate_twist, TwistMatch
-    A = _hex_cell(); B = _hex_cell()
+    A = _hex_cell_60deg(); B = _hex_cell_60deg()
     m = find_commensurate_twist(A, B, target_angle=7.0, angle_tol=3.0,
                                 strain_tol=0.03, max_supercell=12)
     assert isinstance(m, TwistMatch)
@@ -386,7 +356,7 @@ def test_find_commensurate_twist_emits_orthorhombic_box_near_target():
 
 def test_find_commensurate_twist_fails_loud_names_nearest():
     from frictionsim2d.lattice.matching import find_commensurate_twist
-    A = _hex_cell(); B = _hex_cell()
+    A = _hex_cell_60deg(); B = _hex_cell_60deg()
     with pytest.raises(ValueError, match=r"nearest|achievable"):
         find_commensurate_twist(A, B, target_angle=7.0, angle_tol=0.01,
                                 strain_tol=0.001, max_supercell=4)
@@ -394,7 +364,7 @@ def test_find_commensurate_twist_fails_loud_names_nearest():
 
 def test_orthorhombic_wrapper_tiles_rhombic_moire():
     from frictionsim2d.lattice.matching import orthorhombic_wrapper
-    rhombus = _hex_cell(a=30.0)                            # a moire-scale rhombus (60 deg)
+    rhombus = _hex_cell_60deg(a=30.0)                            # a moire-scale rhombus (60 deg)
     ortho, tiling = orthorhombic_wrapper(rhombus)
     assert abs(ortho[1, 0]) < 1e-6                         # rectangular
     # the wrapper area is an integer multiple of the rhombus area (genuine periodic tiling)
@@ -404,13 +374,12 @@ def test_orthorhombic_wrapper_tiles_rhombic_moire():
 
 def test_rotation_angle_between_recovers_the_applied_rotation():
     from frictionsim2d.lattice.matching import rotation_angle_between
-    A = _hex_cell()
+    A = _hex_cell_60deg()
     theta = 15.0
     r = math.radians(theta)
     R = np.array([[math.cos(r), -math.sin(r)], [math.sin(r), math.cos(r)]])
     B = A @ R.T                                            # A rotated by +15 deg
-    assert abs(rotation_angle_between(A, B) - (-theta)) < 1e-6 \
-        or abs(rotation_angle_between(A, B) - theta) < 1e-6
+    assert rotation_angle_between(A, B) == pytest.approx(theta, abs=1e-6)
 
 
 def test_relative_rotation_strain_singular_supercell_returns_zero_angle_inf_strain():

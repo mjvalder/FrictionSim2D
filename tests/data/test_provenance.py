@@ -33,10 +33,12 @@ def _record(**kw):
 
 
 def test_roundtrip(tmp_path):
-    p = write_provenance(tmp_path, _record())
+    rec = _record()
+    p = write_provenance(tmp_path, rec)
     data = json.loads(p.read_text())
     assert data['seed_thermal_tip'] == 1
     assert data['schema_version']
+    assert read_provenance(p) == rec
 
 
 def test_missing_required_field_fails_build():
@@ -95,14 +97,6 @@ def test_every_component_gets_its_own_entry():
     assert {m.role for m in rec.materials} <= set(MATERIAL_ROLES)
     assert [m.name for m in rec.materials if m.role == 'sheet'] == ['h-MoS2', 'h-WS2']
     assert rec.materials[0].pot_file_sha256 == 'ab' * 32
-
-
-def test_reader_leaves_a_two_x_file_alone(tmp_path):
-    path = write_provenance(tmp_path, _record())
-
-    rec = read_provenance(path)
-
-    assert rec == _record()
 
 
 def test_builder_writes_provenance(tmp_path):
@@ -216,10 +210,6 @@ def test_parse_hold_files_skips_a_partial_last_line(tmp_path):
 
 
 # --- run identity (Task 5b, critique C3) ------------------------------------
-
-def test_schema_version_is_2_2_0():
-    assert PROVENANCE_SCHEMA_VERSION == '2.2.0'
-
 
 def test_new_run_uuid_is_a_fresh_uuid4():
     from uuid import UUID

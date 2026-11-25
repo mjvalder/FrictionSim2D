@@ -280,6 +280,19 @@ def test_expert_override_applies_and_is_listed(aiida_profile_clean, no_profile_s
     assert ruled['status'] == 'complete' and not ruled['failed']
 
 
+def test_an_override_without_a_note_is_refused(aiida_profile_clean, no_profile_switch,
+                                              tmp_path):
+    """Overruling a failed point needs a reason on record: an empty note is not."""
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass', note='""', override=True)
+
+    report = apply_rulings('camp')
+
+    assert report.applied == 0 and _nodes('apply_ruling') == []
+    assert 'a non-empty `note`' in report.render()
+
+
 def _ruled_live():
     return [n for n in _ruled_outputs() if not n.base.extras.get('superseded', False)]
 

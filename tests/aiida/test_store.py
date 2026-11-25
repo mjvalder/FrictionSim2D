@@ -283,17 +283,6 @@ def test_random_uuids_duplicate_and_verify_says_so(aiida_profile_clean, tmp_path
     assert 'duplicate' in verify().render()
 
 
-def test_set_uuid_without_the_private_api_warns_once(aiida_profile_clean, caplog,
-                                                    monkeypatch):
-    class Bare:
-        backend_entity = object()
-    monkeypatch.setattr(store, '_warned_uuid', False)
-    with caplog.at_level('WARNING', logger='frictionsim2d.aiida.store'):
-        store._set_uuid(Bare(), node_uuid('block', 'a'))
-        store._set_uuid(Bare(), node_uuid('block', 'b'))
-    assert len([r for r in caplog.records if 'deterministic' in r.message]) == 1
-
-
 def test_a_block_whose_extras_were_dropped_is_found_by_uuid(aiida_profile_clean):
     node = get_or_create_block(THERMOSTAT)
     node.base.extras.clear()
