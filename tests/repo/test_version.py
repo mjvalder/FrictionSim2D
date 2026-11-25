@@ -1,4 +1,5 @@
-"""The package version has one literal (pyproject.toml); everything else derives."""
+"""The package version has one literal (``__version__`` in frictionsim2d/__init__.py,
+read by hatch's dynamic version); everything else derives."""
 from importlib.metadata import version
 
 from click.testing import CliRunner
