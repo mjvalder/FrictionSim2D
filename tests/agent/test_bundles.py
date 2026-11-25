@@ -65,12 +65,18 @@ def test_bad_manifest_is_skipped_with_a_warning(tmp_path, caplog):
     assert 'broken' in caplog.text and 'partial' in caplog.text
 
 
-def test_verify_detects_partial_gguf(tmp_path):
+def test_verify_detects_partial_gguf(tmp_path, monkeypatch):
     folder = write_bundle(tmp_path / 'qwen3.5-4b')
     tune = read_manifest(folder)
     assert verify(tune) is None
     (folder / 'model.gguf').write_bytes(b'weig')
     assert 'does not match' in verify(tune)
+    # a wrong size is refused before the (slow) hash is ever computed
+    def no_hashing(path):
+        raise AssertionError('hashed a file of the wrong size')
+    monkeypatch.setattr(bundles, 'sha256_file', no_hashing)
+    assert 'does not match' in verify(tune)
+    monkeypatch.undo()
     (folder / 'model.gguf').write_bytes(b'WEIGHTS')  # same size, other bytes
     assert 'does not match' in verify(tune)
 

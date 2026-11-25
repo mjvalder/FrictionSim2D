@@ -92,3 +92,32 @@ def test_single_deck_named_slide_in(tmp_path):
     result = reconstruct(run, root)
     record = ProvenanceRecord.model_validate_json(result.wrote.read_text(encoding='utf-8'))
     assert record.thermostat_scheme == 'nvt_center'
+
+
+def test_a_langevin_deck_is_recognised(tmp_path):
+    root, run = _tree(tmp_path, 'rebomos', REBOMOS_REL)
+    deck = run / 'lammps' / 'slide_p1gpa.in'
+    deck.write_text(deck.read_text(encoding='utf-8') + '\nfix lg all langevin 300 300 0.1 42\n',
+                    encoding='utf-8')
+    result = reconstruct(run, root)
+    record = ProvenanceRecord.model_validate_json(result.wrote.read_text(encoding='utf-8'))
+    assert record.thermostat_scheme == 'langevin_center_nve'
+
+
+def test_a_sync_conflict_copy_is_not_a_legacy_run(tmp_path):
+    root, run = _tree(tmp_path, 'rebomos', REBOMOS_REL)
+    conflict = root / 'sheetonsheet' / 'h-MoS2' / '100x_100y' / 'K300.sync-conflict-20260301'
+    shutil.copytree(run, conflict)
+    assert find_legacy_runs(root) == [run]
+
+
+@pytest.mark.parametrize('fixture, rel', [('rebomos', REBOMOS_REL), ('deepmd', DEEPMD_REL)])
+def test_dry_run_writes_and_moves_nothing(tmp_path, fixture, rel):
+    root, run = _tree(tmp_path, fixture, rel)
+    before = sorted(p.relative_to(root).as_posix() for p in root.rglob('*'))
+
+    result = reconstruct(run, root, dry_run=True)
+
+    assert result.wrote is not None            # reports what it would write ...
+    assert not result.wrote.exists()           # ... but writes nothing
+    assert sorted(p.relative_to(root).as_posix() for p in root.rglob('*')) == before

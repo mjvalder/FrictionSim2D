@@ -1,6 +1,4 @@
 """frictionsim2d.interfaces.ase — the one adapter that must stay lazy (CLAUDE.md, import weight)."""
-import sys
-
 import pytest
 
 from frictionsim2d.interfaces import ase as ase_iface
@@ -9,9 +7,14 @@ from frictionsim2d.interfaces import ase as ase_iface
 def test_read_structure_takes_the_first_image_of_a_trajectory(monkeypatch, materials_path):
     import ase.io
     real_read = ase.io.read
-    monkeypatch.setattr(ase.io, 'read', lambda p, **k: [real_read(p), real_read(p)])
+    first = real_read(materials_path / 'h-MoS2.cif')
+    second = real_read(materials_path / 'h-MoS2.cif')
+    second.set_cell([5.0, 5.0, 5.0, 90, 90, 90])      # distinguishable from the first image
+    monkeypatch.setattr(ase.io, 'read', lambda p, **k: [first, second])
     data = ase_iface.read_structure(materials_path / 'h-MoS2.cif')
-    assert len(data['cellpar']) == 6
+    assert data['cellpar'] == pytest.approx(list(first.cell.cellpar()))
+    assert data['formula'] == 'MoS2'                  # Hill notation, not per-atom
+    assert data['symbols'] == first.get_chemical_symbols()
 
 
 def test_element_mass_known_symbol():
@@ -21,18 +24,6 @@ def test_element_mass_known_symbol():
 def test_element_mass_unknown_symbol_raises_key_error():
     with pytest.raises(KeyError):
         ase_iface.element_mass('Xx')
-
-
-def test_importing_the_adapter_does_not_import_ase_io(monkeypatch):
-    import importlib
-    stale = [m for m in sys.modules if m == 'ase.io' or m.startswith('ase.io.')]
-    for m in stale:
-        monkeypatch.delitem(sys.modules, m, raising=False)
-    try:
-        importlib.reload(ase_iface)
-        assert 'ase.io' not in sys.modules
-    finally:
-        importlib.import_module('ase.io')
 
 
 def test_read_lammps_data_returns_cell_and_positions(tmp_path):

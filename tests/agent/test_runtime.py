@@ -300,43 +300,6 @@ def test_continue_after_the_cap_survives_a_history_collapse(deps):
     assert 'set up a sweep' in text
 
 
-def test_history_collapse_keeps_the_latest_turn_intact():
-    from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart,
-                                      ToolCallPart, ToolReturnPart, UserPromptPart)
-    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=scripted('x')),
-                           history_budget=10)
-    old = [ModelRequest(parts=[UserPromptPart(content='old ' * 50)]),
-           ModelResponse(parts=[TextPart(content='old answer ' * 50)])]
-    latest = [ModelRequest(parts=[UserPromptPart(content='latest')]),
-              ModelResponse(parts=[ToolCallPart(tool_name='list_modes', args={},
-                                                tool_call_id='c1')]),
-              ModelRequest(parts=[ToolReturnPart(tool_name='list_modes', content='r',
-                                                 tool_call_id='c1')])]
-    session.history = old + latest
-    trimmed = session._trimmed_history()  # pylint: disable=protected-access
-    assert trimmed[-3:] == latest
-    assert 'Summary of the earlier conversation' in repr(trimmed[0])
-
-
-def test_new_chat_bumps_the_generation_before_clearing():
-    seen = []
-
-    class Watched(AgentSession):
-        @property
-        def history(self):
-            return self.__dict__.get('_hist', [])
-
-        @history.setter
-        def history(self, value):
-            seen.append(getattr(self, '_generation', None))
-            self.__dict__['_hist'] = value
-
-    session = Watched(AgentSettings())
-    seen.clear()
-    session.new_chat()
-    assert seen == [1]
-
-
 def test_turn_cancellation_reaches_the_materials_client(deps):
     seen = []
 

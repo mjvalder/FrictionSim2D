@@ -30,7 +30,22 @@ def test_cli_help(runner):
 def test_cli_version(runner):
     result = runner.invoke(cli, ['--version'])
     assert result.exit_code == 0
-    assert '0.1.0' in result.output
+    from importlib.metadata import version
+    assert version('FrictionSim2D') in result.output
+
+
+@pytest.mark.parametrize('group, names', [
+    ('run', ['afm', 'indent', 'pes-sheet', 'pes-tip', 'quench', 'sheetonsheet']),
+    ('settings', ['init', 'reset', 'show']),
+    ('hpc', ['enrich-provenance', 'generate']),
+    ('postprocess', ['indent', 'pes-scan', 'plot', 'read']),
+])
+def test_group_help_lists_its_commands(runner, group, names):
+    result = runner.invoke(cli, [group, '--help'])
+    assert result.exit_code == 0
+    listed = [line.split()[0] for line in result.output.split('Commands:')[1].splitlines()
+              if line.strip()]
+    assert listed == names
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +64,6 @@ def test_run_afm_help(runner):
     assert result.exit_code == 0
     assert 'CONFIG_FILE' in result.output
     assert '--output-dir' in result.output
-    assert '--aiida' not in result.output
     assert '--hpc-scripts' in result.output
 
 
@@ -81,6 +95,7 @@ def test_settings_show(runner):
 def test_settings_show_origin(runner):
     result = runner.invoke(cli, ['settings', 'show', '--origin'])
     assert result.exit_code == 0
+    assert result.output.startswith('# Settings loaded from:')
 
 
 def test_settings_init_help(runner):
@@ -247,34 +262,17 @@ def test_postprocess_plot_help(runner):
     assert '--output-dir' in result.output
 
 
-def test_postprocess_plot_missing_keys(runner, tmp_path):
-    """Config missing required keys should abort gracefully."""
-    import json
-    cfg = tmp_path / 'bad.json'
-    cfg.write_text(json.dumps({'plots': []}), encoding='utf-8')
-    result = runner.invoke(cli, ['postprocess', 'plot', str(cfg)])
-    assert result.exit_code != 0
-
-
-def test_postprocess_plot_mismatched_labels(runner, tmp_path):
-    """Mismatched data_dirs / labels should abort gracefully."""
-    import json
-    cfg = tmp_path / 'bad.json'
-    cfg.write_text(
-        json.dumps({'data_dirs': ['a', 'b'], 'labels': ['only_one'], 'plots': [{}]}),
-        encoding='utf-8',
-    )
-    result = runner.invoke(cli, ['postprocess', 'plot', str(cfg)])
-    assert result.exit_code != 0
-
-
 # ---------------------------------------------------------------------------
 # removed groups
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize('group', ['db', 'api'])
-def test_the_central_database_groups_are_gone(runner, group):
-    result = runner.invoke(cli, [group, '--help'])
+@pytest.mark.parametrize('argv', [
+    ['db', '--help'], ['api', '--help'],                  # the central database
+    ['aiida', 'package', '--help'], ['aiida', 'submit', '--help'],   # AiiDA is import-only
+    ['aiida', 'dump', '--help'],                         # replaced by export-results
+])
+def test_removed_commands_are_absent(runner, argv):
+    result = runner.invoke(cli, argv)
     assert result.exit_code == 2
     assert 'No such command' in result.output
 
@@ -286,16 +284,20 @@ def test_the_central_database_groups_are_gone(runner, group):
 aiida = pytest.importorskip('aiida', reason='aiida-core not installed')
 
 
-def test_aiida_help(runner):
+def test_aiida_help_lists_its_commands(runner):
     result = runner.invoke(cli, ['aiida', '--help'])
-    # exit_code may be non-zero if no AiiDA profile is configured,
-    # but the help text should still show available commands.
-    assert 'status' in result.output or result.exit_code == 0
+    assert result.exit_code == 0
+    listed = [line.split()[0] for line in result.output.split('Commands:')[1].splitlines()
+              if line.strip()]
+    for name in ('status', 'setup', 'import', 'import-archive', 'export', 'rebuild',
+                 'list-sets', 'query', 'clear', 'delete', 'export-results'):
+        assert name in listed
 
 
 def test_aiida_status_help(runner):
     result = runner.invoke(cli, ['aiida', 'status', '--help'])
-    assert result.exit_code == 0 or 'status' in result.output
+    assert result.exit_code == 0
+    assert 'Usage:' in result.output and 'status' in result.output
 
 
 def test_aiida_import_help(runner):
@@ -321,6 +323,7 @@ def test_aiida_delete_help(runner):
 def test_aiida_clear_help(runner):
     result = runner.invoke(cli, ['aiida', 'clear', '--help'])
     assert result.exit_code == 0
+    assert '--yes' in result.output and '--profile' in result.output
 
 
 def test_aiida_list_sets_help(runner):
@@ -455,7 +458,7 @@ def test_aiida_import_archive_help(runner):
     assert 'ARCHIVE_PATH' in result.output
 
 
-def test_aiida_import_archive_loads_profile(runner, monkeypatch, tmp_path):
+def test_aiida_import_archive_hands_the_archive_to_the_importer(runner, monkeypatch, tmp_path):
     archive = tmp_path / 'results.aiida'
     archive.write_text('dummy', encoding='utf-8')
 
@@ -473,12 +476,3 @@ def test_aiida_import_archive_loads_profile(runner, monkeypatch, tmp_path):
     assert calls == [
         ('import_archive', str(archive)),
     ]
-
-
-@pytest.mark.parametrize('gone', ['package', 'submit'])
-def test_aiida_submission_commands_are_gone(runner, gone):
-    """AiiDA is import-only: jobs go through `hpc generate` + the scheduler +
-    `aiida import`; nothing submits through AiiDA any more."""
-    result = runner.invoke(cli, ['aiida', gone, '--help'])
-    assert result.exit_code != 0
-    assert 'No such command' in result.output

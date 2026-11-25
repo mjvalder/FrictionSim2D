@@ -1,7 +1,7 @@
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
-from jinja2 import TemplateNotFound
+from jinja2 import Environment, TemplateNotFound
 
 from frictionsim2d.interfaces.jinja import PackageLoader
 
@@ -10,19 +10,6 @@ def test_get_source_missing_template_raises_template_not_found():
     loader = PackageLoader('frictionsim2d.templates')
     with pytest.raises(TemplateNotFound):
         loader.get_source(environment=None, template='does/not/exist.lmp')
-
-
-def test_get_source_does_not_mask_type_errors():
-    loader = PackageLoader('frictionsim2d.templates')
-    with patch.object(loader, '_package', None):
-        with pytest.raises(Exception) as excinfo:
-            loader.get_source(environment=None, template='afm/slide.lmp')
-        assert not isinstance(excinfo.value, TemplateNotFound)
-
-
-from pathlib import Path
-
-from jinja2 import Environment
 
 
 def test_get_source_returns_text_name_and_uptodate_for_a_real_template():

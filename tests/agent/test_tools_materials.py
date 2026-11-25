@@ -138,6 +138,13 @@ def test_lattice_mismatch_reports_both_cells_and_the_mismatch(deps):
     assert '/home' not in text and len(text) <= 1500
 
 
+def test_lattice_mismatch_is_relative_to_the_mean_cell(deps):
+    """A mismatch large enough to tell mean-relative (4.17 %) from relative
+    to either cell (4.26 / 4.09 %); a literal, not re-derived."""
+    first = lattice_mismatch(deps, 'h-MoS2', 'h-MoSe2').splitlines()[0]
+    assert '4.17 %' in first
+
+
 def test_lattice_mismatch_numbers_fit_in_the_first_200_chars(deps):
     """The eval's grounding check sees tool results cut to 200 characters."""
     text = lattice_mismatch(deps, 'h-MoS2', 'h-WS2')

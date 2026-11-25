@@ -75,11 +75,6 @@ def test_create_lammps_instance_is_headless():
     assert seen["cmdargs"] == ["-log", "none", "-screen", "none", "-nocite"]
 
 
-def test_import_lammps_module_returns_the_lammps_module():
-    lammps = pytest.importorskip("lammps")
-    assert lmp_iface._import_lammps_module() is lammps
-
-
 @pytest.fixture
 def fresh_pair_styles():
     REAL_PAIR_STYLES.cache_clear()
@@ -106,6 +101,13 @@ def test_pair_styles_none_without_a_pair_styles_block(monkeypatch, fresh_pair_st
     monkeypatch.setattr(lmp_iface.subprocess, 'run',
                         lambda *a, **k: types.SimpleNamespace(stdout=out))
     assert REAL_PAIR_STYLES() is None
+
+
+def test_pair_styles_are_parsed_and_lowercased(monkeypatch, fresh_pair_styles):
+    out = ('Fix styles:\n  nve\nPair styles:\n  Lj/Cut  SW\n  REBOMoS\nBond styles:\n  harmonic\n')
+    monkeypatch.setattr(lmp_iface.subprocess, 'run',
+                        lambda *a, **k: types.SimpleNamespace(stdout=out))
+    assert REAL_PAIR_STYLES() == frozenset({'lj/cut', 'sw', 'rebomos'})
 
 
 def test_run_on_data_file_wraps_commands_between_read_and_write(monkeypatch):

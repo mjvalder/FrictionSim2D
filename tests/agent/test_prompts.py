@@ -4,6 +4,10 @@ from frictionsim2d.agent.prompts import (KNOWLEDGE_FILES, OLLAMA_BUDGET_TOKENS,
 from frictionsim2d.gui.schema.simulation_types import FAMILIES
 
 
+def test_ollama_budget_is_the_one_the_finetunes_were_trained_against():
+    assert OLLAMA_BUDGET_TOKENS == 2500
+
+
 def test_ollama_prompt_within_budget():
     assert estimate_tokens(build_system_prompt('ollama')) <= OLLAMA_BUDGET_TOKENS
 

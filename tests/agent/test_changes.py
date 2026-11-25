@@ -369,6 +369,17 @@ def test_preview_scratch_only_for_material_lists(deps):
     assert not (deps.roots.workspace / '.preview').exists()
 
 
+def test_apply_fs_refuses_a_change_with_issues(deps):
+    ws = deps.roots.workspace
+    change = build_fs_changeset(deps, 'bad', [('write_text', '../escape.cif', 'x')])
+    assert not change.ok
+
+    result = apply_fs_changeset(change, ws)
+
+    assert not result.applied and result.message.startswith('Not applied')
+    assert not (ws.parent / 'escape.cif').exists()
+
+
 def test_fs_write_text_creates_a_new_file(deps):
     ws = deps.roots.workspace
     change = build_fs_changeset(deps, 'cif', [('write_text', 'materials/x.cif', 'data_x\n')])

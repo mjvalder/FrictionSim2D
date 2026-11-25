@@ -173,22 +173,6 @@ def test_export_results_writes_a_tree(tmp_path, monkeypatch):
     assert '1 file' in result.output
 
 
-def test_export_results_reports_an_unknown_label_cleanly(tmp_path, monkeypatch):
-    monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
-
-    def _raise(*_a, **_k):
-        raise LookupError("no simulation set for label or UUID 'nope'")
-
-    monkeypatch.setattr('frictionsim2d.aiida.export.export_results', _raise)
-
-    result = CliRunner().invoke(cli, [
-        'aiida', 'export-results', 'nope', str(tmp_path / 'out')])
-
-    assert result.exit_code != 0
-    assert result.exc_info[0] is not LookupError
-    assert 'nope' in result.output
-
-
 def test_rebuild_calls_rebuild_set(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
@@ -221,27 +205,25 @@ def test_rebuild_exits_nonzero_and_names_the_failed_runs(tmp_path, monkeypatch):
     assert 'Rebuilt 0 run(s)' in result.output and '1 failed' in result.output
 
 
-def test_rebuild_reports_an_unknown_label_cleanly(tmp_path, monkeypatch):
+@pytest.mark.parametrize('target, argv', [
+    ('frictionsim2d.aiida.export.export_results', ['export-results', 'nope', 'OUT']),
+    ('frictionsim2d.aiida.export.rebuild_set', ['rebuild', 'nope', '-o', 'OUT']),
+])
+def test_unknown_label_is_reported_cleanly(tmp_path, monkeypatch, target, argv):
     monkeypatch.setattr('frictionsim2d.aiida.AIIDA_AVAILABLE', True)
 
     def _raise(*_a, **_k):
         raise LookupError("no simulation set for label or UUID 'nope'")
 
-    monkeypatch.setattr('frictionsim2d.aiida.export.rebuild_set', _raise)
+    monkeypatch.setattr(target, _raise)
 
     result = CliRunner().invoke(cli, [
-        'aiida', 'rebuild', 'nope', '-o', str(tmp_path)])
+        'aiida', *[str(tmp_path / 'out') if a == 'OUT' else a for a in argv]])
 
     assert result.exit_code != 0
     assert result.exc_info[0] is not LookupError
     assert 'nope' in result.output
 
-
-def test_dump_is_gone():
-    result = CliRunner().invoke(cli, ['aiida', 'dump', '--help'])
-
-    assert result.exit_code != 0
-    assert 'export-results' in CliRunner().invoke(cli, ['aiida', '--help']).output
 
 
 def test_import_takes_the_profile_from_an_explicit_settings_file(tmp_path, monkeypatch):

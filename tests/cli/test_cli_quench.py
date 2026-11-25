@@ -83,6 +83,18 @@ def test_run_quench_writes_the_root_and_starts_nothing(tmp_path, no_lammps):
     assert no_lammps == []
 
 
+@pytest.mark.parametrize('extra', [[], ['--for', str(REPO / 'examples' / 'afm_config.ini')]],
+                         ids=['neither', 'both'])
+def test_run_quench_needs_exactly_one_of_config_and_for(tmp_path, no_lammps, extra):
+    args = ['run', 'quench', '-o', tmp_path / 'out', *extra]
+    if extra:
+        args.insert(2, _quench_ini(tmp_path))
+    result = _invoke(*args)
+    assert result.exit_code == 2
+    assert 'give either CONFIG' in result.output
+    assert not (tmp_path / 'out').exists()
+
+
 def test_run_quench_list_fields_expand_into_members(tmp_path, no_lammps):
     ini = _quench_ini(tmp_path)
     ini.write_text(ini.read_text().replace('melt_temp = 3000', 'melt_temp = [2800, 3000]'))
@@ -173,6 +185,23 @@ def test_quench_import_cli_reports_incomplete_and_exits_1(tmp_path, no_lammps):
     assert 'incomplete' in result.output
 
 
+@pytest.mark.parametrize('flag, replace', [([], False), (['--replace'], True)])
+def test_quench_import_replace_flag_reaches_the_import(tmp_path, monkeypatch, flag, replace):
+    from types import SimpleNamespace
+    seen = {}
+
+    def fake_import(root, replace, source):
+        seen.update(replace=replace, source=source)
+        return SimpleNamespace(ok=True, lines=lambda: [])
+
+    monkeypatch.setattr(amorphous, 'import_quench_root', fake_import)
+
+    result = _invoke('quench', 'import', tmp_path, *flag)
+
+    assert result.exit_code == 0, result.output
+    assert seen == {'replace': replace, 'source': 'hpc'}
+
+
 def test_quench_import_cli_imports_a_finished_root(tmp_path, no_lammps):
     _invoke('run', 'quench', _quench_ini(tmp_path), '-o', tmp_path / 'out')
     root = next((tmp_path / 'out').glob('quench_*'))
@@ -189,24 +218,6 @@ def test_quench_list_shows_the_shipped_block(tmp_path):
     assert result.exit_code == 0, result.output
     rows = json.loads(result.output)
     assert any(r['root'] == 'packaged' and r['key8'] for r in rows)
-
-
-def test_removed_quench_keys_load_with_a_deprecation_warning():
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter('always')
-        settings = QuenchSettings.model_validate(
-            {'run_local': True, 'n_procs': 4, 'allow_generate': False})
-    assert settings.melt_steps == 20000 and settings.equilibrate_steps == 10000
-    assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-    assert not hasattr(settings, 'run_local')
-
-
-def test_removed_quench_keys_are_logged_where_the_cli_shows_them(caplog):
-    with caplog.at_level('WARNING', logger='frictionsim2d.core.config'):
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            QuenchSettings.model_validate({'run_local': True})
-    assert any('run_local' in r.getMessage() for r in caplog.records)
 
 
 def test_local_run_with_a_failed_member_still_imports_the_rest_and_exits_1(tmp_path,

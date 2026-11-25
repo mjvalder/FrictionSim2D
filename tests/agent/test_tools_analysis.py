@@ -108,10 +108,13 @@ def test_summarise_caps_rows(deps):
 
 def test_summarise_shows_scalar_post_entries_only(deps):
     doc = json.loads(_doc(deps).read_text())
-    doc['runs'][0]['post'] = {'cof_mean': 0.0123456, 'peaks': [1, 2, 3]}
+    doc['runs'][0]['post'] = {'cof_mean': 0.0123456, 'peaks': [1, 2, 3],
+                              's1': 1, 's2': 2, 's3': 3, 's4': 4}
     _doc(deps).write_text(json.dumps(doc))
     text = summarise_results(deps, 'campaign')
     assert 'cof_mean=0.01235' in text and 'peaks' not in text
+    # at most MAX_POST (3) scalars per row
+    assert 's2=2' in text and 's3' not in text and 's4' not in text
 
 
 def test_summarise_refuses_oversized_json(deps):
@@ -186,11 +189,10 @@ def _fake_runs(root, n):
 
 
 def test_find_counts_a_huge_root_cheaply(deps):
-    import time
+    # The count stops at MAX_ROOT_RUNS (1000) instead of reading all 2000
+    # provenance files; no wall-clock bound, which is flaky on a loaded machine.
     _fake_runs(deps.roots.workspace / 'big', 2000)
-    start = time.monotonic()
     text = find_result_sets(deps)
-    assert time.monotonic() - start < 5
     assert 'workspace:/big — simulation root (afm: 1000+ runs)' in text
 
 

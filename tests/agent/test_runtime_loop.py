@@ -82,3 +82,16 @@ def test_runner_reuses_one_loop_and_closes_it():
     runner.close()
     assert first.is_closed()
     runner.close()  # idempotent
+
+
+def test_close_cancels_a_task_left_pending():
+    import asyncio
+    runner = TurnRunner()
+
+    async def leave_a_task():
+        return asyncio.ensure_future(asyncio.sleep(60))
+
+    task = runner.run(leave_a_task())
+    assert not task.done()
+    runner.close()
+    assert task.cancelled()

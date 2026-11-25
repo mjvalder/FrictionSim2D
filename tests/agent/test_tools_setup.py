@@ -58,11 +58,6 @@ def test_set_fields_unknown_key_suggests(deps):
         set_fields(deps, [FieldChange(section='general', key='scan_sped', value=2)])
 
 
-def test_set_fields_unknown_section(deps):
-    with pytest.raises(ToolInputError, match='find_parameter'):
-        set_fields(deps, [FieldChange(section='nope', key='x', value=1)])
-
-
 def test_set_fields_enables_absent_optional_section(deps):
     absent = [s.key for s in deps.document.sections()
               if s.optional and not deps.document.has_section(s.key)
@@ -83,13 +78,6 @@ def test_make_sweep(args, expected):
     assert make_sweep(*args) == pytest.approx(expected)
 
 
-def test_make_sweep_rejects_bad_input():
-    with pytest.raises(ToolInputError):
-        make_sweep(0, 10, 3, 'log')
-    with pytest.raises(ToolInputError):
-        make_sweep(1, 2, 0)
-
-
 def test_make_sweep_tool_text(deps):
     assert make_sweep_tool(deps, 2, 10, 5) == 'values: 2, 4, 6, 8, 10'
 
@@ -103,9 +91,9 @@ def test_suggest_values_low_load_uses_reference_band(deps):
     assert len(text) <= 1500
 
 
-def test_suggest_values_has_no_spacing_argument_and_lists_synonyms():
-    import inspect
-    assert 'spacing' not in inspect.signature(suggest_values).parameters
+def test_suggest_values_lists_its_synonyms():
+    # (the absent `spacing` argument is pinned through the registered tool schema
+    # in test_runtime.py::test_suggest_values_tool_has_no_spacing)
     for word in ('small', 'light', 'moderate', 'medium', 'large', 'heavy'):
         assert word in suggest_values.__doc__
 
@@ -154,6 +142,17 @@ def test_refused_settings_constant_covers_the_rule(deps):
                 assert (spec.key, key) in REFUSED_SETTINGS
 
 
+@pytest.mark.parametrize('section, key, refused', [
+    ('hpc', 'some_future_hpc_key', True),          # the whole hpc section is refused
+    ('simulation', 'some_future_command', True),   # suffix rules
+    ('simulation', 'some_future_dir', True),
+    ('simulation', 'timestep', False),
+])
+def test_the_refusal_rule_covers_keys_the_constant_does_not_list(section, key, refused):
+    from frictionsim2d.agent.tools.setup import _refused_setting
+    assert _refused_setting(section, key) is refused
+
+
 @pytest.mark.parametrize('scope, section, key, value', [
     ('config', 'general', 'scan_speed', '2\nprint hi'),
     ('settings', 'simulation', 'min_style', 'cg\nshell rm -rf x'),
@@ -170,9 +169,10 @@ def test_compact_cuts_a_single_huge_line():
     assert len(text) <= 100 and text.startswith('x' * 50) and text.endswith('(truncated)')
 
 
-@pytest.mark.parametrize('args', [(0, 1, 201), (float('nan'), 1, 3), (0, float('inf'), 3),
+@pytest.mark.parametrize('args', [(0, 10, 3, 'log'), (1, 2, 0), (0, 1, 201),
+                                  (float('nan'), 1, 3), (0, float('inf'), 3),
                                   (float('-inf'), 0, 3)])
-def test_make_sweep_rejects_huge_or_non_finite(args):
+def test_make_sweep_rejects(args):
     with pytest.raises(ToolInputError):
         make_sweep(*args)
 
@@ -209,9 +209,11 @@ def test_set_fields_matches_section_case_insensitively(deps):
     assert any(op.section == 'general' and op.key == 'temp' for op in deps.pending[-1].ops)
 
 
-def test_set_fields_unknown_section_suggests(deps):
-    with pytest.raises(ToolInputError, match="did you mean general"):
-        set_fields(deps, [FieldChange(section='genral', key='temp', value=300)])
+@pytest.mark.parametrize('section, hint', [('nope', 'find_parameter'),
+                                           ('genral', 'did you mean general')])
+def test_set_fields_unknown_section_suggests(deps, section, hint):
+    with pytest.raises(ToolInputError, match=hint):
+        set_fields(deps, [FieldChange(section=section, key='temp', value=300)])
 
 
 def test_set_fields_key_case_hint(deps):

@@ -49,3 +49,21 @@ def test_top_com_maps_to_the_drive_channel():
         'tiers': {'window': {'columns': ['drivex'], 'data': [[5.0]]}}}]}
     report = compare(legacy, export)
     assert report.notes == [] and report.columns[0].max_abs == 0.0
+
+
+def test_the_relative_difference_is_scaled_by_the_legacy_column():
+    # legacy v_sx = 2.0, store 2.5: |diff| 0.5 over a scale of 2.0 -> 0.25
+    report = compare(_legacy([[1.0, 2.0, 3.0]]), _schema3([[1.0, 2.5, 3.0]]))
+    worst = max(report.columns, key=lambda c: c.max_rel)
+    assert worst.max_rel == 0.25
+
+
+def test_render_lists_only_columns_above_the_threshold():
+    from tools.publication.compare_legacy import render
+    report = compare(_legacy([[1.0, 2.0, 3.0]]), _schema3([[1.0, 2.5, 3.0]]))
+
+    loose = render('set', report, threshold=0.5)
+    strict = render('set', report, threshold=1e-9)
+
+    assert 'max relative difference: 0.25' in loose and '| v_sx |' not in loose
+    assert '| v_sx |' in strict

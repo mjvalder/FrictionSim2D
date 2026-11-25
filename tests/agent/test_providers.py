@@ -15,8 +15,9 @@ def test_gemini_without_key_is_unavailable():
 
 
 def test_gemini_model_built_with_key():
-    model = build_model(AgentSettings(), key_lookup=lambda s, p: 'k')
-    assert 'gemini-3.5-flash-lite' in model.model_name
+    settings = AgentSettings()
+    model = build_model(settings, key_lookup=lambda s, p: 'k')
+    assert settings.gemini.model in model.model_name
 
 
 def test_anthropic_without_key_is_unavailable():
@@ -27,9 +28,9 @@ def test_anthropic_without_key_is_unavailable():
 def test_anthropic_model_built_with_its_own_key():
     pytest.importorskip('anthropic')
     asked = []
-    model = build_model(AgentSettings(provider='anthropic'),
-                        key_lookup=lambda s, p: asked.append(p) or 'k')
-    assert asked == ['anthropic'] and model.model_name == 'claude-opus-5-5'
+    settings = AgentSettings(provider='anthropic')
+    model = build_model(settings, key_lookup=lambda s, p: asked.append(p) or 'k')
+    assert asked == ['anthropic'] and model.model_name == settings.anthropic.model
 
 
 def test_openai_without_key_is_unavailable():
@@ -41,10 +42,10 @@ def test_openai_model_built_with_its_own_key():
     """Built only: no request is sent."""
     from pydantic_ai.models.openai import OpenAIChatModel
     asked = []
-    model = build_model(AgentSettings(provider='openai'),
-                        key_lookup=lambda s, p: asked.append(p) or 'sk-test')
+    settings = AgentSettings(provider='openai')
+    model = build_model(settings, key_lookup=lambda s, p: asked.append(p) or 'sk-test')
     assert asked == ['openai'] and isinstance(model, OpenAIChatModel)
-    assert model.model_name == 'gpt-5.5' and 'api.openai.com' in model.base_url
+    assert model.model_name == settings.openai.model and 'api.openai.com' in model.base_url
 
 
 def test_run_settings_per_provider():
@@ -64,8 +65,8 @@ def test_every_ollama_model_is_told_not_to_think(model):
 
 
 def test_ollama_model_uses_openai_endpoint():
-    model = build_model(AgentSettings(provider='ollama'))
-    assert model.model_name == 'fs2d-assistant:qwen3.5-4b'
+    settings = AgentSettings(provider='ollama')
+    assert build_model(settings).model_name == settings.ollama.model
 
 
 def _tags(*names):
@@ -115,10 +116,6 @@ def test_start_command_is_throttled_and_names_the_binary(tmp_path):
     from frictionsim2d.agent.ollama_server import ollama_start_command
     settings = AgentSettings(provider='ollama')
     command = ollama_start_command(settings, which=lambda name: '/opt/x/ollama', home=tmp_path)
-    for part in ('OLLAMA_IGPU_ENABLE=1', 'OLLAMA_VULKAN=1', 'OLLAMA_MAX_LOADED_MODELS=1',
-                 'OLLAMA_NUM_PARALLEL=1', 'OLLAMA_KEEP_ALIVE=2m', 'OLLAMA_CONTEXT_LENGTH=16384',
-                 'nice -n 10'):
-        assert part in command
     assert command == ('OLLAMA_IGPU_ENABLE=1 OLLAMA_VULKAN=1 OLLAMA_MAX_LOADED_MODELS=1 '
                        'OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE=2m OLLAMA_CONTEXT_LENGTH=16384 '
                        'nice -n 10 /opt/x/ollama serve')

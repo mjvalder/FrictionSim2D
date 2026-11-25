@@ -316,6 +316,17 @@ def test_endless_has_more_is_stopped(tmp_path):
         client.twodmatpedia('MoS2')
 
 
+def test_an_empty_page_ends_the_listing_even_if_it_claims_more(tmp_path):
+    http = FakeHTTP(lambda url, params: _page([_contribution(0)], True) if params['_skip'] == 0
+                    else _page([], True))
+    client, _ = _client(tmp_path, http=http)
+
+    rows = client.twodmatpedia('MoS2')
+
+    assert len(http.calls) == 2          # stopped at the empty page, not MAX_PAGES
+    assert isinstance(rows, list)
+
+
 # -- structure → CIF -------------------------------------------------------------
 
 STRUCTURE = {'lattice': {'matrix': [[3.19, 0, 0], [-1.595, 2.7626, 0], [0, 0, 20.0]]},

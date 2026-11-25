@@ -9,35 +9,6 @@ def test_atomsk_binary_not_found():
         with pytest.raises(RuntimeError, match="Atomsk binary not found"):
             AtomskWrapper()
 
-def test_atomsk_run_success():
-    """Test generic run command construction."""
-    with patch("shutil.which", return_value="/usr/bin/atomsk"):
-        wrapper = AtomskWrapper()
-        
-        with patch("subprocess.run") as mock_run:
-            wrapper.run(["input.xsf", "output.cfg"])
-            
-            mock_run.assert_called_once()
-            args = mock_run.call_args[0][0]
-            assert args[0] == "/usr/bin/atomsk"
-            assert "-ow" in args
-            assert "-v" in args
-            assert "0" in args
-            assert "input.xsf" in args
-            assert "output.cfg" in args
-
-def test_create_slab():
-    """Test create_slab command logic."""
-    with patch("shutil.which", return_value="/bin/atomsk"):
-        wrapper = AtomskWrapper()
-        with patch("subprocess.run") as mock_run:
-            wrapper.create_slab("cell.cif", "out.lmp")
-            args = mock_run.call_args[0][0]
-            # Expected: atomsk cell.cif -duplicate 2 2 1 -orthogonal-cell out.lmp
-            assert "-orthogonal-cell" in args
-            assert "-duplicate" in args
-
-
 import subprocess
 from pathlib import Path
 
@@ -51,6 +22,31 @@ def _wrapper(monkeypatch, calls):
         return subprocess.CompletedProcess(cmd, 0, '', '')
     monkeypatch.setattr(subprocess, 'run', fake_run)
     return AtomskWrapper(executable_path='/opt/fake/atomsk')
+
+
+def test_run_builds_the_exact_command_and_declines_the_overwrite_prompt(monkeypatch):
+    calls = []
+    w = _wrapper(monkeypatch, calls)
+    w.run(['input.xsf', 'output.cfg'])
+    cmd, kwargs = calls[0]
+    assert cmd == ['/opt/fake/atomsk', '-ow', '-v', '0', 'input.xsf', 'output.cfg']
+    assert kwargs['input'] == 'n\n'       # the stdin answer that prevents the overwrite prompt
+
+
+def test_create_slab_duplicates_2x2x1_by_default(monkeypatch):
+    calls = []
+    w = _wrapper(monkeypatch, calls)
+    w.create_slab('cell.cif', 'out.lmp')
+    assert calls[0][0][4:] == ['cell.cif', '-duplicate', '2', '2', '1',
+                               '-orthogonal-cell', 'out.lmp']
+
+
+def test_create_slab_takes_a_custom_duplication(monkeypatch):
+    calls = []
+    w = _wrapper(monkeypatch, calls)
+    w.create_slab('cell.cif', 'out.lmp', pre_duplicate=[3, 1, 2])
+    assert calls[0][0][4:] == ['cell.cif', '-duplicate', '3', '1', '2',
+                               '-orthogonal-cell', 'out.lmp']
 
 
 def test_executable_resolves_from_atomsk_path_env(monkeypatch):
@@ -92,27 +88,27 @@ def test_run_failure_without_stderr_hints_verbose(monkeypatch):
         w.run(['a.cif', 'b.lmp'])
 
 
-def test_remove_existing_output_deletes_a_stale_output_file(tmp_path, monkeypatch):
+def test_run_deletes_a_stale_output_file(tmp_path, monkeypatch):
     calls = []
     w = _wrapper(monkeypatch, calls)
     src = tmp_path / 'in.cif'; src.write_text('x')
     out = tmp_path / 'out.lmp'; out.write_text('stale')
-    w._remove_existing_output([str(src), '-duplicate', '2', '2', '1', str(out)])
+    w.run([str(src), '-duplicate', '2', '2', '1', str(out)])
     assert not out.exists()
 
 
-def test_remove_existing_output_keeps_the_file_when_output_is_the_input(tmp_path, monkeypatch):
+def test_run_keeps_the_file_when_output_is_the_input(tmp_path, monkeypatch):
     calls = []
     w = _wrapper(monkeypatch, calls)
     f = tmp_path / 'same.lmp'; f.write_text('keep me')
-    w._remove_existing_output([str(f), '-center', 'com', str(f)])
+    w.run([str(f), '-center', 'com', str(f)])
     assert f.read_text() == 'keep me'
 
 
-def test_remove_existing_output_ignores_empty_args(monkeypatch):
+def test_run_with_no_arguments_does_not_raise(monkeypatch):
     calls = []
     w = _wrapper(monkeypatch, calls)
-    w._remove_existing_output([])   # must not raise
+    w.run([])   # must not raise
 
 
 def test_convert_appends_options_after_paths(monkeypatch):

@@ -45,30 +45,21 @@ def _settings_file_with_modules(tmp_path: Path) -> Path:
     return path
 
 
-def test_scheduler_flag_picks_the_pbs_script(runner, tmp_path):
+@pytest.mark.parametrize("scheduler, written, absent", [
+    ("pbs", "run.pbs", "run.sh"),
+    ("slurm", "run.sh", "run.pbs"),
+])
+def test_scheduler_flag_picks_its_script(runner, tmp_path, scheduler, written, absent):
     sim_root = _sim_tree(tmp_path)
     settings_file = _settings_file_with_modules(tmp_path)
 
     result = runner.invoke(cli, ["hpc", "generate", str(sim_root),
                                  "--settings-file", str(settings_file),
-                                 "--scheduler", "pbs"])
+                                 "--scheduler", scheduler])
 
     assert result.exit_code == 0, result.output
-    assert (sim_root / "hpc" / "run.pbs").exists()
-    assert not (sim_root / "hpc" / "run.sh").exists()
-
-
-def test_scheduler_flag_picks_the_slurm_script(runner, tmp_path):
-    sim_root = _sim_tree(tmp_path)
-    settings_file = _settings_file_with_modules(tmp_path)
-
-    result = runner.invoke(cli, ["hpc", "generate", str(sim_root),
-                                 "--settings-file", str(settings_file),
-                                 "--scheduler", "slurm"])
-
-    assert result.exit_code == 0, result.output
-    assert (sim_root / "hpc" / "run.sh").exists()
-    assert not (sim_root / "hpc" / "run.pbs").exists()
+    assert (sim_root / "hpc" / written).exists()
+    assert not (sim_root / "hpc" / absent).exists()
 
 
 def test_preflight_flag_writes_the_preflight_pair(runner, tmp_path):

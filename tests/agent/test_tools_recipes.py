@@ -109,14 +109,10 @@ def test_tip_left_alone_when_set_unless_named(deps):
 _GEOMETRY = ('tip.r', 'sub.thickness', '2D.x', '2D.y', '2D.layers')
 
 
-def test_afm_fills_geometry_from_the_example_config(deps):
+def test_the_afm_note_lists_what_it_filled_in(deps):
     setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
                                     loads_nN=[5, 10, 20, 30, 50]))
     cs = deps.pending[-1]
-    assert not [i for i in cs.issues if i.startswith(_GEOMETRY)], cs.issues
-    ops = _ops(deps)
-    assert (ops[('2D', 'x')], ops[('2D', 'y')], ops[('2D', 'layers')]) == (100, 100, [1])
-    assert (ops[('tip', 'r')], ops[('sub', 'thickness')]) == (25, 12)
     note = next(n for n in cs.notes if 'examples/afm_config.ini' in n)
     for text in ('2D.x=100', '2D.y=100', '2D.layers=[1]', 'tip.r=25', 'sub.thickness=12',
                  'change if needed'):
@@ -140,6 +136,10 @@ def test_request_tip_radius_beats_the_default(deps):
 
 
 @pytest.mark.parametrize('setup, request_, source, expected', [
+    ('setup_afm', AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
+                                  loads_nN=[5, 10, 20, 30, 50]),
+     'afm_config.ini', {('2D', 'x'): 100, ('2D', 'y'): 100, ('2D', 'layers'): [1],
+                        ('tip', 'r'): 25, ('sub', 'thickness'): 12}),
     ('setup_sheet', SheetSetupRequest(materials=['h-MoS2'], potential_type='sw',
                                       pressures_GPa=[1]),
      'sheet_config.ini', {('2D', 'x'): 100, ('2D', 'layers'): [3]}),

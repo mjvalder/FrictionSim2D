@@ -98,6 +98,16 @@ def test_write_target_refuses_symlinked_escapes(roots, tmp_path):
             check_write_target(bad, ws)
 
 
+def test_a_dot_folder_is_refused_even_when_it_links_to_an_ordinary_one(roots):
+    """The lexical dot-folder check is not redundant with the realpath one: a
+    `.alias` pointing at a plain folder resolves to no dot part at all."""
+    ws = roots.workspace
+    (ws / 'plain').mkdir()
+    (ws / '.alias').symlink_to(ws / 'plain')
+    with pytest.raises(SandboxError, match='dot-folders'):
+        check_write_target('.alias/x.cif', ws)
+
+
 def test_redact_replaces_roots_longest_first_and_home(roots, tmp_path):
     from frictionsim2d.agent.sandbox import redact
     nested = SearchRoots(roots.workspace, roots.workspace / 'ex')

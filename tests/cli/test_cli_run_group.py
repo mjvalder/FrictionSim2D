@@ -90,17 +90,12 @@ def test_the_runner_is_not_told_about_aiida(runner, captured, tmp_path):
     assert "use_aiida" not in captured[0]
 
 
-def test_hpc_scripts_flag_reaches_the_runner(runner, captured, tmp_path):
+@pytest.mark.parametrize("flag, expected", [(["--hpc-scripts"], True), ([], False)])
+def test_hpc_scripts_flag_maps_to_generate_hpc(runner, captured, tmp_path, flag, expected):
     result = runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
-                                             "--output-dir", str(tmp_path), "--hpc-scripts"])
+                                             "--output-dir", str(tmp_path), *flag])
     assert result.exit_code == 0, result.output
-    assert captured[0]["generate_hpc"] is True
-
-
-def test_without_hpc_scripts_flag_generate_hpc_is_false(runner, captured, tmp_path):
-    runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
-                                   "--output-dir", str(tmp_path)])
-    assert captured[0]["generate_hpc"] is False
+    assert captured[0]["generate_hpc"] is expected
 
 
 def test_a_missing_config_file_is_rejected_before_any_build(runner, captured, tmp_path):
