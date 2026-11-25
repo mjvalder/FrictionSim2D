@@ -105,7 +105,7 @@ def test_component_build_tip(afm_config, temp_dir):
     settings = afm_config.settings
     captured: dict = {}
 
-    with patch("frictionsim2d.builders.components.run_lammps_commands",
+    with patch("frictionsim2d.builders.construction.components.run_lammps_commands",
                side_effect=_fake_run_lammps_commands(captured)) as mock_lmp:
         path, radius = components.build_tip(afm_config.tip, temp_dir, settings)
 
@@ -144,7 +144,7 @@ def test_build_sheet_copies_base_when_multilayer_stacking_disabled(tmp_path: Pat
         x=12.0, y=12.0, layers=[1, 2],
     )
 
-    with patch("frictionsim2d.builders.components.stack_multilayer_sheet",
+    with patch("frictionsim2d.builders.construction.components.stack_multilayer_sheet",
                wraps=components.stack_multilayer_sheet) as mock_stack:
         out_path, out_dims, out_lat_c = components.build_sheet(
             config,
@@ -193,7 +193,7 @@ def test_afm_builder_structure(afm_config, temp_dir):
         )
         return out_path
 
-    with patch("frictionsim2d.builders.components.run_lammps_commands",
+    with patch("frictionsim2d.builders.construction.components.run_lammps_commands",
                side_effect=_fake_run_lammps_commands(captured)), \
          patch("frictionsim2d.builders.construction.components.make_amorphous",
                side_effect=_fake_make_amorphous):
@@ -244,11 +244,11 @@ def test_build_monolayer_avoids_atomsk_convert_orthogonalize_duplicate(tmp_path:
         x=50.0, y=50.0, layers=[1],
     )
 
-    with patch("frictionsim2d.builders.components._write_cif_as_lammps_atomic",
+    with patch("frictionsim2d.builders.construction.components._write_cif_as_lammps_atomic",
                wraps=components._write_cif_as_lammps_atomic) as mock_convert, \
-         patch("frictionsim2d.builders.components._orthogonalize_lammps_data",
+         patch("frictionsim2d.builders.construction.components._orthogonalize_lammps_data",
                wraps=components._orthogonalize_lammps_data) as mock_ortho, \
-         patch("frictionsim2d.builders.components.replicate_data_file",
+         patch("frictionsim2d.builders.construction.components.replicate_data_file",
                wraps=components.replicate_data_file) as mock_dup:
         out_path, out_dims, _pot_counts, total_types, _supercell_dims = \
             components.build_monolayer(config)
@@ -268,11 +268,11 @@ def test_create_orthogonal_slab_avoids_atomsk_cli(tmp_path: Path) -> None:
     through the Atomsk CLI at all."""
     out_path = tmp_path / "out.lmp"
 
-    with patch("frictionsim2d.builders.components._write_cif_as_lammps_atomic",
+    with patch("frictionsim2d.builders.construction.components._write_cif_as_lammps_atomic",
                wraps=components._write_cif_as_lammps_atomic) as mock_convert, \
-         patch("frictionsim2d.builders.components.replicate_data_file",
+         patch("frictionsim2d.builders.construction.components.replicate_data_file",
                wraps=components.replicate_data_file) as mock_dup, \
-         patch("frictionsim2d.builders.components._orthogonalize_lammps_data",
+         patch("frictionsim2d.builders.construction.components._orthogonalize_lammps_data",
                wraps=components._orthogonalize_lammps_data) as mock_ortho:
         _, out_dims, duplication = components.create_orthogonal_slab(
             cif_path=Path(SI_CIF),
@@ -304,7 +304,7 @@ def test_build_monolayer_splits_edge_types_when_enabled(tmp_path: Path) -> None:
         x=12.0, y=12.0, layers=[1],
     )
 
-    with patch("frictionsim2d.builders.components.apply_sheet_edge_types",
+    with patch("frictionsim2d.builders.construction.components.apply_sheet_edge_types",
                wraps=components.apply_sheet_edge_types) as mock_edge_split:
         out_path, out_dims, _pot_counts, total_types, _supercell_dims = \
             components.build_monolayer(config, edge_mode='fixed', edge_width=4.0)
@@ -451,33 +451,21 @@ def _stack_with_fake_lmp(monkeypatch, tmp_path, fake_lat_c, lat_c, info,
     return result, settings
 
 
-def test_stack_reports_minimised_source(monkeypatch, tmp_path):
+@pytest.mark.parametrize("fake_lat_c, lat_c, n_layers, expected, source", [
+    (6.15, None, 2, 6.15, 'minimised'),
+    (None, None, 2, 'default', 'default'),            # extraction failed -> settings default
+    (6.15, 6.0, 2, 6.0, 'config'),                    # a configured lat_c wins
+    (6.15, None, 3, 6.15, 'minimised'),               # three layers recurse, same source
+])
+def test_stack_reports_lat_c_source(monkeypatch, tmp_path, fake_lat_c, lat_c, n_layers,
+                                    expected, source):
     info = {}
-    result, _ = _stack_with_fake_lmp(monkeypatch, tmp_path, 6.15, None, info)
-    assert result == pytest.approx(6.15)
-    assert info == {'lat_c_source': 'minimised'}
-
-
-def test_stack_reports_default_source_when_extraction_fails(monkeypatch, tmp_path):
-    info = {}
-    result, settings = _stack_with_fake_lmp(monkeypatch, tmp_path, None, None, info)
-    assert result == pytest.approx(settings.geometry.lat_c_default)
-    assert info == {'lat_c_source': 'default'}
-
-
-def test_stack_reports_config_source(monkeypatch, tmp_path):
-    info = {}
-    result, _ = _stack_with_fake_lmp(monkeypatch, tmp_path, 6.15, 6.0, info)
-    assert result == pytest.approx(6.0)
-    assert info == {'lat_c_source': 'config'}
-
-
-def test_stack_recursion_for_three_layers_still_reports_minimised(monkeypatch, tmp_path):
-    info = {}
-    result, _ = _stack_with_fake_lmp(monkeypatch, tmp_path, 6.15, None, info,
-                                     n_layers=3)
-    assert result == pytest.approx(6.15)
-    assert info == {'lat_c_source': 'minimised'}
+    result, settings = _stack_with_fake_lmp(monkeypatch, tmp_path, fake_lat_c, lat_c, info,
+                                            n_layers=n_layers)
+    if expected == 'default':
+        expected = settings.geometry.lat_c_default
+    assert result == pytest.approx(expected)
+    assert info == {'lat_c_source': source}
 
 
 def test_build_sheet_reports_monolayer_geometry(tmp_path):
@@ -505,7 +493,7 @@ def test_tmp_path_format_and_uniqueness() -> None:
 def test_replicate_or_copy_replicates_only_above_one(tmp_path: Path) -> None:
     src = tmp_path / "src.lmp"
     src.write_text("data")
-    with patch("frictionsim2d.builders.components.replicate_data_file") as dup:
+    with patch("frictionsim2d.builders.construction.components.replicate_data_file") as dup:
         components._replicate_or_copy(src, tmp_path / "same.lmp", 1, 1, 1)
         dup.assert_not_called()
         assert (tmp_path / "same.lmp").read_text() == "data"

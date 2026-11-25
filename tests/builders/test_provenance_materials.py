@@ -36,8 +36,24 @@ FAMILY_BY_CLASS = [
 
 @pytest.mark.parametrize('cls, family', FAMILY_BY_CLASS)
 def test_every_builder_declares_a_known_family(cls, family):
-    assert cls.FAMILY == family
     assert cls.FAMILY in FAMILIES
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('config, model, family', [
+    ('afm_config.ini', 'afm', 'afm'),
+    ('indent_config.ini', 'indent', 'indent'),
+    ('pes_tip_config.ini', 'pes_tip', 'pes_tip'),
+    ('sheet_config.ini', 'sheetonsheet', 'sheetonsheet'),
+    ('pes_sheet_config.ini', 'pes_sheet', 'pes_sheet'),
+])
+def test_the_written_record_carries_the_builders_family(tmp_path, config, model, family):
+    """The family is read back from provenance.json, not from the class constant."""
+    result = build(config, model, tmp_path)
+    assert not result.failures
+    for loc in discover_runs(result.simulation_root):
+        record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
+        assert record['family'] == family
 
 
 def test_obs_ctx_is_built_from_the_class_family(monkeypatch):
@@ -70,6 +86,18 @@ def test_obs_ctx_is_built_from_the_class_family(monkeypatch):
     builder._build_obs_ctx(2, 'friction_x.txt', use_langevin=True)
 
     assert seen['sim_type'] == 'indent'
+
+
+def test_material_provenance_records_the_potential_resolution_route():
+    """`pot_resolution_route` is set by sweep expansion (run/expand.py) and must
+    reach the record; a component without one records None."""
+    from frictionsim2d.data.provenance import material_provenance
+
+    swept = SimpleNamespace(mat='h-MoS2', pot_path=None, pot_type='sw',
+                            pot_resolution_route='sweep:potentials/sw')
+    plain = SimpleNamespace(mat='h-MoS2', pot_path=None, pot_type='sw')
+    assert material_provenance(swept, 'sheet').pot_resolution_route == 'sweep:potentials/sw'
+    assert material_provenance(plain, 'sheet').pot_resolution_route is None
 
 
 def test_model_defaults_to_family_until_the_runner_sets_it():

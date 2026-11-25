@@ -389,11 +389,15 @@ def test_sheetonsheet_slide_unset_outer_loop_matches_pinned_baseline(tmp_path: P
     assert _normalize_random_seeds(slide_script.rstrip()) == _EXPECTED_SLIDE_UNSET_OUTER_LOOP
 
 
-def test_sheetonsheet_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> None:
+@pytest.mark.parametrize("angles, names", [
+    ([0.0, 30.0, 60.0], ["slide_a0.in", "slide_a30.in", "slide_a60.in"]),
+    ([0.0, 30.0], ["slide_a0.in", "slide_a30.in"]),   # two angles already split
+])
+def test_sheetonsheet_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path, angles, names) -> None:
     """outer_loop=scan_angle emits one slide_a<angle>.in per angle."""
     config = _make_sheetonsheet_config(tmp_path, layers=[3])
     config.general.pressure = 1.0
-    config.general.scan_angle = [0.0, 30.0, 60.0]
+    config.general.scan_angle = angles
     config.general.outer_loop = "scan_angle"
 
     builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
@@ -404,7 +408,7 @@ def test_sheetonsheet_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Pat
     # No monolithic slide.in; one per angle instead.
     assert not (lammps_dir / "slide.in").exists()
     slide_scripts = sorted(p.name for p in lammps_dir.glob("slide_*.in"))
-    assert slide_scripts == ["slide_a0.in", "slide_a30.in", "slide_a60.in"]
+    assert slide_scripts == names
 
     # Each split slide pins a scalar angle (no in-script angle loop), while
     # the pressure axis keeps its full config (still a single value here).
@@ -415,8 +419,9 @@ def test_sheetonsheet_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Pat
 
     slide_0 = (lammps_dir / "slide_a0.in").read_text(encoding="utf-8")
     assert "variable        a equal 0.0" in slide_0
-    slide_60 = (lammps_dir / "slide_a60.in").read_text(encoding="utf-8")
-    assert "variable        a equal 60.0" in slide_60
+    if 60.0 in angles:
+        slide_60 = (lammps_dir / "slide_a60.in").read_text(encoding="utf-8")
+        assert "variable        a equal 60.0" in slide_60
 
 
 def test_sheetonsheet_outer_loop_scan_angle_single_angle_stays_slide_in(tmp_path: Path) -> None:

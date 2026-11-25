@@ -67,6 +67,29 @@ def test_check_deck_reads_the_last_change_box():
     box.check_deck("read_data       ${load_file}\n")   # no box: inherits it
 
 
+@pytest.mark.parametrize("zlo, zhi, ok", [
+    (-5.0, 38.0, False),        # vacuum 13: past the cutoff (12) but short of cutoff + skin (14)
+    (-5.0, 38.5, False),        # 13.5: still short, by more than the rounding tolerance
+    (-5.0, 39.0, True),         # exactly cutoff + skin
+    (-5.0, 38.9999995, True),   # 5e-7 short: inside the rounding tolerance
+])
+def test_check_requires_the_skin_on_top_of_the_cutoff(zlo, zhi, ok):
+    box = _zbox()                                  # atoms 0..30, cutoff 12, skin 2
+    if ok:
+        box.check(zlo, zhi)
+    else:
+        with pytest.raises(ValueError, match="below the pair cutoff"):
+            box.check(zlo, zhi)
+
+
+def test_check_takes_the_top_travel_out_of_the_vacuum():
+    """Atoms a run lifts by ``top_travel`` eat into the vacuum above them."""
+    deck_box = (-6.0, 45.0)                        # 51 - 30 = 21 A of static vacuum
+    _zbox().check(*deck_box)
+    with pytest.raises(ValueError, match="top travel 10 A"):
+        _zbox(top_travel=10.0).check(*deck_box)    # 21 - 10 = 11 < 14
+
+
 def test_margin_is_validated():
     with pytest.raises(ValidationError):
         GlobalSettings(geometry={'z_vacuum_margin': -1.0})

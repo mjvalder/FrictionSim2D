@@ -144,6 +144,26 @@ def test_nearest_blocks_name_what_differs():
     assert any('melt_temp 2500 (wanted 3000)' in d for _p, m in near for d in m['differs'])
 
 
+def test_nearest_blocks_rank_an_oversize_block_ahead_of_an_undersized_one():
+    """Size shortfall counts only what is MISSING: a block larger than needed has
+    none, so it must not be ranked behind a smaller one for being big."""
+    key = _key(melt_temp=3000)
+    meta = {**key.as_dict(), 'key8': key.key8}
+    name = f'amor_Si__{key.key8}.lmp'
+    small = _write_block(amorphous.materials_pack_dir(), name, (200.0, 200.0, 60.0),
+                         {**meta, 'box': [200.0, 200.0, 60.0]})
+    big = _write_block(amorphous_library_dir(), name, (600.0, 600.0, 60.0),
+                       {**meta, 'box': [600.0, 600.0, 60.0]})
+    ranked = [p for p, _m in nearest_blocks('Si', key=key, min_dims=(300.0, 300.0, 60.0))]
+    assert ranked[:2] == [big, small]
+
+
+def test_quench_run_length_is_at_least_one_step():
+    """A quench rate so fast the run rounds to zero steps still runs one."""
+    from frictionsim2d.builders.construction.amorphous import quench_nsteps
+    assert quench_nsteps(_key(quench_rate=1e30)) == 1
+
+
 # --------------------------------------------------------------- the miss
 
 def _afm_config(tmp_path) -> Path:

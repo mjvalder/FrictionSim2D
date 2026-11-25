@@ -44,6 +44,15 @@ def test_freestanding_pes_tip_refuses_a_flake_config(tmp_path):
     assert "afm_freestanding/pes_scan.lmp" in message
 
 
+def test_eval_mode_defaults_to_minimize_without_a_pes_section(tmp_path):
+    cfg = _free_cfg(tmp_path, eval_mode="md")
+    assert FreestandingPESTipSimulation(
+        cfg, output_dir=str(tmp_path / "o"))._eval_mode() == "md"
+    cfg.pes = None
+    assert FreestandingPESTipSimulation(
+        cfg, output_dir=str(tmp_path / "o2"))._eval_mode() == "minimize"
+
+
 def test_freestanding_hpc_job_name(tmp_path):
     builder = FreestandingPESTipSimulation(_free_cfg(tmp_path), output_dir=str(tmp_path / "o"))
     assert builder._get_hpc_job_name() == "pes_tip_free_h-MoS2"

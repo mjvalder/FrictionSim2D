@@ -34,8 +34,13 @@ def test_disabled_peratom_tier_drops_its_computes():
 
 
 def test_non_langevin_drops_thermostat_work_channels():
-    # w_thermostat_* reference f_lang_*, which does not exist under nose-hoover
-    ctx = _ctx(use_langevin=False)
+    # w_thermostat_* reference f_lang_*, which does not exist under nose-hoover.
+    # Needs a family that HAS the channel (afm never emits one), so the Langevin
+    # half is asserted too -- else the test passes for any value of the flag.
+    sheet = dict(sim_type='sheetonsheet', n_layers=4, interface_layers=(2, 3))
+    assert 'w_lang_center' in _ctx(use_langevin=True, **sheet)['window_varlist']
+    ctx = _ctx(use_langevin=False, **sheet)
+    assert 'w_lang_center' not in ctx['window_varlist']
     assert 'w_thermostat' not in ctx['window_varlist']
 
 

@@ -686,26 +686,28 @@ def test_flake_slide_paths_resolve_from_the_simulation_root(tmp_path):
 #
 # No LAMMPS: the raise precedes run_lammps, and `pm` is only read after it.
 
-def _write_slab(path, xs, cell_xy):
-    """A minimal LAMMPS data file: one atom per x, at z=0, in a cell_xy box."""
+def _write_slab(path, xs, cell_xy, ys=None):
+    """A minimal LAMMPS data file: one atom per x, at z=0, in a cell_xy box.
+
+    ``ys`` gives each atom's y (default: all at y=1.0)."""
     import numpy as np
     from ase import Atoms
     from ase.io import write
 
     cell = np.array([[cell_xy[0], 0.0, 0.0], [0.0, cell_xy[1], 0.0], [0.0, 0.0, 50.0]])
     atoms = Atoms(symbols=["H"] * len(xs),
-                  positions=[[x, 1.0, 0.0] for x in xs], cell=cell, pbc=True)
+                  positions=[[x, 1.0 if ys is None else ys[i], 0.0] for i, x in enumerate(xs)], cell=cell, pbc=True)
     write(str(path), atoms, format="lammps-data", atom_style="atomic")
     return path
 
 
-def _assemble(tmp_path, flake_xs, sheet_cell=(10.0, 10.0)):
+def _assemble(tmp_path, flake_xs, sheet_cell=(10.0, 10.0), flake_ys=None):
     from frictionsim2d.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     sim = FlakeSlideSimulation(_flake_on_sheet_cfg(), str(tmp_path))
     return sim._assemble_flake_on_sheet(
         sheet_path=_write_slab(tmp_path / "sheet.lmp", [1.0, 2.0], sheet_cell),
-        flake_path=_write_slab(tmp_path / "flake.lmp", flake_xs, sheet_cell),
+        flake_path=_write_slab(tmp_path / "flake.lmp", flake_xs, sheet_cell, flake_ys),
         n_sheet_types=1, pm=None,
         settings_path=tmp_path / "system.in.settings",
         bottom_flake_component="flake",
@@ -726,6 +728,12 @@ def test_assemble_refuses_a_flake_wider_than_the_substrate_box(tmp_path):
     assert "12.0" in message          # the flake span
     assert "10.0" in message          # the box it has to fit inside
     assert "edge_length" in message
+
+
+def test_assemble_refuses_a_flake_wider_than_the_substrate_box_in_y_alone(tmp_path):
+    """The x span fits (2 A in a 10 A box); only y (12 A) does not."""
+    with pytest.raises(ValueError, match="does not fit"):
+        _assemble(tmp_path, flake_xs=[1.0, 3.0], flake_ys=[0.0, 12.0])
 
 
 def test_assemble_refuses_a_flake_that_exactly_spans_the_box(tmp_path):

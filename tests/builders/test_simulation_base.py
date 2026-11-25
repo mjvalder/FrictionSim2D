@@ -89,6 +89,20 @@ def test_add_to_provenance_dedupes_same_checksum_other_path(tmp_path):
     assert files[0]["components"] == ["tip", "sub"]
 
 
+def test_add_to_provenance_keeps_one_file_in_two_categories_as_two_entries(tmp_path):
+    """Dedup is per category: the same bytes staged as a cif and as a potential
+    are two manifest entries, each with its own component."""
+    import json
+    sim = _sim(tmp_path)
+    src = tmp_path / "shared.dat"
+    src.write_text("same bytes", encoding="utf-8")
+    sim.add_to_provenance(src, "cif", component="sheet")
+    sim.add_to_provenance(src, "potential", component="tip")
+    files = json.loads((tmp_path / "provenance" / "manifest.json").read_text())["files"]
+    assert sorted((f["category"], tuple(f["components"])) for f in files) == [
+        ("cif", ("sheet",)), ("potential", ("tip",))]
+
+
 def test_git_identity_falls_back_when_git_is_absent(monkeypatch):
     def _no_git(*_a, **_k):
         raise FileNotFoundError("git")

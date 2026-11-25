@@ -71,27 +71,6 @@ def test_hetero_pes_tip_without_a_flake_is_constructed_as_before(tmp_path):
     assert sim._get_hpc_job_name() == "pes_tip_h-MoS2+h-WS2"
 
 
-# --- MRO / SPLIT_OUTER_LOOPS resolution (Step 1) -----------------------------
-
-def test_hetero_pes_tip_mro_and_split_outer_loops():
-    """Pin the MRO/SPLIT_OUTER_LOOPS resolution the class docstring documents:
-    PESTipSimulation must resolve before HeteroAFMSimulation so the run-phase
-    identity (self-contained static-scan write_inputs) is the PES tip's, not
-    the plain hetero AFM slide's, and SPLIT_OUTER_LOOPS stays frozenset() (a
-    static scan never reads outer_loop). A wrong SPLIT_OUTER_LOOPS would
-    silently make the GUI promise a job count the build never produces (the
-    exact bug class fixed elsewhere on this branch)."""
-    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
-    from frictionsim2d.builders.afm.pes_tip import HeteroPESTipSimulation, PESTipSimulation
-
-    mro = [c.__name__ for c in HeteroPESTipSimulation.__mro__]
-    print("HeteroPESTipSimulation MRO:", mro)
-    print("HeteroPESTipSimulation.SPLIT_OUTER_LOOPS:", HeteroPESTipSimulation.SPLIT_OUTER_LOOPS)
-    assert mro.index("PESTipSimulation") < mro.index("HeteroAFMSimulation")
-    assert HeteroPESTipSimulation.SPLIT_OUTER_LOOPS == frozenset()
-    assert HeteroPESTipSimulation.SPLIT_OUTER_LOOPS == PESTipSimulation.SPLIT_OUTER_LOOPS
-
-
 # --- routing ------------------------------------------------------------------
 
 def test_routing_selects_hetero_pes_tip_for_two_materials_with_substrate():

@@ -4,8 +4,9 @@ The original channels work wired the gate into `common/observables.lmp` and
 the AFM builder only. The sheet templates hand-write their `fix ave/time`
 lines rather than taking them from the observables registry, so the setting
 silently did nothing for `sheetonsheet`, `hetero` and `flake` runs -- half the
-simulation types. `tests/builders/test_output_channels.py` did not catch it because it
-renders the *macro*, proving the macro works rather than that anyone uses it.
+simulation types. The macro-only tests that used to live in `test_output_channels.py`
+did not catch it: they rendered the *macro*, proving the macro works rather than
+that anyone uses it.
 
 These tests render the real templates instead, which is the only way this class
 of gap shows up.
@@ -24,6 +25,7 @@ import pytest
 from jinja2 import meta
 
 from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
+from frictionsim2d.core.config import OutputSettings
 from frictionsim2d.interfaces.jinja import template_environment
 
 
@@ -147,6 +149,13 @@ def _render_flake(**channels) -> str:
 
 
 ALL_TIERS = "sheetonsheet/slide.lmp"
+
+
+def test_channels_default_to_all_on():
+    """Default must preserve pre-setting behaviour: all three tiers written."""
+    assert OutputSettings().channels == {
+        'window': True, 'raw': True, 'peratom': True,
+    }
 
 
 def test_sheet_emits_every_tier_by_default():

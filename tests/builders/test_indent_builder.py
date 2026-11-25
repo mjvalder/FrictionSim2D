@@ -119,6 +119,15 @@ def test_defaults_when_no_indent_section(tmp_path: Path):
     assert 1 <= builder.base_seed <= 999999  # freshly drawn
 
 
+def test_two_builders_without_a_seed_draw_different_base_seeds(tmp_path: Path):
+    """Without `[indent] seed` every build draws its own seed (a constant would
+    make every unseeded run share one velocity stream)."""
+    seeds = {IndentSimulation(_afm_cfg(tmp_path, force=[10, 30]),
+                              output_dir=str(tmp_path / f"o{i}")).base_seed
+             for i in range(3)}
+    assert len(seeds) > 1
+
+
 def test_reads_indent_params_and_seed(tmp_path: Path):
     cfg = _afm_cfg(tmp_path, force=[10, 30],
                    indent={"hold_steps": 25000, "z_step": 0.1, "n_steps": 150, "seed": 777})
@@ -234,6 +243,20 @@ def test_indent_renders_hold_phase(tmp_path: Path):
     assert "rigid/nve single force * off off on" in script
     # Records the out-of-plane channels the penetration descriptor needs.
     assert "v_fz_tip" in script and "v_comz" in script and "v_comz_tip" in script
+    # The tip's reaction is emitted in nN (the registry's unit), not eV/A.
+    assert "variable        fx_spr equal f_forcetip[1]*1.602176634" in script
+    assert "variable        fy_spr equal f_forcetip[2]*1.602176634" in script
+    assert "variable        fz_tip equal f_forcetip[3]*1.602176634" in script
+
+
+def test_indent_results_fixes_come_from_the_registry_macro(tmp_path: Path):
+    """Exactly one results `ave/time` fix per tier, none hand-rolled."""
+    builder = IndentSimulation(_afm_cfg(tmp_path, force=[10, 30]), output_dir=str(tmp_path / "o"))
+    script = builder.render_template("afm/indent.lmp", _indent_context())
+    averaging = [ln.split()[1] for ln in script.splitlines()
+                 if ln.startswith("fix") and "ave/time" in ln]
+    assert sorted(averaging) == ["fc_pa", "fc_raw", "fc_win"]
+    assert "v_fx_react" not in script and "v_fy_react" not in script
 
 
 def test_indent_auto_damping_when_dspring_none(tmp_path: Path):

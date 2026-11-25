@@ -252,47 +252,28 @@ def _pes_tip_builder(tmp_path: Path, tip_r: float = 2.0) -> PESTipSimulation:
     return PESTipSimulation(cfg, output_dir=str(tmp_path / "o"))
 
 
-def test_warn_if_footprint_too_small_noop_when_m_is_one(tmp_path, caplog):
-    """The m <= 1 (default scan_cells) guard must short-circuit before any
-    box math, even for a box far too small to ever pass the check."""
-    builder = _pes_tip_builder(tmp_path)
-    builder.box_dims = {"xlo": 0.0, "xhi": 1.0, "ylo": 0.0, "yhi": 1.0}
-    with caplog.at_level(logging.WARNING):
-        builder._warn_if_footprint_too_small(1, 5.0, 5.0)
-    assert not caplog.records
-
-
-def test_warn_if_footprint_too_small_warns_on_undersized_box(tmp_path, caplog):
-    # r=2.0, m=2, period=5.0: need_x = 2*2 + 2*5 + 12 = 26; a 20x20 box is
-    # short of that on both axes -> the tip could reach its periodic image.
+# r=2.0, period=5.0, m=2: need = 2*2 + 2*5 + 12 = 26 A on each axis.
+@pytest.mark.parametrize("m, box, warns", [
+    (2, (20.0, 20.0), True),       # short on both axes
+    (2, (20.0, 200.0), True),      # short in x only
+    (2, (200.0, 20.0), True),      # short in y only
+    (2, (200.0, 200.0), False),    # comfortably past the need
+    (1, (1.0, 1.0), False),        # default scan_cells: no check, however small
+    (2, None, False),              # box_dims never populated: quiet, no KeyError
+], ids=["both", "x-only", "y-only", "large", "m-is-one", "no-box"])
+def test_warn_if_footprint_too_small(tmp_path, caplog, m, box, warns):
+    """A multi-cell scan warns when the box could let the tip reach its image."""
     builder = _pes_tip_builder(tmp_path, tip_r=2.0)
-    builder.box_dims = {"xlo": 0.0, "xhi": 20.0, "ylo": 0.0, "yhi": 20.0}
+    builder.box_dims = ({} if box is None else
+                        {"xlo": 0.0, "xhi": box[0], "ylo": 0.0, "yhi": box[1]})
     with caplog.at_level(logging.WARNING):
-        builder._warn_if_footprint_too_small(2, 5.0, 5.0)
-    assert len(caplog.records) == 1
-    msg = caplog.records[0].message
-    assert "may overlap the tip's periodic image" in msg
-    assert "scan_cells=2" in msg
-
-
-def test_warn_if_footprint_too_small_silent_on_large_enough_box(tmp_path, caplog):
-    # Same geometry as above but a box comfortably past the 26x26 need.
-    builder = _pes_tip_builder(tmp_path, tip_r=2.0)
-    builder.box_dims = {"xlo": 0.0, "xhi": 200.0, "ylo": 0.0, "yhi": 200.0}
-    with caplog.at_level(logging.WARNING):
-        builder._warn_if_footprint_too_small(2, 5.0, 5.0)
-    assert not caplog.records
-
-
-def test_warn_if_footprint_too_small_swallows_missing_box_dims(tmp_path, caplog):
-    # box_dims never populated (e.g. called before _get_substrate_box_dims) --
-    # the try/except (AttributeError, KeyError, TypeError) guard must return
-    # quietly rather than raising or warning off a KeyError.
-    builder = _pes_tip_builder(tmp_path)
-    builder.box_dims = {}
-    with caplog.at_level(logging.WARNING):
-        builder._warn_if_footprint_too_small(2, 5.0, 5.0)
-    assert not caplog.records
+        builder._warn_if_footprint_too_small(m, 5.0, 5.0)
+    if warns:
+        assert len(caplog.records) == 1
+        assert "periodic image" in caplog.records[0].message
+        assert f"scan_cells={m}" in caplog.records[0].message
+    else:
+        assert not caplog.records
 
 
 def test_pes_tip_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):

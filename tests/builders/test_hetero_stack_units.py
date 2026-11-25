@@ -53,11 +53,13 @@ def test_detect_inplane_repeat_falls_back_to_the_box_without_a_repeat(tmp_path):
     assert (px, py) == pytest.approx((3.0, 5.0))
 
 
-def test_detect_inplane_repeat_rejects_a_flat_box(tmp_path):
+@pytest.mark.parametrize("box", ["0.0 0.0 xlo xhi\n0.0 5.0 ylo yhi", "0.0 5.0 xlo xhi\n0.0 0.0 ylo yhi"],
+                         ids=["flat-x", "flat-y"])
+def test_detect_inplane_repeat_rejects_a_flat_box(tmp_path, box):
     path = tmp_path / "flat.data"
     path.write_text(
         "LAMMPS data\n\n1 atoms\n1 atom types\n\n"
-        "0.0 0.0 xlo xhi\n0.0 5.0 ylo yhi\n0.0 10.0 zlo zhi\n\n"
+        f"{box}\n0.0 10.0 zlo zhi\n\n"
         "Masses\n\n1 95.95\n\nAtoms # atomic\n\n1 1 0.0 0.0 5.0\n",
         encoding="utf-8")
     with pytest.raises(ValueError, match="Non-positive in-plane box"):

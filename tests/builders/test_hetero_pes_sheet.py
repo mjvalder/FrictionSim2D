@@ -79,55 +79,6 @@ def _twist_pes_config():
     return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
 
 
-# --- MRO / SPLIT_OUTER_LOOPS resolution --------------------------------------
-
-def test_hetero_pes_sheet_mro_and_split_outer_loops():
-    """Pin the MRO/``SPLIT_OUTER_LOOPS`` resolution.
-
-    ``PESGridMixin`` must resolve before ``HeteroSheetOnSheetSimulation`` so the
-    run-phase identity is the static scan's, and ``SPLIT_OUTER_LOOPS`` must stay
-    ``frozenset()``: the scan replaces the run phase outright and never reads
-    ``outer_loop``, so a non-empty value would make the GUI's job-count
-    prediction (``frictionsim2d.run.expand._run_scripts_per_build``) promise scripts the
-    build never writes.
-    """
-    from frictionsim2d.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
-    from frictionsim2d.builders.sheetonsheet.pes_sheet import (
-        HeteroPESSheetSimulation,
-        PESGridMixin,
-        PESSheetSimulation,
-    )
-
-    mro = [c.__name__ for c in HeteroPESSheetSimulation.__mro__]
-    print("HeteroPESSheetSimulation MRO:", mro)
-    print("HeteroPESSheetSimulation.SPLIT_OUTER_LOOPS:",
-          HeteroPESSheetSimulation.SPLIT_OUTER_LOOPS)
-    assert mro.index("PESGridMixin") < mro.index("HeteroSheetOnSheetSimulation")
-    assert HeteroPESSheetSimulation.SPLIT_OUTER_LOOPS == frozenset()
-    assert PESSheetSimulation.SPLIT_OUTER_LOOPS == frozenset()
-    assert PESGridMixin.SPLIT_OUTER_LOOPS == frozenset()
-
-    # The homogeneous class keeps its own composition too.
-    homo_mro = [c.__name__ for c in PESSheetSimulation.__mro__]
-    assert homo_mro.index("PESGridMixin") < homo_mro.index("SheetOnSheetSimulation")
-
-
-def test_hetero_pes_sheet_run_script_count_is_one_per_build():
-    """``outer_loop`` must not multiply the run scripts for the hetero PES scan,
-    while ``pes.grid_n_refine`` must still add exactly one refinement script."""
-    from frictionsim2d.run.expand import _run_scripts_per_build
-
-    raw = _hetero_pes_raw()
-    raw["general"]["outer_loop"] = "pressure"
-    raw["general"]["pressure"] = [1.0, 2.0, 3.0]
-    scripts, notes = _run_scripts_per_build(raw, "pes_sheet")
-    assert scripts == 1, notes
-
-    raw["pes"]["grid_n_refine"] = 20
-    scripts, notes = _run_scripts_per_build(raw, "pes_sheet")
-    assert scripts == 2, notes
-
-
 # --- routing -----------------------------------------------------------------
 
 def test_routing_selects_hetero_pes_sheet_for_two_materials():
@@ -446,8 +397,7 @@ def test_pes_sheet_refuses_a_flake_config(hetero, tmp_path):
     """The refusal fires at construction, on BOTH concrete classes.
 
     One definition on PESGridMixin covers them because the mixin precedes each
-    base in MRO order -- the property `test_hetero_pes_sheet_mro_and_split_
-    outer_loops` already pins.
+    base in MRO order -- the property `tests/run/test_split_outer_loops.py` pins.
     """
     from frictionsim2d.builders.sheetonsheet.pes_sheet import (
         HeteroPESSheetSimulation, PESSheetSimulation,

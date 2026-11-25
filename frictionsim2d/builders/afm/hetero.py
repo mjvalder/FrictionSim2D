@@ -203,7 +203,7 @@ def _pair_material_token(config) -> str:
 
     E.g. ``h-MoS2+h-WS2``. Used by :class:`HeteroAFMSimulation._material_id`,
     which :class:`HeteroIndentSimulation` inherits (pinned by
-    ``tests/builders/test_material_id_mro.py``).
+    ``tests/builders/test_hetero_indent.py::test_hetero_indent_job_name_carries_the_pair_token``).
 
     Mirrors :func:`frictionsim2d.run.naming.material_token`'s convention on the raw-dict
     side (that function isn't reusable directly here: the builder only has

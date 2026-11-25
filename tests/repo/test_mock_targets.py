@@ -22,7 +22,6 @@ ALLOWED_TARGET_PREFIXES = (
     "frictionsim2d.interfaces.atomsk.",
     "frictionsim2d.builders.construction.components.make_amorphous",
     "frictionsim2d.builders.construction.components.run_lammps_commands",
-    "frictionsim2d.builders.components.run_lammps_commands",   # lazy alias of the line above
     "frictionsim2d.aiida.",
     # run_simulations builds real geometry -- a genuine expensive boundary.
     # frictionsim2d.cli imports the name at module level (`from .run.simulate import
@@ -44,8 +43,8 @@ KNOWN_VIOLATIONS = {
     "builders/test_afm_builder.py": {
         # Phase 2c test-weak repair (builders-afm.md (c)): the since-removed
         # test_afm_builder_layer_specific_paths never called build() at all
-        # (its mocks were dead code) and test_afm_build_orchestrates_per_
-        # layer_steps no longer mocks _create_directories -- it now asserts
+        # (its mocks were dead code) and test_afm_build_creates_an_l_n_
+        # directory_tree_per_layer no longer mocks _create_directories -- it now asserts
         # the real L{n} directory tree on disk instead. build_tip/
         # build_substrate were only patched by the removed test.
         "frictionsim2d.builders.afm.AFMSimulation._build_components",
@@ -55,7 +54,7 @@ KNOWN_VIOLATIONS = {
         "frictionsim2d.builders.afm.AFMSimulation._get_substrate_box_dims",
         "frictionsim2d.builders.afm.AFMSimulation._init_provenance",
         "frictionsim2d.builders.afm.AFMSimulation.write_inputs",
-        "frictionsim2d.builders.components.build_sheet",
+        "frictionsim2d.builders.construction.components.build_sheet",
     },
     "builders/test_builders.py": {
         # Phase 2c test-weak repair (docs/superpowers/reviews/
@@ -66,11 +65,11 @@ KNOWN_VIOLATIONS = {
         # patched with `wraps=` (the real function still executes; only
         # call-count is observed) as a regression guard that the native
         # pipeline -- not Atomsk -- is what ran.
-        "frictionsim2d.builders.components.replicate_data_file",
-        "frictionsim2d.builders.components._orthogonalize_lammps_data",
-        "frictionsim2d.builders.components._write_cif_as_lammps_atomic",
-        "frictionsim2d.builders.components.apply_sheet_edge_types",
-        "frictionsim2d.builders.components.stack_multilayer_sheet",
+        "frictionsim2d.builders.construction.components.replicate_data_file",
+        "frictionsim2d.builders.construction.components._orthogonalize_lammps_data",
+        "frictionsim2d.builders.construction.components._write_cif_as_lammps_atomic",
+        "frictionsim2d.builders.construction.components.apply_sheet_edge_types",
+        "frictionsim2d.builders.construction.components.stack_multilayer_sheet",
     },
     "builders/test_components_substrate_match.py": {
         # A real match never yields a sheared supercell for an orthogonal box,

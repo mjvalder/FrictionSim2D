@@ -110,21 +110,37 @@ def test_all_sw_afm_cell_still_builds_its_settings_file(tmp_path):
 # Rejections (v4 spec §3: no partial cell; §6: no multi-component full cell)
 # ---------------------------------------------------------------------------
 
-def test_deepmd_sheet_beside_sw_tip_and_sub_is_rejected(tmp_path):
+def _deepmd_sheet_cell(tmp_path):
     """v3 setups 3 and 4, both struck by E2/E3."""
-    config = make_config(tmp_path, _deepmd_sheet(tmp_path))
-    with pytest.raises(ValueError, match='Partial-cell MLIP is not available'):
-        settings_text(config, tmp_path)
+    return make_config(tmp_path, _deepmd_sheet(tmp_path))
 
 
-def test_mace_sheet_beside_sw_tip_and_sub_is_rejected(tmp_path):
-    config = make_config(tmp_path, {
+def _mace_sheet_cell(tmp_path):
+    return make_config(tmp_path, {
         'pot_type': 'mace',
         'pot_path': _model(tmp_path, 'mace.json'),
         'lat_c': 6.112, 'dispersion': 'd3',
     })
+
+
+def _mlip_tip_alone_cell(tmp_path):
+    """The mirror image: classical sheet, MLIP tip."""
+    return make_config(
+        tmp_path,
+        tip_overrides={'pot_type': 'deepmd', 'pot_path': _model(tmp_path, 'dpa.pth')},
+    )
+
+
+def _d3_beside_sw_cell(tmp_path):
+    return make_config(tmp_path, _deepmd_sheet(tmp_path, dispersion='d3'))
+
+
+@pytest.mark.parametrize('cell', [_deepmd_sheet_cell, _mace_sheet_cell,
+                                  _mlip_tip_alone_cell, _d3_beside_sw_cell],
+                         ids=['deepmd-sheet', 'mace-sheet', 'tip-alone', 'd3-beside-sw'])
+def test_partial_cell_mlip_is_rejected(tmp_path, cell):
     with pytest.raises(ValueError, match='Partial-cell MLIP is not available'):
-        settings_text(config, tmp_path)
+        settings_text(cell(tmp_path), tmp_path)
 
 
 def test_the_rejection_names_the_doc_and_the_lammps_errors(tmp_path):
@@ -137,23 +153,6 @@ def test_the_rejection_names_the_doc_and_the_lammps_errors(tmp_path):
     assert 'Pair hybrid sub-style deepmd is not used' in message
     assert 'pair_deepmd.cpp:816' in message
     assert '#1314' in message
-
-
-def test_mlip_on_the_tip_alone_is_rejected(tmp_path):
-    """The mirror image: classical sheet, MLIP tip."""
-    config = make_config(
-        tmp_path,
-        tip_overrides={'pot_type': 'deepmd',
-                       'pot_path': _model(tmp_path, 'dpa.pth')},
-    )
-    with pytest.raises(ValueError, match='Partial-cell MLIP is not available'):
-        settings_text(config, tmp_path)
-
-
-def test_d3_is_rejected_in_a_cell_containing_sw_components(tmp_path):
-    config = make_config(tmp_path, _deepmd_sheet(tmp_path, dispersion='d3'))
-    with pytest.raises(ValueError, match='Partial-cell MLIP is not available'):
-        settings_text(config, tmp_path)
 
 
 def test_two_different_models_of_one_framework_are_rejected(tmp_path):
@@ -244,14 +243,3 @@ def test_amorphous_substrate_is_refused_under_an_mlip(tmp_path):
     assert "amorph = 'a'" in message
     assert 'sub' in message
     assert 'documentation/mlip.md' in message
-
-
-@pytest.mark.parametrize('mode', ['atom_bonds', 'com_spring'])
-def test_constraint_modes_are_rejected_with_an_mlip_sheet(tmp_path, mode):
-    """Still refused -- but a partitioned AFM cell now fails one rule earlier."""
-    from frictionsim2d.core.mlip import validate_mlip_cell
-
-    config = make_config(tmp_path, _deepmd_sheet(tmp_path))
-    config.settings.simulation.constraint_mode = mode
-    with pytest.raises(ValueError, match='constraint_mode'):
-        validate_mlip_cell(config.sheet, components=[], constraint_mode=mode)

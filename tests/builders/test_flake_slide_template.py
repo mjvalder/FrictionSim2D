@@ -20,48 +20,30 @@ emission, unrecoverably without re-running; and on the `v_sx` branch
 `xfrict IS v_sx`, so the "COF" degenerates to the direction cosine of one noise
 vector.
 """
-from pathlib import Path
-
-TEMPLATE = (Path(__file__).resolve().parents[2]
-            / 'frictionsim2d' / 'templates' / 'flake' / 'slide.lmp')
+from tests.builders.test_flake_slide import _loaded_ctx, _render_flake_slide_for_test
 
 
-def _source() -> str:
-    return TEMPLATE.read_text(encoding='utf-8')
-
-
-def test_the_template_emits_v_fz_from_the_applied_load():
-    """`fz` is `f_force[3]`, the group force on the `addforce` fix, scaled to
-    nN like the lateral channels it is the denominator of."""
-    source = _source()
-
-    assert 'fix             force flake addforce' in source
-    assert 'variable        fz equal f_force[3]*{{ ev_a_to_nn }}' in source
+def _rendered() -> str:
+    return _render_flake_slide_for_test(_loaded_ctx())
 
 
 def test_the_normal_force_is_never_the_frozen_bottom_bands_reaction():
     """`f_fsbot[3]` is the setforce-frozen bottom band's reaction. Nothing
     presses on it through the stack, so its mean is zero and any COF built on
     it is rectified thermal noise."""
-    for line in _source().splitlines():
-        if line.lstrip().startswith('variable') and ' fz ' in f' {line} ':
-            assert 'fsbot' not in line, line
+    fz = [line for line in _rendered().splitlines()
+          if line.lstrip().startswith('variable') and ' fz ' in f' {line} ']
+    assert fz, 'no fz variable rendered'
+    for line in fz:
+        assert 'fsbot' not in line, line
 
 
 def test_no_emitted_normal_force_is_rectified_with_abs():
     """The sign of a normal force is physical (attractive vs repulsive) and
     `abs()` inside LAMMPS destroys it at emission, unrecoverably."""
-    for line in _source().splitlines():
-        stripped = line.lstrip()
-        if stripped.startswith('variable') and ('fz' in stripped
-                                                or 'frict' in stripped):
-            assert 'abs(' not in stripped, line
-
-
-def test_the_load_is_the_flake_area_not_the_box_area():
-    """A flake covers a fraction of the box; pressure times the BOX area would
-    over-load it by that fraction and make the COF area-dependent."""
-    source = _source()
-
-    assert 'variable        A equal {{ flake_area }}' in source
-    assert 'variable        f equal -v_p*v_A/(count(flake))' in source
+    emitted = [line.lstrip() for line in _rendered().splitlines()
+               if line.lstrip().startswith('variable')
+               and ('fz' in line or 'frict' in line)]
+    assert emitted, 'no fz/frict variable rendered'
+    for line in emitted:
+        assert 'abs(' not in line, line

@@ -36,28 +36,28 @@ def _indent_hetero_raw():
     }
 
 
-# --- MRO / SPLIT_OUTER_LOOPS resolution (Step 1) --------------------------
+# --- job name ---------------------------------------------------------------
 
-def test_hetero_indent_mro_and_split_outer_loops():
-    """Pin the two class-attribute resolutions the class docstring documents:
-    IndentSimulation must resolve before HeteroAFMSimulation in the MRO so
-    the run-phase identity (template + split set) is the indent's, not the
-    plain hetero AFM slide's. Printed/asserted directly (not inferred) —
-    a wrong SPLIT_OUTER_LOOPS here would silently make the GUI promise a job
-    count the build never produces (the exact bug class fixed elsewhere on
-    this branch)."""
-    from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation, HeteroIndentSimulation
+def test_hetero_indent_job_name_carries_the_pair_token():
+    """Two hetero indent configs sharing material 1 must not share a job name
+    (the pair token, not sheet 1's material alone, names the job); a single
+    material indent keeps its plain name."""
+    from frictionsim2d.builders.afm.hetero import HeteroIndentSimulation
     from frictionsim2d.builders.afm.indent import IndentSimulation
 
-    mro = [c.__name__ for c in HeteroIndentSimulation.__mro__]
-    print("HeteroIndentSimulation MRO:", mro)
-    print("HeteroIndentSimulation.SPLIT_OUTER_LOOPS:", HeteroIndentSimulation.SPLIT_OUTER_LOOPS)
-    assert mro.index("IndentSimulation") < mro.index("HeteroAFMSimulation")
-    assert HeteroIndentSimulation.SLIDE_TEMPLATE == "afm/indent.lmp"
-    # No lateral drive in the hold+retract run -> only the per-load split
-    # applies (matches plain IndentSimulation, not AFM's {'force','scan_angle'}).
-    assert HeteroIndentSimulation.SPLIT_OUTER_LOOPS == frozenset({'force'})
-    assert HeteroIndentSimulation.SPLIT_OUTER_LOOPS == IndentSimulation.SPLIT_OUTER_LOOPS
+    raw = _indent_hetero_raw()
+    pair = HeteroIndentSimulation(AFMSimulationConfig(**raw, settings=load_settings()), "out")
+    assert pair._get_hpc_job_name() == "indent_h-MoS2+h-WS2"
+
+    raw["2D-2"]["mat"] = "h-WSe2"
+    other = HeteroIndentSimulation(AFMSimulationConfig(**raw, settings=load_settings()), "out")
+    assert other._get_hpc_job_name() == "indent_h-MoS2+h-WSe2"
+
+    del raw["2D-2"]
+    raw["2D"] = raw.pop("2D-1")
+    raw["2D"]["x"] = raw["2D"]["y"] = 50.0
+    single = IndentSimulation(AFMSimulationConfig(**raw, settings=load_settings()), "out")
+    assert single._get_hpc_job_name() == "indent_h-MoS2"
 
 
 # --- routing ----------------------------------------------------------------

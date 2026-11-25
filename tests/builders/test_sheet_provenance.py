@@ -65,6 +65,14 @@ def test_a_sheet_build_writes_a_valid_provenance_record(tmp_path):
     assert record.run_role == "label"
 
 
+def test_a_twisted_sheet_build_records_its_twist_angle(tmp_path):
+    """The twist the user configured reaches the record (None when untwisted)."""
+    run_dir, _slide, _b = _build_homogeneous(tmp_path, twist_angle=21.8)
+    assert _record(run_dir).twist_angle == 21.8
+    (tmp_path / "plain").mkdir()
+    assert _record(_build_homogeneous(tmp_path / "plain")[0]).twist_angle is None
+
+
 def test_a_sheet_build_records_its_own_run_uuid(tmp_path):
     """Task 5b: every build is a new run, with a fresh uuid4."""
     from uuid import UUID

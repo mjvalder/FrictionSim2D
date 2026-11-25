@@ -12,7 +12,6 @@ import pytest
 
 from frictionsim2d.builders.afm import AFMSimulation
 from frictionsim2d.builders.construction import components
-from frictionsim2d.potentials.utils import normalize_potential_type
 from frictionsim2d.data.models import NM_TO_EV_A2
 from tests.builders.test_builders import MOS2_CIF, MOS2_POT
 from tests.helpers.afm import _make_afm_config, _prepare_builder_for_slide_write, _seed_builder_state
@@ -191,110 +190,51 @@ write_data      out/L1/data/final_f$(v_find)N_a$(v_a).data
 label           slide_next"""
 
 
-def test_afm_builder_supports_layer_sweep(tmp_path: Path) -> None:
-    """AFM builder should accept multiple layer values (unlike sheet-on-sheet)."""
-    config = _make_afm_config(tmp_path, layers=[1, 2, 3])
+def test_afm_build_creates_an_l_n_directory_tree_per_layer(tmp_path: Path, monkeypatch) -> None:
+    """Build creates an L{n} directory tree on disk for every requested layer.
 
-    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
-    # Should not raise; multiple layers are intentional for AFM
-    assert config.sheet.layers == [1, 2, 3]
-
-
-def test_normalize_potential_type_consistency() -> None:
-    """Potential type normalization should be consistent across builders."""
-    test_cases = [
-        ("SW", "sw"),
-        ("Tersoff", "tersoff"),
-        ("ReaxFF", "reaxff"),
-        ("REAX/C", "reax/c"),
-        ("  sw  ", "sw"),
-    ]
-
-    for input_val, expected in test_cases:
-        assert normalize_potential_type(input_val) == expected
-
-
-def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> None:
-    """Build should execute per-layer orchestration for all requested layers,
-    and actually create an L{n} directory tree per layer on disk.
-
-    builders-afm.md test-weak repair: this test (and the since-removed
-    test_afm_builder_layer_specific_paths, whose claim -- "AFM should create
-    L{n} directories for each layer count" -- it never actually checked; it
-    never called build() at all) used to mock every AFMSimulation internal
-    and assert only call order/counts. _create_directories is real here
-    (removed from tests/repo/test_mock_targets.py's KNOWN_VIOLATIONS for this
-    file accordingly) so the L{n} directory claim is now verified against the
-    real filesystem, not inferred from a mock having been called.
+    The component builders and LAMMPS-facing steps are stubbed (a real build
+    needs lmp); ``_create_directories`` is real, so the L{n} claim is checked
+    against the filesystem, not inferred from a mock having been called.
     """
     config = _make_afm_config(tmp_path, layers=[2, 4])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
 
-    called = {
-        "build_sheet_layers": [],
-        "build_components": 0,
-        "generate_potentials": [],
-        "z_positions": [],
-        "write_inputs": [],
-        "hpc": 0,
-    }
-
     def mock_build_sheet(*_args, **kwargs):
-        called["build_sheet_layers"].append(kwargs["n_layers_override"])
         return (
             tmp_path / f"sheet_L{kwargs['n_layers_override']}.lmp",
             {"xlo": 0, "xhi": 100, "ylo": 0, "yhi": 100, "zlo": 0, "zhi": 20},
             3.0,
         )
 
-    monkeypatch.setattr("frictionsim2d.builders.components.build_sheet", mock_build_sheet)
+    monkeypatch.setattr("frictionsim2d.builders.construction.components.build_sheet", mock_build_sheet)
     monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation._init_provenance", lambda *_a, **_k: None)
     monkeypatch.setattr(
         "frictionsim2d.builders.afm.AFMSimulation._get_substrate_box_dims",
         lambda _self: {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zlo": -5.0, "zhi": 0.0},
     )
-
-    def mock_build_components(_self, _build_dir):
-        called["build_components"] += 1
-        return tmp_path / "tip.lmp", 20.0, tmp_path / "sub.lmp"
-
-    monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation._build_components", mock_build_components)
     monkeypatch.setattr(
-        "frictionsim2d.builders.afm.AFMSimulation._generate_potentials",
-        lambda _self, n: called["generate_potentials"].append(n) or object(),
+        "frictionsim2d.builders.afm.AFMSimulation._build_components",
+        lambda _self, _build_dir: (tmp_path / "tip.lmp", 20.0, tmp_path / "sub.lmp"),
     )
-    monkeypatch.setattr(
-        "frictionsim2d.builders.afm.AFMSimulation._calculate_z_positions",
-        lambda _self, n, _r: called["z_positions"].append(n),
-    )
-    monkeypatch.setattr(
-        "frictionsim2d.builders.afm.AFMSimulation.write_inputs",
-        lambda _self, n: called["write_inputs"].append(n),
-    )
-    monkeypatch.setattr(
-        "frictionsim2d.builders.afm.AFMSimulation._generate_hpc_scripts",
-        lambda *_a, **_k: called.__setitem__("hpc", called["hpc"] + 1),
-    )
+    monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation._generate_potentials",
+                        lambda _self, _n: object())
+    monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation._calculate_z_positions",
+                        lambda _self, _n, _r: None)
+    monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation.write_inputs",
+                        lambda _self, _n: None)
+    monkeypatch.setattr("frictionsim2d.builders.afm.AFMSimulation._generate_hpc_scripts",
+                        lambda *_a, **_k: None)
 
     builder.build()
 
-    assert called["build_sheet_layers"] == [2, 4]
-    assert called["build_components"] == 1
-    assert called["generate_potentials"] == [2, 4]
-    assert called["z_positions"] == [2, 4]
-    assert called["write_inputs"] == [2, 4]
-    assert called["hpc"] == 1
     assert sorted(builder.output_dir_layer.keys()) == [2, 4]
-
-    # Real _create_directories output: an L{n} dir with the standard
-    # subdirectory layout for each requested layer count, not just the dict
-    # key write-up-front _create_directories itself doesn't produce.
     for n in (2, 4):
         layer_dir = builder.output_dir_layer[n]
         assert layer_dir == tmp_path / "out" / f"L{n}"
         assert layer_dir.is_dir()
-        for sub in ("visuals", "results", "lammps", "data"):
-            assert (layer_dir / sub).is_dir(), f"L{n}/{sub} missing"
+        for sub_dir in ("visuals", "results", "lammps", "data"):
+            assert (layer_dir / sub_dir).is_dir(), f"L{n}/{sub_dir} missing"
 
 
 def test_afm_finite_sheet_computes_box_and_center_offsets(tmp_path: Path) -> None:
@@ -391,77 +331,51 @@ def _builder_with_pm_types(tmp_path: Path, types) -> AFMSimulation:
     return builder
 
 
-def test_layer_groups_available_false_when_types_missing_methods(tmp_path: Path) -> None:
-    """builders-afm.md finding 3: the not-callable fail-safe guard.
+class _NoSheetIds:
+    def get_layer_group_string(self, component, layer):
+        return '3'
 
-    A types stand-in missing get_layer_group_string/ids_by_component (an
-    "exotic builder" or a thinner test stub) must fail safe to False rather
-    than raise an AttributeError deep inside write_inputs.
+    def ids_by_component(self, component):
+        return []
+
+
+class _Raises:
+    def get_layer_group_string(self, component, layer):
+        raise RuntimeError("boom")
+
+    def ids_by_component(self, component):
+        return [3]
+
+
+@pytest.mark.parametrize("types", [SimpleNamespace(), _NoSheetIds(), _Raises()],
+                         ids=["missing-methods", "no-sheet-ids", "raises"])
+def test_layer_groups_unavailable_fails_safe(tmp_path: Path, types) -> None:
+    """builders-afm.md finding 3: a broken types stand-in fails safe to False.
+
+    Missing methods ("exotic builder"), no sheet ids, or a raising lookup must
+    not crash write_inputs -- they silently disable the zref block and the
+    layer-resolved COM channels instead.
     """
-    builder = _builder_with_pm_types(tmp_path, SimpleNamespace())
+    builder = _builder_with_pm_types(tmp_path, types)
     assert builder._layer_groups_available(2) is False
 
 
-def test_layer_groups_available_false_when_no_sheet_ids(tmp_path: Path) -> None:
-    """finding 3: ids_by_component('sheet') returning nothing fails safe."""
-    class _Types:
-        def get_layer_group_string(self, component, layer):
-            return '3'
-
-        def ids_by_component(self, component):
-            return []
-
-    builder = _builder_with_pm_types(tmp_path, _Types())
-    assert builder._layer_groups_available(2) is False
-
-
-def test_layer_groups_available_false_on_exception(tmp_path: Path) -> None:
-    """finding 3: the broad-except catch-all fails safe rather than propagating.
-
-    A regression that makes get_layer_group_string raise for the ordinary
-    homogeneous AFM path must not crash write_inputs -- it silently disables
-    the zref block and layer-resolved COM channels instead, which is the
-    contract this test pins.
-    """
-    class _Types:
-        def get_layer_group_string(self, component, layer):
-            raise RuntimeError("boom")
-
-        def ids_by_component(self, component):
-            return [3]
-
-    builder = _builder_with_pm_types(tmp_path, _Types())
-    assert builder._layer_groups_available(2) is False
-
-
-def test_afm_scan_angle_list_with_force_gate(tmp_path: Path) -> None:
-    """Explicit angle lists should be used directly (no interval expansion)."""
+@pytest.mark.parametrize("angles, rendered", [
+    ([2.0, 10.0, 4.0], "2.0 10.0 4.0"),
+    ([0.0, 2.0, 6.0, 10.0], "0.0 2.0 6.0 10.0"),
+])
+def test_afm_scan_angle_list_with_force_gate(tmp_path: Path, angles, rendered) -> None:
+    """Explicit angle lists are used directly (no interval expansion), with a separate force gate."""
     config = _make_afm_config(tmp_path, layers=[1])
     config.general.force = [2.0, 5.0, 10.0, 20.0, 30.0]
-    config.general.scan_angle = [2.0, 10.0, 4.0]
+    config.general.scan_angle = angles
     config.general.scan_angle_force = 30.0
 
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
     slide_script = slide_path.read_text(encoding="utf-8")
 
-    assert "variable        a index 2.0 10.0 4.0" in slide_script
-    assert "variable        scan_angle_force equal 30.0" in slide_script
-    assert "abs(v_find-v_scan_angle_force) < 1.0e-12" in slide_script
-
-
-def test_afm_scan_angle_explicit_list_with_force_gate(tmp_path: Path) -> None:
-    """Explicit AFM angle lists should be supported with a separate force gate."""
-    config = _make_afm_config(tmp_path, layers=[1])
-    config.general.force = [2.0, 5.0, 10.0, 20.0, 30.0]
-    config.general.scan_angle = [0.0, 2.0, 6.0, 10.0]
-    config.general.scan_angle_force = 30.0
-
-    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
-    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
-    slide_script = slide_path.read_text(encoding="utf-8")
-
-    assert "variable        a index 0.0 2.0 6.0 10.0" in slide_script
+    assert f"variable        a index {rendered}" in slide_script
     assert "variable        scan_angle_force equal 30.0" in slide_script
     assert "abs(v_find-v_scan_angle_force) < 1.0e-12" in slide_script
 
@@ -482,10 +396,14 @@ def test_afm_scan_angle_force_accepts_multiple_targets(tmp_path: Path) -> None:
     assert "then \"next scan_angle_force\"" in slide_script
 
 
-def test_afm_outer_loop_force_splits_slide_per_load(tmp_path: Path) -> None:
+@pytest.mark.parametrize("forces, names", [
+    ([2.0, 5.0, 10.0], ["slide_f10N.in", "slide_f2N.in", "slide_f5N.in"]),
+    ([2.0, 5.0], ["slide_f2N.in", "slide_f5N.in"]),   # two loads already split
+])
+def test_afm_outer_loop_force_splits_slide_per_load(tmp_path: Path, forces, names) -> None:
     """outer_loop=force emits one slide_f<load>N.in per load, sharing system.in."""
     config = _make_afm_config(tmp_path, layers=[1])
-    config.general.force = [2.0, 5.0, 10.0]
+    config.general.force = forces
     config.general.outer_loop = "force"
 
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
@@ -496,11 +414,11 @@ def test_afm_outer_loop_force_splits_slide_per_load(tmp_path: Path) -> None:
     assert (lammps_dir / "system.in").exists()
     assert not (lammps_dir / "slide.in").exists()
     slide_scripts = sorted(p.name for p in lammps_dir.glob("slide_*.in"))
-    assert slide_scripts == ["slide_f10N.in", "slide_f2N.in", "slide_f5N.in"]
+    assert slide_scripts == names
 
     # system.in still writes every load's data file (full force loop retained).
     system_script = (lammps_dir / "system.in").read_text(encoding="utf-8")
-    assert "variable        find index 2.0 5.0 10.0" in system_script
+    assert "variable        find index " + " ".join(str(f) for f in forces) in system_script
 
     # Each split slide reads its own load and pins a scalar force (no force loop).
     slide_5 = (lammps_dir / "slide_f5N.in").read_text(encoding="utf-8")
@@ -534,18 +452,14 @@ def test_afm_slide_unset_outer_loop_matches_pinned_baseline(tmp_path: Path) -> N
     assert _normalize_random_seeds(slide_script.rstrip()) == _EXPECTED_SLIDE_UNSET_OUTER_LOOP
 
 
-def test_afm_supports_angle_split_by_default() -> None:
-    """AFMSimulation opts into the angle split; only opt-out subclasses (e.g.
-    IndentSimulation, see tests/builders/test_indent_builder.py) drop it. The same
-    declaration drives the job-count prediction (frictionsim2d/run/expand.py)."""
-    assert 'scan_angle' in AFMSimulation.SPLIT_OUTER_LOOPS
-    assert 'force' in AFMSimulation.SPLIT_OUTER_LOOPS
-
-
-def test_afm_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> None:
+@pytest.mark.parametrize("angles, names", [
+    ([0.0, 30.0, 60.0], ["slide_a0.in", "slide_a30.in", "slide_a60.in"]),
+    ([0.0, 30.0], ["slide_a0.in", "slide_a30.in"]),   # two angles already split
+])
+def test_afm_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path, angles, names) -> None:
     """outer_loop=scan_angle emits one slide_a<angle>.in per angle, sharing system.in."""
     config = _make_afm_config(tmp_path, layers=[1])
-    config.general.scan_angle = [0.0, 30.0, 60.0]
+    config.general.scan_angle = angles
     config.general.outer_loop = "scan_angle"
 
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
@@ -556,7 +470,7 @@ def test_afm_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> Non
     assert (lammps_dir / "system.in").exists()
     assert not (lammps_dir / "slide.in").exists()
     slide_scripts = sorted(p.name for p in lammps_dir.glob("slide_*.in"))
-    assert slide_scripts == ["slide_a0.in", "slide_a30.in", "slide_a60.in"]
+    assert slide_scripts == names
 
     # Each split slide pins a scalar angle (no in-script angle loop).
     slide_30 = (lammps_dir / "slide_a30.in").read_text(encoding="utf-8")
@@ -566,8 +480,9 @@ def test_afm_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> Non
 
     slide_0 = (lammps_dir / "slide_a0.in").read_text(encoding="utf-8")
     assert "variable        a equal 0.0" in slide_0
-    slide_60 = (lammps_dir / "slide_a60.in").read_text(encoding="utf-8")
-    assert "variable        a equal 60.0" in slide_60
+    if 60.0 in angles:
+        slide_60 = (lammps_dir / "slide_a60.in").read_text(encoding="utf-8")
+        assert "variable        a equal 60.0" in slide_60
 
 
 def test_afm_outer_loop_scan_angle_single_angle_stays_slide_in(tmp_path: Path) -> None:

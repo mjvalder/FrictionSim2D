@@ -58,10 +58,12 @@ def _fake_match(matrix):
         "M", (), {"supercell_matrix": np.array(matrix), "residual_strain": 0.0})()
 
 
-def test_matched_substrate_refuses_a_sheared_supercell(tmp_path, monkeypatch):
+@pytest.mark.parametrize("matrix", [[[2, 1], [0, 2]], [[2, 0], [1, 2]]],
+                         ids=["upper-off-diagonal", "lower-off-diagonal"])
+def test_matched_substrate_refuses_a_sheared_supercell(tmp_path, monkeypatch, matrix):
     from frictionsim2d.builders.construction.components import build_matched_crystalline_substrate
     monkeypatch.setattr("frictionsim2d.lattice.matching.match_to_fixed_box",
-                        _fake_match([[2, 1], [0, 2]]))
+                        _fake_match(matrix))
     with pytest.raises(ValueError, match="sheared supercell"):
         build_matched_crystalline_substrate(
             np.array([[22.0, 0.0], [0.0, 22.0]]), _si_sub(), thickness=12.0, build_dir=tmp_path)

@@ -314,6 +314,26 @@ def test_matched_supercells_fail_loud_when_either_strain_exceeds_tol(tmp_path):
         )
 
 
+@pytest.mark.parametrize("swap", [False, True], ids=["b-over", "a-over"])
+def test_post_match_strain_guard_names_the_over_strained_side(tmp_path, monkeypatch, swap):
+    """The guard after the match is not the "no coincidence" error: with the
+    matcher forced to accept a looser pair, a per-material strain above
+    ``strain_tol`` must still be refused, whichever side carries it."""
+    from frictionsim2d.builders.construction import hetero_stack
+
+    real = hetero_stack.find_coincidence_lattice
+    monkeypatch.setattr(hetero_stack, "find_coincidence_lattice",
+                        lambda a, b, **kw: real(a, b, **{**kw, "strain_tol": 0.05}))
+    cells = (_SHEAR_CELL_B, _SHEAR_CELL_A) if swap else (_SHEAR_CELL_A, _SHEAR_CELL_B)
+    mono_a = _write_synthetic_monolayer(tmp_path / "g_a.lmp", cells[0], charges=[0.5, -0.5])
+    mono_b = _write_synthetic_monolayer(tmp_path / "g_b.lmp", cells[1], charges=[0.6, -0.6])
+
+    # Mean-cell strains are ~0.64 % and ~0.87 %; 0.75 % leaves exactly one over.
+    with pytest.raises(ValueError, match="strain exceeds tol"):
+        build_matched_supercells(mono_a, mono_b, workdir=tmp_path, strain_tol=0.0075,
+                                 max_supercell=3, area_tol=0.06)
+
+
 # A genuinely sheared, non-identity coincidence between two canonical (a1 along
 # +x) in-plane cells: find_coincidence_lattice matches these at
 #   matrix_a = [[1, 1], [0, 2]]   (sheared, det 2)
@@ -634,6 +654,22 @@ def test_emitted_layers_are_twisted_by_the_achieved_angle(tmp_path):
     expected = ms.twist_angle_achieved % 60.0
     expected = min(expected, 60.0 - expected)
     assert abs(rel - expected) < 0.3, (rel, expected)
+
+
+def test_twist_refuses_a_layer_strained_beyond_the_tolerance(tmp_path, monkeypatch):
+    """Per-layer strain onto the moire box is guarded separately from the match:
+    force the matcher loose and the build must refuse, naming the achieved twist."""
+    from frictionsim2d.builders.construction import hetero_stack
+
+    real = hetero_stack.find_commensurate_twist
+    monkeypatch.setattr(hetero_stack, "find_commensurate_twist",
+                        lambda a, b, **kw: real(a, b, **{**kw, "strain_tol": 0.03}))
+    mono_a = _build_small_monolayer("h-MoS2", MOS2_CIF, MOS2_POT)
+    mono_b = _build_small_monolayer("h-WS2", WS2_CIF, WS2_POT)
+    with pytest.raises(ValueError, match=r"residual strain .* exceeds strain_tol.*achieved twist"):
+        hetero_stack.build_twisted_supercells(
+            mono_a, mono_b, workdir=tmp_path, twist_angle=21.8, angle_tol=3.0,
+            strain_tol=0.0003, max_supercell=12)
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")

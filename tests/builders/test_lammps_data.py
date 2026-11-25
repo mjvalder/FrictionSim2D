@@ -4,6 +4,7 @@ Moved verbatim from tests/core/test_utils.py (C-4): these classes exercise
 LAMMPS data-file surgery, not core.
 """
 import pytest
+import re
 import tempfile
 from pathlib import Path
 
@@ -321,6 +322,26 @@ Atoms
         after = path.read_text(encoding='utf-8')
         assert after == before  # z_min already 0 -> early return
         path.unlink()
+
+    def test_shift_moves_atoms_and_both_box_bounds_by_the_minimum_z(self, tmp_path):
+        path = tmp_path / "shift.lmp"
+        path.write_text("""LAMMPS data file
+ 2 atoms
+
+      -3.0      10.0  zlo zhi
+
+Atoms
+
+1 1 0.0 0.0 2.0
+2 2 1.0 1.0 5.0
+""", encoding='utf-8')
+        shift_atoms_to_z_zero(path)
+        text = path.read_text(encoding='utf-8')
+        assert [float(x) for x in re.search(r"^\s*(\S+)\s+(\S+)\s+zlo zhi", text, re.M).groups()] \
+            == pytest.approx([-5.0, 8.0])
+        zs = [float(line.split()[4]) for line in text.splitlines()
+              if re.match(r"^\d+\s+\d+\s", line)]
+        assert zs == pytest.approx([0.0, 3.0])
 
     def test_unparsable_z_is_skipped_in_both_passes(self):
         with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:

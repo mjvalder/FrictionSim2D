@@ -97,6 +97,19 @@ def test_ilp_splits_single_chalcogen(tmp_path):
     assert [t.pot_label for t in pm.types].count("S") == 4
 
 
+@pytest.mark.parametrize("name", ["tip", "substrate"])
+def test_only_sheet_like_components_are_split(name):
+    """The split is for the monolayer families; a component named otherwise keeps
+    its single chalcogen type even under ilp."""
+    jiang = _sheet("mos2_jiang3.sw")
+    plain = PotentialManager(GlobalSettings(), use_langevin=False)
+    plain.register_component(name, jiang, n_layers=2)
+    ilp = PotentialManager(GlobalSettings(), use_langevin=False)
+    ilp.set_interlayer("ilp")
+    ilp.register_component(name, jiang, n_layers=2)
+    assert len(ilp.types) == len(plain.types) == 4
+
+
 def test_ilp_sevik_not_double_split():
     sevik = _sheet("MoS2_sevik.sw")
     assert len(_pm(sevik, "ilp").types) == len(_pm(sevik, "lj").types)

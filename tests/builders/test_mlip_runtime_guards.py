@@ -4,46 +4,7 @@ Both were invisible to component-level tests: the emitted deck was individually
 valid, and only failed when a real builder output met a real solver.
 """
 
-from pathlib import Path
-
 import pytest
-
-REPO = Path(__file__).resolve().parents[2]
-TEMPLATES = REPO / 'frictionsim2d' / 'templates'
-
-#: Every template that emits a tiled decomposition / RCB balance.
-TILED_TEMPLATES = [
-    'sheetonsheet/slide.lmp',
-    'sheetonsheet/pes_scan.lmp',
-    'hetero/slide.lmp',
-    'flake/slide.lmp',
-    'afm/pes_scan.lmp',
-]
-
-
-@pytest.mark.parametrize('rel', TILED_TEMPLATES)
-def test_tiled_comm_is_gated_for_mlip_sheets(rel):
-    """F2: `comm_style tiled` breaks pair_deepmd, so it must be conditional.
-
-    Measured 2026-08-11: with tiled, pair_deepmd tries to allocate ~558 GB on a
-    270-atom cell (`DefaultCPUAllocator`, host side -- not a GPU limit, and the
-    size varies run to run, the signature of a bogus length). Removing
-    `balance` alone does NOT help; removing `comm_style tiled` alone does, and
-    the identical deck then runs. tiled/RCB buy nothing at our design point
-    anyway (mpi_ranks == 1 per GPU).
-    """
-    text = (TEMPLATES / rel).read_text(encoding='utf-8')
-    for keyword in ('comm_style', 'balance'):
-        for i, line in enumerate(text.splitlines()):
-            stripped = line.strip()
-            if not stripped.startswith(keyword):
-                continue
-            window = '\n'.join(text.splitlines()[max(0, i - 10):i])
-            assert 'mlip_sheet' in window, (
-                f"{rel}:{i+1} emits {stripped!r} unguarded; it must sit inside "
-                f"a Jinja block keyed on `mlip_sheet` so MLIP runs get the "
-                f"default brick decomposition"
-            )
 
 
 def test_d3_cutoff_vs_box_is_validated():
@@ -60,6 +21,13 @@ def test_d3_cutoff_vs_box_is_validated():
     # 16.0 cutoff + 0.3 skin = 16.3 required
     with pytest.raises(ValueError, match='(?i)d3_cutoff'):
         check_d3_fits_box(box_x=15.9, box_y=16.5, d3_cutoff=16.0, skin=0.3)
+
+    # a box between the cutoff (16.0) and cutoff + skin (16.3) is still refused
+    with pytest.raises(ValueError, match='(?i)d3_cutoff'):
+        check_d3_fits_box(box_x=16.1, box_y=20.0, d3_cutoff=16.0, skin=0.3)
+
+    # exactly cutoff + skin fits
+    check_d3_fits_box(box_x=16.3, box_y=16.3, d3_cutoff=16.0, skin=0.3)
 
     # comfortably larger box is fine
     check_d3_fits_box(box_x=19.1, box_y=22.1, d3_cutoff=16.0, skin=0.3)

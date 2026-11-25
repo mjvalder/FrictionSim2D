@@ -52,13 +52,13 @@ def _hetero_2p2_config():
     return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
 
-def _hetero_1p1_config():
-    raw = {  # 1+1 = 2 layers -> below MIN_LAYERS
+def _hetero_config(layers_a, layers_b):
+    raw = {
         "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
         "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
-                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1]},
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [layers_a]},
         "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
-                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1]},
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [layers_b]},
     }
     return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
@@ -331,8 +331,9 @@ def test_hetero_slide_defines_layer_groups_by_region():
     assert "aveforce" in script
 
 
-def test_builder_requires_four_layers(tmp_path):
-    cfg = _hetero_1p1_config()  # 1+1 = 2 layers -> below MIN_LAYERS
+@pytest.mark.parametrize("layers", [(1, 1), (1, 2)], ids=["2-layers", "3-layers"])
+def test_builder_requires_four_layers(tmp_path, layers):
+    cfg = _hetero_config(*layers)  # 2 or 3 layers: both below MIN_LAYERS (4)
     sim = HeteroSheetOnSheetSimulation(cfg, str(tmp_path))
     with pytest.raises(ValueError, match=r"[Aa]t least 4"):
         sim.build()

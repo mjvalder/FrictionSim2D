@@ -187,8 +187,12 @@ def test_known_types_contains_the_three_documented_families():
     assert {'sw', 'rebomos', 'reaxff'} <= set(KNOWN_TYPES)
 
 
-def test_normalize_potential_type_is_case_and_space_insensitive():
-    assert normalize_potential_type(' SW ') == 'sw'
+@pytest.mark.parametrize('raw, expected', [
+    (' SW ', 'sw'), ('SW', 'sw'), ('Tersoff', 'tersoff'), ('ReaxFF', 'reaxff'),
+    ('REAX/C', 'reax/c'), ('  sw  ', 'sw'),
+])
+def test_normalize_potential_type_is_case_and_space_insensitive(raw, expected):
+    assert normalize_potential_type(raw) == expected
 
 
 class TestCustomPotType:

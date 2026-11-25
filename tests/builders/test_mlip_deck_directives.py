@@ -119,6 +119,20 @@ def test_mace_declares_the_two_directives():
     assert get_mlip('deepmd').deck_directives == ()
 
 
+def test_the_sheet_family_context_carries_the_style_directives():
+    """The context every sheet/hetero/flake builder merges into its deck render:
+    an MLIP style hands over its mandatory pre-`read_data` lines, a classical
+    one hands over none (the template's `default([])` would hide a missing key)."""
+    from frictionsim2d.builders.simulation_base import mlip_template_context
+
+    mace = mlip_template_context('mace')
+    assert mace['mlip_sheet'] is True
+    assert mace['mlip_deck_directives'] == list(get_mlip('mace').deck_directives)
+    assert any('atom_modify' in d and 'map yes' in d for d in mace['mlip_deck_directives'])
+
+    assert mlip_template_context('sw') == {'mlip_sheet': False, 'mlip_deck_directives': []}
+
+
 MACE_MODEL_JSON = (
     '{"num_channels": 128, "r_cut": 6.0, '
     '"atomic_numbers": [14, 16, 42], "num_elements": 3}'

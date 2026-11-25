@@ -408,6 +408,23 @@ def test_the_refusal_names_the_axis_and_the_numbers():
     assert "x" in message and "6.38" in message and "11.0" in message
 
 
+def test_only_the_y_axis_too_tight_is_refused_by_its_own_span():
+    """x has 40 A of clearance; y has 5 A. The y gap is cell_y - span_y (a
+    flake wide in x and short in y must not borrow its x span for y)."""
+    with pytest.raises(ValueError, match=r"y: 5\.00 A"):
+        components.check_flake_pbc_clearance(
+            (10.0, 20.0), (50.0, 25.0), lj_cutoff=11.0)
+
+
+def test_a_gap_exactly_equal_to_the_cutoff_is_refused():
+    """The gap must EXCEED the cutoff: equal means the flake still sees its image."""
+    with pytest.raises(ValueError, match=r"periodic image"):
+        components.check_flake_pbc_clearance(
+            (19.0, 10.0), (30.0, 44.0), lj_cutoff=11.0)
+    components.check_flake_pbc_clearance(
+        (19.0, 10.0), (30.01, 44.0), lj_cutoff=11.0)
+
+
 def test_a_flake_wider_than_the_cell_is_refused():
     with pytest.raises(ValueError, match=r"periodic image"):
         components.check_flake_pbc_clearance(

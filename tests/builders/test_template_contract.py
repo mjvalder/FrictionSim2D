@@ -168,20 +168,6 @@ def test_conditional_interlayer_channel():
     assert 'e_int_il' not in rb_text
 
 
-def test_sheet_slide_takes_its_varlist_from_the_macro():
-    src = _template_source('sheetonsheet/slide.lmp')
-    assert 'emit_output_fixes(obs_ctx)' in src
-    # hold_ave is exempt: it is NOT a results-tier file (no title1, and it
-    # keeps its own hand-written varlist by design -- see
-    # test_hold_fix_never_carries_schema_marker). Only fc_win/fc_raw/fc_pa
-    # must have vanished from the source in favour of the macro call.
-    results_fix_lines = [ln for ln in src.splitlines()
-                         if ln.startswith('fix') and 'ave/time' in ln
-                         and 'hold_ave' not in ln]
-    assert not results_fix_lines, (
-        f'no hand-written results-tier fix ave/time may remain: {results_fix_lines}')
-
-
 def test_sheet_window_varlist_matches_the_registry():
     from frictionsim2d.core.observables import channels_for, layer_channels
     ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
@@ -205,11 +191,6 @@ def test_many_body_sheet_drops_the_interlayer_channels():
     ctx = _sheet_obs_ctx(has_internal_lj=True, n_layers=4)
     assert 'v_e_int_il' not in ctx['peratom_varlist']
     assert ctx['emit_peratom'] is False      # it was the only peratom channel
-
-
-def test_sheet_results_fix_carries_the_family_marker():
-    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
-    assert ctx['title1'] == '# schema=2 lf_units=nN family=sheetonsheet'
 
 
 def test_unloaded_reference_lines_in_system_init(tmp_path):
@@ -337,14 +318,6 @@ def test_seed_channels_are_distinct_and_recorded(tmp_path):
     assert builder._run_seed('thermal_tip') == seeds['thermal_tip']
 
 
-def test_sheet_lj_branch_lateral_force_is_scaled_to_nN():
-    # compute group/group's VECTOR is a force in eV/A; nf is nN. Dividing one
-    # by the other gave a COF 1.602176634x too SMALL for the whole SW set.
-    text = _render_sheet_slide(has_internal_lj=False)
-    assert 'variable        xfrict equal c_frict[1]*1.602176634' in text
-    assert 'variable        yfrict equal c_frict[2]*1.602176634' in text
-
-
 def test_sheet_many_body_branch_stays_unscaled_at_source():
     # v_sx is ALREADY nN (f_fsbot[1]*ev_a_to_nn); scaling it again would be a
     # second bug in the opposite direction
@@ -357,15 +330,6 @@ def test_interlayer_energy_is_not_scaled():
     # c_frict (SCALAR) is an energy in eV and is already correct
     text = _render_sheet_slide(has_internal_lj=False)
     assert 'variable        e_int_il equal c_frict\n' in text
-
-
-def test_sheet_fixes_carry_the_schema_marker():
-    # line 1 distinguishes post-fix (nN) output from pre-fix (eV/A) output.
-    # LAMMPS title1 replaces ONLY line 1; the column header stays on line 2
-    # where read_data reads it.
-    text = _render_sheet_slide(has_internal_lj=False)
-    assert text.count(
-        'title1 "# schema=2 lf_units=nN family=sheetonsheet"') == 3  # win, raw, pa
 
 
 def test_hold_fix_has_no_schema_marker():
@@ -440,32 +404,10 @@ def _render_hetero_slide(n_layers: int, **extra) -> str:
     )
 
 
-def test_hetero_langevin_fix_tallies():
-    """w_thermostat_center reads f_lang, which only exists with `tally yes`.
-    hetero/slide.lmp had `zero yes` and no tally, so the channel the spec
-    called free is a LAMMPS error here without this one word."""
-    src = _template_source('hetero/slide.lmp')
-    line = [l for l in src.split('\n')
-           if 'fix' in l and 'lang' in l and 'langevin' in l][0]
-    assert 'tally yes' in line
-
-
-def test_hetero_slide_takes_its_varlist_from_the_macro():
-    src = _template_source('hetero/slide.lmp')
-    assert 'emit_output_fixes(obs_ctx)' in src
-    # Unlike sheetonsheet/slide.lmp, hetero has no hold_ave fix to exempt --
-    # every hand-written results-tier fix ave/time is gone.
-    assert 'ave/time' not in src
-
-
 def test_hetero_gains_the_layer_coms_and_energies():
     ctx = _hetero_obs_ctx(n_layers=4)
     emitted = set(ctx['window_varlist'].split())
     assert {'v_comz_L1', 'v_comz_L4', 'v_etot', 'v_pe_now'} <= emitted
-
-
-def test_hetero_results_fix_carries_its_own_family_marker():
-    assert _hetero_obs_ctx(n_layers=4)['title1'].endswith('family=hetero')
 
 
 def _com_probe_groups(text: str):
@@ -493,39 +435,22 @@ def _frict_groups(text: str):
 MIDDLE_INTERFACE = [(3, 1, 2), (4, 2, 3), (5, 2, 3), (6, 3, 4), (7, 3, 4)]
 
 
-@pytest.mark.parametrize('n_layers,cbot,ctop', MIDDLE_INTERFACE)
-def test_sheet_com_probes_straddle_the_middle_interface(n_layers, cbot, ctop):
-    got = _com_probe_groups(
-        _render_sheet_slide(has_internal_lj=False, n_layers=n_layers))
+_PROBE_CASES = ([('sheetonsheet/slide.lmp', *r) for r in MIDDLE_INTERFACE]
+                + [('hetero/slide.lmp', *r) for r in MIDDLE_INTERFACE if r[0] >= 4])  # MIN_LAYERS is 4 there
+
+
+@pytest.mark.parametrize('template,n_layers,cbot,ctop', _PROBE_CASES)
+def test_com_probes_straddle_the_middle_interface(template, n_layers, cbot, ctop):
+    got = _com_probe_groups(_CONVERTED_RENDER[template](n_layers))
     assert got == (f'layer_{ctop}', f'layer_{cbot}')
 
 
-@pytest.mark.parametrize('n_layers,cbot,ctop',
-                         [r for r in MIDDLE_INTERFACE if r[0] >= 4])
-def test_hetero_com_probes_straddle_the_middle_interface(n_layers, cbot, ctop):
-    """Same rule for hetero/slide.lmp (MIN_LAYERS is 4 there)."""
-    got = _com_probe_groups(_render_hetero_slide(n_layers))
-    assert got == (f'layer_{ctop}', f'layer_{cbot}')
-
-
-def test_sheet_results_file_carries_all_four_com_z_probes():
-    """comz_top and comz_bot were computed and never emitted. After the
-    alias removal the same four numbers arrive as drivez plus the layer
-    COMs at il_top, il_bot and layer 1."""
-    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
-    emitted = set(ctx['window_varlist'].split())
-    assert {'v_comz_top', 'v_comz_L3', 'v_comz_L2', 'v_comz_L1'} <= emitted
-
-
-def test_hetero_results_file_carries_all_four_com_z_probes():
-    """comz_top and comz_bot were computed and never emitted (and hetero never
-    emitted comz_ctop/comz_cbot into the results file either, despite
-    computing them). After the alias removal the same four numbers arrive as
-    drivez plus the layer COMs at il_top, il_bot and layer 1 (n_layers=4:
-    il_top=3, il_bot=2) -- same shape as
-    test_sheet_results_file_carries_all_four_com_z_probes."""
-    ctx = _hetero_obs_ctx(n_layers=4)
-    emitted = set(ctx['window_varlist'].split())
+@pytest.mark.parametrize('template', ['sheetonsheet/slide.lmp', 'hetero/slide.lmp'])
+def test_results_file_carries_all_four_com_z_probes(template):
+    """comz_top and comz_bot were computed and never emitted. After the alias
+    removal the same four numbers arrive as drivez plus the layer COMs at
+    il_top, il_bot and layer 1 (n_layers=4: il_top=3, il_bot=2)."""
+    emitted = set(_CONVERTED_CTX[template]()['window_varlist'].split())
     assert {'v_comz_top', 'v_comz_L3', 'v_comz_L2', 'v_comz_L1'} <= emitted
 
 
@@ -539,33 +464,6 @@ def test_hetero_results_file_carries_all_four_com_z_probes():
 SHEET_SLIDE_TEMPLATES = ('sheetonsheet/slide.lmp',
                          'hetero/slide.lmp',
                          'flake/slide.lmp')
-
-
-def _template_source(name: str) -> str:
-    from frictionsim2d.interfaces.jinja import template_environment
-    env = template_environment()
-    return env.loader.get_source(env, name)[0]
-
-
-@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
-def test_lj_branch_lateral_force_scaled_to_nN(template):
-    # compute group/group's VECTOR is a force in eV/A. nf is nN. Unscaled,
-    # COF came out a factor 1.602176634 too SMALL for the entire SW set.
-    src = _template_source(template)
-    assert 'c_frict[1]*{{ ev_a_to_nn }}' in src, template
-    assert 'c_frict[2]*{{ ev_a_to_nn }}' in src, template
-    # and never the bare form
-    assert 'equal c_frict[1]\n' not in src, template
-    assert 'equal c_frict[2]\n' not in src, template
-
-
-@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
-def test_interlayer_energy_stays_unscaled(template):
-    # c_frict's SCALAR is an energy in eV and was always correct; scaling it
-    # would be a new bug in the opposite direction.
-    src = _template_source(template)
-    if 'e_int_il' in src:
-        assert 'variable        e_int_il equal c_frict\n' in src, template
 
 
 #: All three sheet-family templates are now routed through the observables
@@ -588,10 +486,90 @@ SHEET_SLIDE_TEMPLATES_CONVERTED = SHEET_SLIDE_TEMPLATES
 #: and flake, a parameter for sheetonsheet), so a single shared render call
 #: does not cover every member.
 _CONVERTED_RENDER = {
-    'sheetonsheet/slide.lmp': lambda: _render_sheet_slide(has_internal_lj=False),
-    'hetero/slide.lmp': lambda: _render_hetero_slide(4),
-    'flake/slide.lmp': lambda: _render_flake_slide(4),
+    'sheetonsheet/slide.lmp': lambda n=4: _render_sheet_slide(has_internal_lj=False, n_layers=n),
+    'hetero/slide.lmp': lambda n=4: _render_hetero_slide(n),
+    'flake/slide.lmp': lambda n=4: _render_flake_slide(n),
 }
+
+#: The obs_ctx each family's real builder hands its slide template.
+_CONVERTED_CTX = {
+    'sheetonsheet/slide.lmp': lambda n=4: _sheet_obs_ctx(has_internal_lj=False, n_layers=n),
+    'hetero/slide.lmp': lambda n=4: _hetero_obs_ctx(n),
+    'flake/slide.lmp': lambda n=4: _flake_obs_ctx(n),
+}
+
+#: The non-many-body (compute group/group) branch of each template.
+_LJ_BRANCH_RENDER = {
+    'sheetonsheet/slide.lmp': _CONVERTED_RENDER['sheetonsheet/slide.lmp'],
+    'hetero/slide.lmp': _CONVERTED_RENDER['hetero/slide.lmp'],
+    'flake/slide.lmp': lambda n=4: _render_flake_slide(n, has_internal_lj=False),
+}
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_lateral_force_scaled_to_nN(template):
+    # compute group/group's VECTOR is a force in eV/A. nf is nN. Unscaled,
+    # COF came out a factor 1.602176634 too SMALL for the entire SW set.
+    text = _LJ_BRANCH_RENDER[template]()
+    assert 'variable        xfrict equal c_frict[1]*1.602176634' in text, template
+    assert 'variable        yfrict equal c_frict[2]*1.602176634' in text, template
+    assert 'equal c_frict[1]\n' not in text and 'equal c_frict[2]\n' not in text, template
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_results_fixes_take_their_varlist_from_the_registry(template):
+    """Every results-tier fix comes from the macro: the window fix carries the
+    registry varlist, and no fix other than fc_win/fc_raw/fc_pa averages in time
+    (hold_ave is the hold's own file, not a results tier)."""
+    text = _CONVERTED_RENDER[template]()
+    averaging = [ln for ln in text.splitlines()
+                 if ln.startswith('fix') and 'ave/time' in ln and 'hold_ave' not in ln]
+    assert {ln.split()[1] for ln in averaging} <= {'fc_win', 'fc_raw', 'fc_pa'}, averaging
+    win = [ln for ln in averaging if ln.split()[1] == 'fc_win']
+    assert len(win) == 1 and _CONVERTED_CTX[template]()['window_varlist'] in win[0]
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_langevin_fix_tallies(template):
+    """w_thermostat_center reads f_lang, which only exists with `tally yes`."""
+    lines = [ln for ln in _CONVERTED_RENDER[template]().splitlines()
+             if ln.startswith('fix') and 'langevin' in ln]
+    assert lines, template
+    assert all('tally yes' in ln for ln in lines), lines
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_results_fix_family_marker(template):
+    family = template.split('/')[0]
+    assert (_CONVERTED_CTX[template]()['title1']
+            == f'# schema=2 lf_units=nN family={family}')
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+@pytest.mark.parametrize('n_layers', [4, 6])
+def test_temp_ltop_names_the_real_top_layer(template, n_layers):
+    """`layer_n` is a registry LABEL for the top layer, not a LAMMPS group."""
+    text = _CONVERTED_RENDER[template](n_layers)
+    assert f'compute T_Ltop layer_{n_layers} temp' in text
+    assert 'layer_n' not in text
+
+
+def test_window_fix_honours_results_frequency():
+    """Regression: the macro hardcoded `1 1000 1000`, so
+    settings.output.results_frequency was computed and discarded."""
+    from frictionsim2d.builders.utils.obs_ctx import build_obs_ctx
+    from frictionsim2d.interfaces.jinja import template_environment
+    ctx = build_obs_ctx(
+        sim_type='sheetonsheet', n_layers=4, results_file_pattern='results/friction.txt',
+        use_langevin=True, enabled_tiers={'window': True, 'raw': True, 'peratom': True},
+        contact_cutoff=5.0, results_freq=500, optional_channels=(),
+        interface_layers=(2, 3))
+    env = template_environment()
+    text = env.from_string(
+        "{% from 'common/observables.lmp' import emit_output_fixes %}"
+        "{{ emit_output_fixes(obs_ctx) }}").render(obs_ctx=ctx)
+    win = next(ln for ln in text.splitlines() if ln.startswith('fix') and 'fc_win' in ln)
+    assert win.split()[3:7] == ['ave/time', '1', '1000', '500'], win
 
 
 @pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES_CONVERTED)
@@ -605,15 +583,6 @@ def test_results_fixes_carry_schema_marker_converted(template):
     for ln in results_fixes:
         assert (f'title1 "# schema=2 lf_units=nN family={family}"' in ln
                ), f"{template}: {ln[:60]}"
-
-
-@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
-def test_hold_fix_never_carries_schema_marker(template):
-    # the hold writes its own hold_*.txt and is not read by read_data
-    src = _template_source(template)
-    for ln in src.splitlines():
-        if 'hold_ave' in ln and 'ave/time' in ln:
-            assert 'title1' not in ln, template
 
 
 @pytest.mark.parametrize('n_layers,cbot,ctop', MIDDLE_INTERFACE)
@@ -664,13 +633,13 @@ def _flake_obs_ctx(n_layers: int) -> dict:
     )
 
 
-def _render_flake_slide(n_layers: int) -> str:
+def _render_flake_slide(n_layers: int, has_internal_lj: bool = True) -> str:
     """Render flake/slide.lmp, whose substrate layer groups come from z-bands
     (like hetero) and whose driven body is the flake, not a sheet layer_N."""
     from frictionsim2d.interfaces.jinja import template_environment
     env = template_environment()
     return env.get_template('flake/slide.lmp').render(
-        n_layers=n_layers, has_internal_lj=True,
+        n_layers=n_layers, has_internal_lj=has_internal_lj,
         sheet_layers=[{'idx': i, 'zlo': 3.0 * (i - 1), 'zhi': 3.0 * i}
                      for i in range(1, n_layers + 1)],
         constraint_mode='none', pot_type='sw',
@@ -692,24 +661,6 @@ def _render_flake_slide(n_layers: int) -> str:
         reserve_virtual_type=False, flake_area=64.95, flake_shape='hexagon',
         flake_edge_length=5.0,
     )
-
-
-def test_flake_langevin_fix_tallies():
-    """w_thermostat_center would read f_lang, which only exists with `tally
-    yes`. flake/slide.lmp had `zero yes` and no tally, same gap Task 15 fixed
-    for hetero."""
-    src = _template_source('flake/slide.lmp')
-    line = [l for l in src.split('\n')
-           if 'fix' in l and 'lang' in l and 'langevin' in l][0]
-    assert 'tally yes' in line
-
-
-def test_flake_slide_takes_its_varlist_from_the_macro():
-    src = _template_source('flake/slide.lmp')
-    assert 'emit_output_fixes(obs_ctx)' in src
-    # flake/slide.lmp has no hold_ave fix to exempt -- every hand-written
-    # results-tier fix ave/time is gone.
-    assert 'ave/time' not in src
 
 
 def test_flake_drive_com_maps_to_the_flake_body():
@@ -741,35 +692,6 @@ def test_flake_gains_no_energy_channels_but_emits_the_normal_load():
     assert ctx['emit_peratom'] is False
 
 
-def test_flake_results_fix_carries_its_own_family_marker():
-    assert _flake_obs_ctx(n_layers=4)['title1'].endswith('family=flake')
-
-
-def test_afm_window_fix_honours_results_frequency():
-    """Regression: the macro hardcoded `1 1000 1000`, so
-    settings.output.results_frequency was computed and discarded for every
-    AFM slide build (afm/base.py passes it; the macro ignored it)."""
-    from frictionsim2d.interfaces.jinja import template_environment
-    env = template_environment()
-    src = env.loader.get_source(env, 'common/observables.lmp')[0]
-    assert 'ave/time 1 1000 1000' not in src
-    assert 'obs_ctx.window_args' in src
-
-
-def test_macro_emits_the_schema_marker_on_every_results_fix():
-    """Interlock: a results file with no marker parses as schema 1, which
-    triggers the frozen legacy correction and multiplies correctly-scaled
-    nN data by 1.602176634. The macro had no title1 at all."""
-    from frictionsim2d.interfaces.jinja import template_environment
-    env = template_environment()
-    src = env.loader.get_source(env, 'common/observables.lmp')[0]
-    fixes = [l for l in src.split('\n')
-             if l.startswith('fix') and 'ave/time' in l]
-    assert len(fixes) == 3, fixes
-    for line in fixes:
-        assert 'title1 "{{ obs_ctx.title1 }}"' in line, line
-
-
 # --- Task 17: thermostat work and group temperatures ------------------------
 
 def test_thermostat_work_present_under_langevin_absent_otherwise():
@@ -791,27 +713,6 @@ def test_f_lang_never_referenced_in_the_nvt_branch():
 #: layer", not a real LAMMPS group -- the real group is layer_4, layer_6,
 #: etc. Parametrized over two layer counts so layer_4 vs layer_6 is visible,
 #: not just "some digit got substituted".
-@pytest.mark.parametrize('n_layers', [4, 6])
-def test_temp_ltop_names_the_real_top_layer_sheetonsheet(n_layers):
-    text = _render_sheet_slide(has_internal_lj=False, n_layers=n_layers)
-    assert f'compute T_Ltop layer_{n_layers} temp' in text
-    assert 'layer_n' not in text
-
-
-@pytest.mark.parametrize('n_layers', [4, 6])
-def test_temp_ltop_names_the_real_top_layer_hetero(n_layers):
-    text = _render_hetero_slide(n_layers)
-    assert f'compute T_Ltop layer_{n_layers} temp' in text
-    assert 'layer_n' not in text
-
-
-@pytest.mark.parametrize('n_layers', [4, 6])
-def test_temp_ltop_names_the_real_top_layer_flake(n_layers):
-    text = _render_flake_slide(n_layers)
-    assert f'compute T_Ltop layer_{n_layers} temp' in text
-    assert 'layer_n' not in text
-
-
 def test_sheet_group_temperatures_present_regardless_of_thermostat():
     # compute ... temp works under either langevin or nose-hoover; only
     # w_thermostat_center is conditional on use_langevin

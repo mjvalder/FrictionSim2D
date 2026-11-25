@@ -349,6 +349,23 @@ def test_resolve_run_log_prefers_run_system_then_a_lone_log(tmp_path):
     assert resolve_run_log(tmp_path) == (lammps / 'run_system.log', '')
 
 
+def test_enrich_one_run_reports_a_repeat_pass_as_unchanged(tmp_path):
+    from frictionsim2d.builders.utils.post_run import enrich_one_run
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+    log_path = _write_log(
+        tmp_path, "log_system.lammps",
+        "LAMMPS (2 Aug 2023 - Update 3)\n"
+        "# RAMP_STATUS converged=1 r=0.042 iterations=17\n")
+
+    first = enrich_one_run(layer_dir, log_path)
+    second = enrich_one_run(layer_dir, log_path)
+
+    assert first[0] == 'enriched' and first[1] == f"from {log_path.name}"
+    assert second[0] == 'unchanged'
+    assert log_path.name in second[1]
+
+
 def test_enrich_tree_reports_each_run_and_a_tally(tmp_path):
     from frictionsim2d.builders.utils.post_run import enrich_tree
     assert list(enrich_tree(tmp_path / 'nope')) == [
