@@ -160,7 +160,8 @@ lower it to protect a free-tier quota.
   sentence, including material sweeps.
 - Find any config or settings parameter and set it.
 - Search structures and potentials: your workspace first, then the bundled
-  examples (labelled; verify them before production runs).
+  library in `frictionsim2d/data` (labelled `examples:/`; verify them before
+  production runs).
 - Describe workspace folders, create folders, copy found files in.
 - Look a formula up on Materials Project (stability, band gap, moduli) and
   2DMatPedia, and propose saving a 2DMatPedia monolayer as

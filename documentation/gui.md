@@ -12,6 +12,8 @@ pip install -e '.[gui]'
 
 FrictionSim2D gui --check     # verify the environment first
 FrictionSim2D gui             # launch
+FrictionSim2D gui --verbose   # show all log output and library warnings
+                              # (or FRICTIONSIM2D_GUI_VERBOSE=1)
 ```
 
 `--check` reports the Qt platform, the ovito version, whether the viewport gets
@@ -71,9 +73,9 @@ front:
   used a rounded 16.02 before provenance schema 2.2.0).
 
 Separately, `[tip] damping_ratio` now defaults to 0.0 (off) rather than
-0.0072. `dspring` — a raw viscous override — already takes precedence
-whenever it is set, so this only changes anything for a config that leaves
-`dspring` blank too.
+0.0072. `dspring` — a raw viscous override whose own default is 0.0, also no
+damping — takes precedence whenever it holds any value, so
+`damping_ratio` only acts in a config that blanks `dspring`.
 
 ## Fields
 
@@ -157,6 +159,20 @@ confirm, if it has unsaved changes). Blocks under other conditions than the
 first are not put in it, so nothing is made that was not needed: generate and
 import this one, then generate the friction config again to be offered the
 rest. Pressing the button generates and runs nothing.
+
+## Interlayer interaction
+
+For a sheet potential with no interlayer term of its own, `[general]
+interlayer_style` appears as **Interlayer interaction** (`lj`, `lj_g` for
+LJ plus the Jiang–Park Gaussian, `ilp`, `kc`), with **Interlayer parameter
+file** (`interlayer_file`, shown for `ilp`/`kc`), **Gaussian strength g**
+(`interlayer_g`, `[2D]`, shown for `lj_g`) and **Comparison mode**
+(`interlayer_comparison`). A blank file or g field shows what will be used (the
+bundled file for the sheet's elements, the material's built-in g). A choice
+that cannot build, such as `ilp`/`kc` without `constraint_mode = none`, is
+reported on the field that has to change. The fields are hidden for REBOMoS,
+AIREBO, ReaxFF and COMB sheets. See
+[configuration.md](configuration.md) for the styles.
 
 ## Reading the run count
 
@@ -711,7 +727,7 @@ where a set pulled out of the local AiiDA store belongs:
 
 ```bash
 FrictionSim2D aiida export-results <label> \
-    --output-dir <workspace>/.preview/_datasets/<label>
+    <workspace>/.preview/_datasets/<label>
 ```
 
 Select one and press **Add dataset** to put it in the document; the pane does

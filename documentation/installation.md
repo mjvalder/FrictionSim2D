@@ -10,8 +10,13 @@ Environment setup, optional extras, verification, and troubleshooting.
 
 Optional features require extra dependencies:
 
-- AiiDA workflows: `aiida-core`
-- Plotting: `matplotlib`, `seaborn`, `scipy`
+| Extra | Adds | Needs |
+|---|---|---|
+| `aiida` | the local provenance store (`aiida-core`) | Python 3.9+ |
+| `plotting` | `matplotlib`, `seaborn`, `scipy` | Python 3.9+ |
+| `gui` | the desktop builder (`ovito`, `PySide6`) | see [gui.md](gui.md) |
+| `agent` | the GUI [Assistant](assistant.md) (`pydantic-ai`, `huggingface_hub`) | Python 3.11+ |
+| `dev` | `pytest`, `pytest-cov`, `pylint`, `pytest-qt` | |
 
 ## Install from source
 
@@ -27,6 +32,8 @@ brackets:
 ```bash
 pip install -e ".[aiida]"
 pip install -e ".[plotting]"
+pip install -e ".[gui]"
+pip install -e ".[agent]"
 pip install -e ".[all]"
 ```
 
@@ -37,7 +44,8 @@ FrictionSim2D --help
 FrictionSim2D --version
 ```
 
-Then verify external binaries used by workflows:
+`FrictionSim2D gui --check` verifies the GUI environment separately (see
+[gui.md](gui.md)). Then verify external binaries used by workflows:
 
 ```bash
 lmp -h
@@ -48,6 +56,21 @@ If you use Atomsk-based geometry operations, also verify:
 ```bash
 atomsk --version
 ```
+
+## Materials and potentials
+
+The material (CIF) and potential library ships inside the package, in
+`frictionsim2d/data/`, so an installed copy finds it without the repository.
+The package carries one amorphous Si block; the verified pack of further
+pre-quenched amorphous blocks is optional:
+
+```bash
+FrictionSim2D fetch materials            # --remove deletes it again
+```
+
+It goes to `$XDG_DATA_HOME/FrictionSim2D/materials-pack` and is searched after
+the packaged files. The assistant's fine-tuned models are installed the same way
+(`FrictionSim2D fetch model`, see [assistant.md](assistant.md)).
 
 ## AiiDA setup (optional)
 
