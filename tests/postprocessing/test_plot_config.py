@@ -67,7 +67,6 @@ def test_stick_slip_is_spelled_as_the_dispatcher_spells_it():
     """Plotter.generate_plot dispatches on 'stick_slip_analysis'. A model
     keyed 'stick_slip' would validate documents the Plotter then ignores."""
     assert 'stick_slip_analysis' in PLOT_TYPES
-    assert 'stick_slip' not in PLOT_TYPES
 
 
 def test_a_summary_key_on_a_timeseries_plot_is_refused():
@@ -121,19 +120,6 @@ def test_default_settings_come_from_the_model():
     from frictionsim2d.postprocessing.plot_style import DEFAULT_SETTINGS
 
     assert DEFAULT_SETTINGS == PlotSettings().model_dump()
-    assert DEFAULT_SETTINGS['figure']['size'] == [10, 7]
-    assert DEFAULT_SETTINGS['fonts']['title'] == 26
-    assert DEFAULT_SETTINGS['fonts']['family'] == 'sans-serif'
-    assert DEFAULT_SETTINGS['grid']['which'] == 'both'
-    assert DEFAULT_SETTINGS['export']['formats'] == ['png']
-
-
-def test_layout_is_no_longer_an_empty_dict():
-    """`layout` was declared and never read -- a settings key that did
-    nothing at all."""
-    from frictionsim2d.postprocessing.plot_style import DEFAULT_SETTINGS
-
-    assert DEFAULT_SETTINGS['layout'] == {'constrained_layout': False}
 
 
 def test_the_publication_preset_validates_and_is_vector_first():

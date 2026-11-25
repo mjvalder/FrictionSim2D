@@ -297,7 +297,12 @@ def test_save_plot_does_not_fight_constrained_layout(tmp_path):
     fig, ax = plotter.new_figure()
     ax.plot([0, 1], [0, 1])
 
-    plotter._save_plot(fig, 'x.png')  # pylint: disable=protected-access
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')      # subplots_adjust would warn here
+        plotter._save_plot(fig, 'x.png')  # pylint: disable=protected-access
 
     assert (tmp_path / 'x.png').exists()
     assert not plt.get_fignums()
+    assert type(fig.get_layout_engine()).__name__ == 'ConstrainedLayoutEngine'

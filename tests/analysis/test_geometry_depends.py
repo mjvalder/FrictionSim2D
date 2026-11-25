@@ -37,6 +37,11 @@ def test_own_geometry_is_linked_and_a_new_one_recomputes(store):  # noqa: F811
 
     assert set(first['period_x_A']) == {3.16}
     assert node.creator.inputs.sheet_geometry.uuid == first_geometry
+    # the dependency's identity and version are recorded on the result itself
+    recorded = node.base.attributes.get('depends')['sheet_geometry']
+    assert recorded['uuid'] == first_geometry
+    assert recorded['version'] == get_analysis('sheet_geometry').version
+    assert recorded['params_hash']
     run_analysis('period_summary', 'paper')
     assert _node('period_summary', 'paper').uuid == node.uuid       # reused
 

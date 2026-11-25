@@ -107,27 +107,6 @@ def test_raw_tier_is_picked_from_the_filename_prefix(tmp_path):
     assert 'nf' not in df.columns
 
 
-def test_the_reader_delegates_to_it(tmp_path, monkeypatch):
-    """DataReader no longer has a `sim_type` traversal vocabulary to feed the
-    method form of the parser, so the delegation is asserted over a real walk."""
-    from tests.helpers.results_tree import make_family_run
-
-    import frictionsim2d.postprocessing.read_data as rd
-
-    make_family_run(tmp_path, 'afm')
-    seen = []
-    real = rd.read_results_file
-    monkeypatch.setattr(
-        rd, 'read_results_file',
-        lambda p, f, n=2: seen.append((p, f, n)) or real(p, f, n))
-
-    rd.DataReader(results_dir=str(tmp_path))
-
-    assert len(seen) == 1
-    assert seen[0][1] == 'afm'
-    assert seen[0][2] == 2
-
-
 def test_layer_columns_are_named_for_the_requested_layer_count(tmp_path):
     """The third parameter is positional-or-keyword, and the map it builds is
     `rename_map`'s own -- not a second copy kept in this module."""

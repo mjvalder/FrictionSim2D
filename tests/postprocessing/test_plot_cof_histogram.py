@@ -17,21 +17,22 @@ import pytest  # noqa: E402
 from frictionsim2d.postprocessing.plot_data import Plotter  # noqa: E402
 
 
-def test_mean_load_ratio_matches_handcalc():
-    ratio, err = Plotter._mean_load_ratio([10, 20, 40], [2.0, 3.0, 4.0])
-    r = np.array([0.2, 0.15, 0.1])
-    assert ratio == pytest.approx(r.mean())
-    assert err == pytest.approx(r.std(ddof=1) / np.sqrt(3))
+_R = np.array([0.2, 0.15, 0.1])
 
 
-def test_ratio_x_range_drops_low_loads():
-    ratio, _ = Plotter._mean_load_ratio([10, 20, 40], [2.0, 3.0, 4.0], x_range=[15, 50])
-    assert ratio == pytest.approx((0.15 + 0.1) / 2)
-
-
-def test_zero_load_has_no_ratio():
-    ratio, err = Plotter._mean_load_ratio([0, 10], [1.0, 2.0])
-    assert ratio == pytest.approx(0.2) and err == 0.0
+@pytest.mark.parametrize('nf, lf, x_range, ratio, err', [
+    # hand calculation: mean of lf/nf, error SD/sqrt(n)
+    ([10, 20, 40], [2.0, 3.0, 4.0], None, _R.mean(), _R.std(ddof=1) / np.sqrt(3)),
+    # loads outside ratio_x_range are dropped
+    ([10, 20, 40], [2.0, 3.0, 4.0], [15, 50], (0.15 + 0.1) / 2,
+     np.array([0.15, 0.1]).std(ddof=1) / np.sqrt(2)),
+    # a zero load has no ratio
+    ([0, 10], [1.0, 2.0], None, 0.2, 0.0),
+], ids=['handcalc', 'x_range', 'zero_load'])
+def test_mean_load_ratio(nf, lf, x_range, ratio, err):
+    got_ratio, got_err = Plotter._mean_load_ratio(nf, lf, x_range=x_range)
+    assert got_ratio == pytest.approx(ratio)
+    assert got_err == pytest.approx(err)
 
 
 def _series_file(tmp_path):

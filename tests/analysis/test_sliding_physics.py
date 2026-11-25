@@ -92,6 +92,13 @@ def test_stick_frac_counts_the_stuck_samples():
     assert sp.stick_frac(tipx, dx) == pytest.approx(0.5)
 
 
+def test_a_slow_advance_still_counts_as_sliding():
+    """Only a step below STICK_DX of a drive step sticks: 0.3 dx is moving."""
+    dx = 0.02
+    tipx = np.concatenate([[0.0], np.cumsum(np.tile([0.0, 0.3 * dx], 50))])
+    assert sp.stick_frac(tipx, dx) == pytest.approx(0.5)
+
+
 def test_sheet_carried_and_interlayer_slip():
     tipx = np.linspace(0.0, 10.0, 50)
     comx = np.linspace(0.0, 2.0, 50)

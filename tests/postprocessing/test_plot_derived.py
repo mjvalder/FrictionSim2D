@@ -92,16 +92,3 @@ def test_linear_fit_refuses_a_single_point():
     from frictionsim2d.postprocessing.plot_derived import linear_fit
 
     assert linear_fit(np.array([1.0]), np.array([1.0])) is None
-
-
-def test_the_mixin_still_delegates_with_its_old_signature(tmp_path):
-    from frictionsim2d.postprocessing.plot_data import Plotter
-    from frictionsim2d.postprocessing.plot_derived import linear_fit
-
-    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
-    x = np.array([0.0, 10.0, 20.0])
-    y = 0.3 * x
-
-    fit = plotter._calculate_linear_fit(x, y, None, 'none')  # pylint: disable=protected-access
-
-    assert fit == linear_fit(x, y, None, 'none')

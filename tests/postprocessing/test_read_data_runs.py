@@ -85,24 +85,19 @@ def test_parse_results_name_refuses_anything_else():
     assert parse_results_name('friction_p1_a0_s2_extra') is None
 
 
-def test_a_potential_sweep_keeps_both_arms(tmp_path):
-    make_family_run(tmp_path, 'afm', pot='sw_a')
-    make_family_run(tmp_path, 'afm', pot='sw_b')
+@pytest.mark.parametrize('field, first, second, read', [
+    ('pot', 'sw_a', 'sw_b', lambda r: sorted(x.tokens.pot_token for x in r.runs)),
+    ('temp', 77, 300, lambda r: sorted(x.tokens.temperature for x in r.runs)),
+], ids=['potential', 'temperature'])
+def test_a_sweep_keeps_both_arms(tmp_path, field, first, second, read):
+    make_family_run(tmp_path, 'afm', **{field: first})
+    make_family_run(tmp_path, 'afm', **{field: second})
 
     reader = DataReader(results_dir=str(tmp_path))
 
     assert len(reader.runs) == 2
-    assert sorted(r.tokens.pot_token for r in reader.runs) == [
-        'pot_sw_a', 'pot_sw_b']
-
-
-def test_a_temperature_sweep_keeps_both_arms(tmp_path):
-    make_family_run(tmp_path, 'afm', temp=77)
-    make_family_run(tmp_path, 'afm', temp=300)
-
-    reader = DataReader(results_dir=str(tmp_path))
-
-    assert sorted(r.tokens.temperature for r in reader.runs) == [77.0, 300.0]
+    expected = (['pot_sw_a', 'pot_sw_b'] if field == 'pot' else [77.0, 300.0])
+    assert read(reader) == expected
 
 
 def test_a_sheet_run_reports_its_substrate_as_none_not_k300(tmp_path):
@@ -501,6 +496,26 @@ def test_summary_rows_come_from_summarise_run(tmp_path):
     assert row['is_complete'] is True
 
 
+def test_a_complete_run_with_an_incomplete_summary_is_not_complete(tmp_path, monkeypatch):
+    """`is_complete` needs BOTH the run's status and the summary to agree."""
+    from frictionsim2d.data import models
+
+    make_family_run(tmp_path, 'afm')
+    real = models.summarise_run
+
+    def incomplete(*args, **kwargs):
+        summary = real(*args, **kwargs)
+        summary.is_complete = False
+        return summary
+
+    monkeypatch.setattr(models, 'summarise_run', incomplete)
+
+    row, = DataReader(results_dir=str(tmp_path)).summary_rows()
+
+    assert row['status'] == 'complete'
+    assert row['is_complete'] is False
+
+
 def test_summary_row_identity_columns(tmp_path):
     make_family_run(tmp_path, 'hetero', material='h-MoS2',
                     second_material='h-WS2', pot='sw_a',
@@ -601,41 +616,6 @@ def test_two_families_concatenate_through_pandas(tmp_path):
     assert len(combined) == 2
     assert set(combined['family']) == {'afm', 'sheetonsheet'}
     assert set(_SUMMARY_SCALARS) <= set(combined.columns)
-
-
-def test_the_regex_walk_is_gone():
-    """These six patterns were the walk. Two of them carried real defects --
-    _PATH_PATTERN_SHEET group 3 captured the K{T} token as the substrate, and
-    neither path pattern had a pot_ or K{T} group at all."""
-    import frictionsim2d.postprocessing.read_data as rd
-
-    for name in ('_FILE_PATTERN_TIP', '_FILE_PATTERN_TIP_ALT',
-                 '_FILE_PATTERN_SHEET', '_FILE_PATTERN_SHEET_ALT',
-                 '_PATH_PATTERN_TIP', '_PATH_PATTERN_SHEET'):
-        assert not hasattr(rd.DataReader, name), name
-
-
-def test_the_nested_tree_and_its_walk_are_gone(tmp_path):
-    import frictionsim2d.postprocessing.read_data as rd
-
-    make_family_run(tmp_path, 'afm')
-    reader = rd.DataReader(results_dir=str(tmp_path))
-
-    assert not hasattr(reader, 'full_data_nested')
-    for name in ('_first_pass_ntimestep', '_resolve_path_info',
-                 '_is_sheet_family', '_parse_filename_params',
-                 '_finalize_metadata', 'read_data'):
-        assert not hasattr(reader, name), name
-
-
-def test_the_file_level_parser_survives():
-    """Spec section 3: the file-level parser is untouched. 20 calls in
-    test_read_data_schema.py drive it directly."""
-    import frictionsim2d.postprocessing.read_data as rd
-
-    assert callable(rd.DataReader._read_dataframe)
-    assert callable(rd.DataReader._registry_sim_type)
-    assert rd.LF_SCHEMA1_CORRECTION == 1.602176634
 
 
 # --- status column / complete_only ---------------------------------------

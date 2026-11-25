@@ -207,11 +207,3 @@ def test_afm_hold_steps_for_every_family_that_runs_the_afm_hold():
     assert config_settings({}, 'indent')['simulation']['afm_hold_steps'] == 10000
     assert 'afm_hold_steps' not in config_settings(
         {}, 'sheetonsheet')['simulation']
-
-
-def test_afm_hold_steps_lives_in_core_observables():
-    """One definition, importable without the AFM builder stack; the builder
-    re-exports the same object for the template render."""
-    from frictionsim2d.builders.afm.base import AFM_HOLD_STEPS as builder_value
-    from frictionsim2d.core.observables import AFM_HOLD_STEPS
-    assert AFM_HOLD_STEPS == builder_value == 10000

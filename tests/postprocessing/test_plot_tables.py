@@ -222,7 +222,8 @@ def test_load_table_reads_a_stored_analysis(tmp_path, stored):
 
 def test_missing_analysis_names_the_command_fast(tmp_path, stored):
     with pytest.raises(PlotDataError,
-                       match='FrictionSim2D analyse run cof_ranking paper'):
+                       match='no stored cof_ranking over paper; run: '
+                             'FrictionSim2D analyse run cof_ranking paper'):
         load_table(TableSource(analysis='cof_ranking', dataset='paper'))
 
 

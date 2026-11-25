@@ -135,7 +135,7 @@ def _ranking(*materials, **params):
     for r, w in materials:
         rows += r
         windows.update(w)
-    period = {m: 3.0 for m in ('h_A', 'h_B', 'h_C', 'h_D')}
+    period = {m: 3.0 for m in ('h_A', 'h_B', 'h_C', 'h_D', 'h_E')}
     return _compute('cof_ranking', _source(rows, windows), period_x=period, **params)
 
 
@@ -145,7 +145,9 @@ def test_missing_load_is_not_eligible():
                      _material('h-C', (0.1, 0.1, 0.1, 0.1),
                                statuses={30.0: 'failed_integrity'}),
                      _material('h-D', (0.1, 0.1, 0.1, 0.1),
-                               statuses={20.0: 'not_reached'})).set_index('material')
+                               statuses={20.0: 'not_reached'}),
+                     _material('h-E', (0.1, 0.1, 0.1, 0.1),
+                               statuses={20.0: 'halted'})).set_index('material')
 
     assert bool(table.loc['h_A', 'eligible'])
     assert not table.loc['h_B', 'eligible']
@@ -156,6 +158,8 @@ def test_missing_load_is_not_eligible():
     assert table.loc['h_C', 'n_loads'] == 4
     assert math.isnan(table.loc['h_C', 'cof_30nN'])   # a non-pass run is never read
     assert table.loc['h_D', 'excluded_because'] == 'not run at 20 nN'
+    assert table.loc['h_E', 'excluded_because'] == 'not run at 20 nN'   # halted: no frames
+    assert table.loc['h_E', 'n_loads'] == 3
 
 
 def test_rank_orders_eligible_only():

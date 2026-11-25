@@ -37,13 +37,24 @@ def test_legend_order_reorders_handles(tmp_path):
     plt.close(fig)
 
 
-def test_legend_outside_top_right_aligned(tmp_path):
+def _drawn_legend(tmp_path, **config):
     fig, ax = _axes_with(['a', 'b'])
-    _plotter(tmp_path)._finalize_plot(
-        ax, {'legend_outside': 'top', 'legend_top_align': 'right', 'legend_ncol': 2})
-    legend = ax.get_legend()
-    assert legend._loc == 4  # 'lower right'  # pylint: disable=protected-access
-    assert legend._ncols == 2  # pylint: disable=protected-access
+    _plotter(tmp_path)._finalize_plot(ax, {'legend_outside': 'top', **config})
+    fig.canvas.draw()
+    return fig, ax, ax.get_legend()
+
+
+def test_legend_outside_top_right_aligned(tmp_path):
+    fig, ax, right = _drawn_legend(tmp_path, legend_top_align='right', legend_ncol=2)
+    axes_box, box = ax.get_window_extent(), right.get_window_extent()
+    assert box.x1 == pytest.approx(axes_box.x1, abs=2)       # flush with the right edge
+    assert box.y0 >= axes_box.y1 - 1                         # above the axes
+    assert len({round(t.get_window_extent().x0) for t in right.get_texts()}) == 2  # 2 columns
+    plt.close(fig)
+
+    fig, ax, left = _drawn_legend(tmp_path, legend_top_align='left', legend_ncol=1)
+    assert left.get_window_extent().x1 < ax.get_window_extent().x1 - 20   # not right-flush
+    assert len({round(t.get_window_extent().x0) for t in left.get_texts()}) == 1
     plt.close(fig)
 
 

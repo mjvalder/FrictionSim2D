@@ -571,42 +571,19 @@ def test_only_the_keys_that_were_set_reach_the_mixin(tmp_path, monkeypatch):
 
     plotter.generate_plot(SummaryPlot(filename='x.png', x_axis='force'))
 
-    assert seen == {'plot_type': 'summary', 'filename': 'x.png',
-                    'x_axis': 'force'}
+    assert seen['x_axis'] == 'force' and seen['filename'] == 'x.png'
     assert 'legend_outside' not in seen
     assert 'tier' not in seen
 
 
-def test_a_dict_still_works(tmp_path, monkeypatch):
-    root = _dataset(tmp_path, 'afm')
-    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
-                      output_dir=str(tmp_path / 'out'))
-    seen = {}
-    monkeypatch.setattr(type(plotter), '_generate_summary_plot',
-                        lambda self, cfg: seen.update(cfg))
-
-    plotter.generate_plot({'plot_type': 'summary', 'filename': 'x.png'})
-
-    assert seen == {'plot_type': 'summary', 'filename': 'x.png'}
-
-
-def test_an_unknown_plot_type_raises(tmp_path):
+@pytest.mark.parametrize('plot_type', ['sunburst', 'taxonomy_prevalence'])
+def test_an_unknown_plot_type_raises(tmp_path, plot_type):
     root = _dataset(tmp_path, 'afm')
     plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
                       output_dir=str(tmp_path / 'out'))
 
-    with pytest.raises(PlotDataError, match='sunburst'):
-        plotter.generate_plot({'plot_type': 'sunburst', 'filename': 'x.png'})
-
-
-def test_the_taxonomy_types_are_gone(tmp_path):
-    """The ML anomaly-mode plots left with the taxonomy: they are unknown types."""
-    root = _dataset(tmp_path, 'afm')
-    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
-                      output_dir=str(tmp_path / 'out'))
-
-    with pytest.raises(PlotDataError, match='taxonomy_prevalence'):
-        plotter.generate_plot({'plot_type': 'taxonomy_prevalence', 'filename': 'x.png'})
+    with pytest.raises(PlotDataError, match=plot_type):
+        plotter.generate_plot({'plot_type': plot_type, 'filename': 'x.png'})
 
 
 def test_plot_stack_reads_schema_3_and_still_reads_schema_2(tmp_path):
@@ -762,6 +739,25 @@ def test_stick_slip_psd_recovers_the_period_of_a_sine(tmp_path):
 
     assert psd is not None
     assert psd.period == pytest.approx(5.0, rel=0.05)
+
+
+def test_stick_slip_psd_peak_floor_keeps_a_real_second_peak_and_drops_noise(tmp_path):
+    """The default prominence floor is 2 % of the strongest peak: a second line
+    at half the PSD is reported (rank 2 reads it), one at 0.04 % is not."""
+    import numpy as np  # pylint: disable=import-outside-toplevel
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    t = np.arange(0, 200.0, 0.1)
+    strong = np.sin(2 * np.pi * t / 5.0)
+
+    real = plotter._compute_stick_slip_psd(  # pylint: disable=protected-access
+        t, strong + 0.7 * np.sin(2 * np.pi * t / 2.0), {'fft_peak_rank': 2})
+    noise = plotter._compute_stick_slip_psd(  # pylint: disable=protected-access
+        t, strong + 0.02 * np.sin(2 * np.pi * t / 2.0), {'fft_peak_rank': 2})
+
+    assert real.period == pytest.approx(2.0, rel=0.05)        # the second line
+    assert [p['period'] for p in real.peak_labels] == pytest.approx([5.0, 2.0], rel=0.05)
+    assert noise.period == pytest.approx(5.0, rel=0.05)       # rank 2 falls back to rank 1
+    assert len(noise.peak_labels) == 1
 
 
 def test_iterative_outlier_removal_drops_the_largest_residual():

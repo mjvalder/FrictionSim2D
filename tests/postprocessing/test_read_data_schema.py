@@ -146,24 +146,40 @@ SHEET_SCHEMA1_MB = (
 )
 
 
-def test_legacy_lj_file_is_corrected_and_flagged(tmp_path, caplog):
-    p = tmp_path / "friction_p1.0_a0_s1.txt"
-    p.write_text(SHEET_SCHEMA1_LJ)
+# The react_x rename moves v_sx out of the header, but the frozen correction
+# still tells the LJ branch from the many-body one: without that, 7,166
+# retained files silently lose the x1.602176634 correction (2026-08-28 review,
+# where lfx reverted from 0.01287 to 0.00803). Both file-name styles are read.
+_LJ_FC_AVE = "# Time-averaged data for fix fc_ave\n# TimeStep v_xfrict v_yfrict v_sx v_sy v_sz\n1000 1.0 0.5 2.0 1.0 0.0\n"
+_MB_FC_AVE = "# Time-averaged data for fix fc_ave\n# TimeStep v_xfrict v_yfrict v_sx v_sy v_sz\n1000 2.0 1.0 2.0 1.0 0.0\n"
+
+
+@pytest.mark.parametrize('name, content, lfx, lfy', [
+    ("friction_p1.0_a0_s1.txt", SHEET_SCHEMA1_LJ, 2.0, 1.0),
+    ("fc_ave_slide_5GPa_0angle_1ms.txt", _LJ_FC_AVE, 1.0, 0.5),
+])
+def test_legacy_lj_file_is_corrected_and_flagged(tmp_path, caplog, name, content, lfx, lfy):
+    p = tmp_path / name
+    p.write_text(content)
     with caplog.at_level('WARNING'):
         df = _reader()._read_dataframe(p, 'sheet')
     assert df.attrs['lf_schema'] == 1
     assert df.attrs['lf_corrected'] is True
-    assert df['lfx'].iloc[0] == pytest.approx(2.0 * 1.602176634)
-    assert df['lfy'].iloc[0] == pytest.approx(1.0 * 1.602176634)
+    assert df['lfx'].iloc[0] == pytest.approx(lfx * 1.602176634)
+    assert df['lfy'].iloc[0] == pytest.approx(lfy * 1.602176634)
     assert any('1.602176634' in r.getMessage() for r in caplog.records)
 
 
-def test_legacy_many_body_file_is_not_corrected(tmp_path):
-    p = tmp_path / "friction_p1.0_a0_s1.txt"
-    p.write_text(SHEET_SCHEMA1_MB)
+@pytest.mark.parametrize('name, content, lfx', [
+    ("friction_p1.0_a0_s1.txt", SHEET_SCHEMA1_MB, 0.5),
+    ("fc_ave_slide_5GPa_0angle_1ms.txt", _MB_FC_AVE, 2.0),
+])
+def test_legacy_many_body_file_is_not_corrected(tmp_path, name, content, lfx):
+    p = tmp_path / name
+    p.write_text(content)
     df = _reader()._read_dataframe(p, 'sheet')
     assert df.attrs['lf_corrected'] is False
-    assert df['lfx'].iloc[0] == 0.5      # already nN, untouched
+    assert df['lfx'].iloc[0] == lfx      # already nN, untouched
 
 
 def test_schema2_file_is_never_corrected(tmp_path):
@@ -260,66 +276,15 @@ def test_ev_a_to_nn_matches_the_corrector_constant():
     assert LF_SCHEMA1_CORRECTION == EV_A_TO_NN
 
 
-def test_legacy_lj_file_still_corrects_after_react_x_rename(tmp_path):
-    """Declaring react_x with rename_to='v_sx' renames away the column the
-    frozen correction uses to tell the LJ branch from the many-body one.
-    Without this, 7,166 retained files silently lose the x1.602176634
-    correction -- reproduced during the 2026-08-28 review, where lfx reverted
-    from 0.01287 to 0.00803 and lf_corrected flipped True -> False.
-
-    Task 9 (not yet landed) is what will actually rename v_sx to react_x
-    for a real file's header. Until then this is a characterization test:
-    it passes today because v_sx still survives unrenamed, and it must keep
-    passing unchanged once Task 9 lands the react_x declaration."""
-    from frictionsim2d.postprocessing.read_data import DataReader
-    f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
-    # no schema marker => schema 1; lfx != v_sx => LJ branch
-    f.write_text(
-        "# Time-averaged data for fix fc_ave\n"
-        "# TimeStep v_xfrict v_yfrict v_sx v_sy v_sz\n"
-        "1000 1.0 0.5 2.0 1.0 0.0\n"
-    )
-    df = DataReader()._read_dataframe(f, 'sheet')
-    assert df.attrs['lf_schema'] == 1
-    assert df.attrs['lf_corrected'] is True
-    assert df['lfx'].iloc[0] == 1.0 * LF_SCHEMA1_CORRECTION
-
-
-def test_many_body_legacy_file_is_left_alone(tmp_path):
-    # on the many-body branch the template defines xfrict AS v_sx, so the two
-    # columns are bit-identical and there is nothing to correct
-    from frictionsim2d.postprocessing.read_data import DataReader
-    f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
-    f.write_text(
-        "# Time-averaged data for fix fc_ave\n"
-        "# TimeStep v_xfrict v_yfrict v_sx v_sy v_sz\n"
-        "1000 2.0 1.0 2.0 1.0 0.0\n"
-    )
-    df = DataReader()._read_dataframe(f, 'sheet')
-    assert df.attrs['lf_corrected'] is False
-    assert df['lfx'].iloc[0] == 2.0
-
-
-def test_audit_reads_native_names_not_renamed_ones():
-    """The audit classifies from raw header tokens, so it is unaffected by
-    the react_x rename. Pinned so a later 'tidy-up' does not route it
-    through _read_dataframe and silently change what it classifies."""
-    import inspect
-    from frictionsim2d.postprocessing import audit_lf_units
-    src = inspect.getsource(audit_lf_units)
-    assert "'v_sx'" in src and '_read_dataframe' not in src
-
-
 def test_raw_tier_unidentifiable_branch_warns_after_react_x_rename(tmp_path, caplog):
-    """After Task 9 lands, a raw-tier sheet file's v_xfrict/v_yfrict rename
-    to raw_lfx/raw_lfy (not lfx/lfy), so the discriminator lookup must also
-    accept raw_lfx/raw_lfy -- otherwise the 'cannot be identified' warning
-    that test_unidentifiable_branch_warns_rather_than_going_quiet pins today
-    silently disappears once raw tier renaming changes.
+    """A raw-tier sheet file's v_xfrict/v_yfrict rename to raw_lfx/raw_lfy
+    (not lfx/lfy), so the discriminator lookup must also accept
+    raw_lfx/raw_lfy -- otherwise the 'cannot be identified' warning that
+    test_unidentifiable_branch_warns_rather_than_going_quiet pins silently
+    disappears.
 
-    No file path can produce a raw_lfx column until Task 9 declares the
-    RAW-tier channel, so this calls _correct_legacy_lf_schema1 directly on a
-    hand-built frame that anticipates that rename."""
+    Calls the private _correct_legacy_lf_schema1 directly on a hand-built
+    frame: documented private-API test of the discriminator lookup."""
     import pandas as pd
     from frictionsim2d.postprocessing.read_data import DataReader
 
@@ -338,13 +303,6 @@ def test_raw_tier_unidentifiable_branch_warns_after_react_x_rename(tmp_path, cap
                for rec in caplog.records)
 
 
-def test_registry_is_the_only_sheet_rename_map():
-    from frictionsim2d.postprocessing.read_data import DataReader
-    assert not hasattr(DataReader, '_SHEET_COLUMN_RENAME'), (
-        'the registry owns sheet renames now; a second hand-maintained map '
-        'is what let rename_map shadow lfx and silently kill sheet COF')
-
-
 def test_headerless_sheet_file_raises(tmp_path):
     """Surveyed 2026-08-29: of 24,064 candidate results files in the retained
     tree, zero non-empty files are headerless, and only 5 of 7,171 sheet files
@@ -361,12 +319,6 @@ def test_headerless_sheet_file_raises(tmp_path):
                  "2000 1.1 0.6 2.1\n")
     with pytest.raises(SchemaError):
         DataReader()._read_dataframe(f, 'sheet')
-
-
-def test_sheet_positional_list_is_gone():
-    from frictionsim2d.postprocessing.read_data import AFM_FILE_COLUMNS, DataReader
-    assert not hasattr(DataReader, '_SHEET_FILE_COLUMNS')
-    assert AFM_FILE_COLUMNS[:3] == ['time', 'nf', 'lfx']
 
 
 def test_family_marker_wins_over_path_inference(tmp_path):

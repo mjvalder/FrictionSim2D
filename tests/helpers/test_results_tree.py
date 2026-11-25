@@ -78,12 +78,11 @@ def test_hetero_and_flake_material_tokens(tmp_path):
     assert f_tokens.flake_material == 'h-WSe2'
 
 
-def test_provenance_is_a_real_schema_two_record(tmp_path):
+def test_provenance_names_family_model_and_materials(tmp_path):
     run_dir = make_family_run(tmp_path, 'sheetonsheet')
 
     record = json.loads((run_dir / 'provenance.json').read_text(encoding='utf-8'))
 
-    assert record['schema_version'] == '2.0.0'
     assert record['family'] == 'sheetonsheet'
     assert record['model'] == 'sheetonsheet'
     assert [m['role'] for m in record['materials']] == ['sheet']

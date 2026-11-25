@@ -40,13 +40,6 @@ def test_table_source_resolves_an_analysis(store, probe, tmp_path):  # noqa: F81
         load_table(TableSource(analysis='probe', dataset='paper', version='9'))
 
 
-def test_missing_analysis_names_the_command(store, tmp_path):  # noqa: F811
-    with pytest.raises(PlotDataError,
-                       match='no stored cof_ranking over paper; run: '
-                             'FrictionSim2D analyse run cof_ranking paper'):
-        load_table(TableSource(analysis='cof_ranking', dataset='paper'))
-
-
 def test_analysis_data_source_feeds_summary_rows(store, tmp_path):  # noqa: F811
     stored = run_analysis('period_summary', 'paper', {'period_x': {'h_MoS2': 3.16}})
     assert sorted(stored['force']) == [30.0, 50.0]

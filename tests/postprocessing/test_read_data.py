@@ -46,15 +46,10 @@ def test_negative_scan_angle_is_read(results_root: Path) -> None:
     """A negative scan angle is a documented, buildable run (outer_loop
     scan_angle writes slide_am15.in for -15), and LAMMPS writes its results
     as friction_f5_a-15_s1_layer1.txt. An unsigned filename pattern skips
-    that file silently, so the run just disappears from every analysis."""
+    that file silently, so the run just disappears from every analysis; the
+    angle the plotting layer filters on must also carry the sign."""
     reader = DataReader(results_dir=str(results_root))
 
     assert reader.metadata["loads_by_kind"]["force"]["5.0"] == [-15.0, 0.0]
-
-
-def test_negative_scan_angle_reaches_the_runs(results_root: Path) -> None:
-    """The angle the plotting layer filters on must carry the sign."""
-    reader = DataReader(results_dir=str(results_root))
-
     assert sorted(run.angle for run in reader.runs) == [-15.0, 0.0]
     assert {run.load for run in reader.runs} == {5.0}

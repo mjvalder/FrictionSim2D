@@ -398,6 +398,8 @@ def test_margin_quarantines():
     assert v.status == 'quarantined' and not v.failed and v.observed
     assert v.quarantine and v.quarantine[0].startswith('hole')
     assert verdict('complete', {**CLEAN, 'hole': 1.20}, s).status == 'complete'
+    # [m * threshold, threshold): the lower edge (0.9 * 1.5) is inside the band
+    assert verdict('complete', {**CLEAN, 'hole': 0.9 * 1.5}, s).status == 'quarantined'
     assert verdict('complete', {**CLEAN, 'hole': 1.60}, s).status == 'failed_integrity'
 
 

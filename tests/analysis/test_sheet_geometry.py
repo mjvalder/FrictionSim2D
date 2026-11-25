@@ -101,6 +101,15 @@ def test_period_of_a_square_lattice():
     assert (row.material, row.layer) == ('h_X', 2)
 
 
+@pytest.mark.parametrize('a', [2.46, 3.07, 3.51])
+def test_the_period_is_resolved_for_a_lattice_between_scan_steps(a):
+    pts, box = _square(a)
+
+    row = _geometry(_bilayer(pts, box)).iloc[0]
+
+    assert row.period_x_top == pytest.approx(a, abs=0.003)
+
+
 def test_hexagonal_period_along_x():
     pts, box = _hexagonal(2.46)
 

@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import pytest
 
-from frictionsim2d.postprocessing.labels import (FAMILY_LABEL_OVERRIDES, display_name,
-                                       label_for, unit_for)
+from frictionsim2d.postprocessing.labels import display_name, label_for, unit_for
 
 
 @pytest.mark.parametrize('column, family, expected', [
     ('nf', 'afm', 'Normal Load (nN)'),
     ('nf', 'sheetonsheet', 'Normal Load (nN)'),
+    # a flake slide applies a real normal load (pressure x projected area), so
+    # its COF is lateral force over applied load, exactly as the sheet's is
+    ('nf', 'flake', 'Normal Load (nN)'),
+    ('cof', 'flake', 'Coefficient of Friction'),
     ('lfx', 'afm', 'Lateral Force x (nN)'),
     ('lfy', 'sheetonsheet', 'Lateral Force y (nN)'),
     ('cof', 'afm', 'Coefficient of Friction'),
@@ -48,19 +51,6 @@ def test_the_same_name_gets_the_right_family_entry():
     assert unit_for('lfx', 'afm') == 'nN'
     assert unit_for('lfx', 'flake') == 'nN'
     assert unit_for('raw_lfx', 'afm') == 'nN'
-
-
-def test_the_flake_normal_force_is_the_same_quantity_as_the_sheets():
-    """Flake slides apply a real normal load now (`fix force flake addforce`,
-    pressure x the flake's projected area), and `nf@sheet` claims the flake
-    sim_type, so a flake COF is lateral force over applied load exactly as
-    sheet-on-sheet's is. An earlier draft of this plan put an adhesion caveat
-    on these two labels; that caveat would now be wrong."""
-    assert label_for('nf', 'flake') == 'Normal Load (nN)'
-    assert label_for('cof', 'flake') == 'Coefficient of Friction'
-    assert label_for('nf', 'afm') == 'Normal Load (nN)'
-    assert label_for('nf', 'sheetonsheet') == 'Normal Load (nN)'
-    assert FAMILY_LABEL_OVERRIDES == {}
 
 
 def test_an_unknown_column_is_prettified_not_an_error():
