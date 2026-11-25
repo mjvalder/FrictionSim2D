@@ -6,28 +6,18 @@ Stillinger–Weber potential. Two frameworks are registered, as foundation model
 **DeePMD** (DPA family) and **MACE** (MACE-MP family). Training and fine-tuning
 are out of scope.
 
-Design authority for everything on this page:
+Where the evidence lives, all on this page:
 
-- Specification (**v4, binding for the capability matrix**):
-  [`docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md`](../docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md)
-- Campaign design (**v5, 2026-08-24, revised 2026-08-31**):
-  [`docs/superpowers/specs/2026-08-24-mlip-campaign-v5-design.md`](../docs/superpowers/specs/2026-08-24-mlip-campaign-v5-design.md)
-  — supersedes v4 on **framework status** (§4.2: the symmetrix MACE stack, its
-  measured energies and the `mace_types` patch). v4 still governs the coverage
-  topology; where the two disagree about MACE, v5 wins.
-- Implementation plan:
-  [`docs/superpowers/plans/2026-08-11-mlip-post-m0.md`](../docs/superpowers/plans/2026-08-11-mlip-post-m0.md)
-- Executed feasibility results:
-  [`documentation/milestone0.md`](milestone0.md)
-- **Executed AFM physics gate (v6 §6):**
-  [`documentation/mlip_afm_gate.md`](mlip_afm_gate.md) — run 2026-09-09.
-  Gates 1–3 (deck shape, Si sanity, energy agreement vs ASE) **pass**; Gate 4
-  (cross-framework) is **open**: MACE-MPA-0 and the DPA-3.2 MPtrj head disagree
-  by 44 % RMS on forces on the reference cell. **A tip-bearing MLIP result is
-  not framework-independent on current evidence** — read that page before
-  reporting an AFM, `pes-tip` or `indent` MLIP number.
+- the capability matrix and the executed feasibility results: section 1 and
+  section 12 (the hand-written Milestone-0 decks are in `scripts/milestone0/`);
+- the AFM physics gate: section 13. Gates 1-3 (deck shape, Si sanity, energy
+  agreement vs ASE) **pass**; Gate 4 (cross-framework) is **open**: MACE-MPA-0
+  and the DPA-3.2 MPtrj head disagree by 44 % RMS on forces on the reference
+  cell. **A tip-bearing MLIP result is not framework-independent on current
+  evidence** - read section 13 before reporting an AFM, `pes-tip` or `indent`
+  MLIP number.
 
-> **v4 supersedes the 2026-08-06 (v3) design.** v3's matrix rested on the
+> **The current matrix supersedes the earlier (v3) design.** v3's matrix rested on the
 > assumption that DeePMD accepts `NULL` entries in a `pair_coeff` type map, so
 > that an MLIP could share a cell with SW/LJ under `pair_style hybrid`. That
 > assumption was tested on real hardware and **is false**. Three of v3's four
@@ -54,11 +44,11 @@ A run is either
 | **Full-cell** — one instance, full type map, every atom | **Yes** ¹ | **Yes** ² | **Yes** ³ | **Yes** ³ |
 | Partial-cell (MLIP shares the cell with SW/LJ) | **No** ⁴ | No | **No** ⁵ | No |
 
-¹ Executed (spec §1, E1): `pair_style hybrid deepmd <model> lj/cut` with
+¹ Executed (feasibility item E1, section 12): `pair_style hybrid deepmd <model> lj/cut` with
 `pair_coeff * * deepmd Mo S Mo S Mo S` on a 36-atom MoS2 trilayer gives
 `E_pair = -256.90309 eV` (−7.14 eV/atom), model resident on GPU 0.
 
-² Executed (spec §3 footnote 1, item **E8**, 2026-08-11) on the backported
+² Executed (item **E8**, 2026-08-11) on the backported
 binary of §7: `pair_style hybrid/overlay deepmd <model> dispersion/d3 bj pbe
 16.0 8.0` on the 24-atom bilayer gives `E_pair = -180.15327 eV`, decomposing via
 `compute pair` into `c_edp = -171.42832` and `c_ed3 = -8.7249526` — a D3
@@ -80,7 +70,7 @@ all), and with D3 it *over*-binds at 0.474 J/m². So for MACE `dispersion = none
 is a legitimate control rather than a broken run. **Two traps gate every MACE
 number — see §3 and `scripts/hpc/README.md` before quoting one.**
 
-⁴ Executed (spec §1, E2/E3). `pair_coeff * * deepmd Mo S NULL NULL NULL NULL`
+⁴ Executed (items E2/E3). `pair_coeff * * deepmd Mo S NULL NULL NULL NULL`
 dies with `ERROR: Pair hybrid sub-style deepmd is not used` — and it fails for
 **one** instance exactly as it does for three, so `NULL` is the cause, not
 multi-instancing. Restricting by type range instead
@@ -106,7 +96,7 @@ Keep this distinction — "we can't" and "we shouldn't" have different future
 work.
 
 `pair_style hybrid/overlay deepmd <model> lj/cut` with a full type map **runs**
-(spec §1, E4: stable 20-step MD, `c_edp = -256.898`, `c_elj = -1.684`). So it is
+(item E4: stable 20-step MD, `c_edp = -256.898`, `c_elj = -1.684`). So it is
 mechanically tempting to rescue setup 1 by swapping `hybrid` for
 `hybrid/overlay`. That is wrong, and the reason is physical:
 
@@ -131,9 +121,9 @@ supported mode.
 The builders used to register **one MLIP instance per component** (sheet, tip,
 sub, flake, each hetero sheet) and partition the atom types between them with
 `NULL`-padded maps. Post-E2 that topology is invalid for DeePMD as well as for
-MACE, so v4 §6 restricted full-cell to a **single-component** cell.
+MACE, so full-cell was first restricted to a **single-component** cell.
 
-**That restriction is gone.** The builders now emit **one instance whose type
+**That restriction is gone** (multi-component full cells, "v6" below). The builders now emit **one instance whose type
 map spans every atom type in the cell** (`TypeRegistry.build_full_map`), which
 is exactly the shape `pair_coeff * *` wants. An AFM cell comes out as:
 
@@ -160,7 +150,7 @@ What replaces the old rule is **uniformity**, not component count:
 
 Two further constraints on an MLIP cell:
 
-- **`amorph = 'a'` is refused** (v6 §5). Amorphisation is melt-quench MD run at
+- **`amorph = 'a'` is refused** Amorphisation is melt-quench MD run at
   *generation* time, so it can evaluate neither the `pair_style zero` build
   surrogate (no forces) nor the MLIP itself. For AFM use a lattice-matched
   crystalline substrate — `amorph = c` with `match = true` — which
@@ -175,7 +165,7 @@ Two further constraints on an MLIP cell:
 ### Drive method and constraint modes
 
 **Virtual-atom drive** (`drive_method = virtual_atom`, the project's preferred
-drive) survives an MLIP. Executed for both halves (milestone0 M0.4):
+drive) survives an MLIP. Executed for both halves (item M0.4, section 12):
 
 | | isolated-atom energy of the placeholder | force on the virtual atom |
 |---|---|---|
@@ -219,7 +209,7 @@ the only topology, so the key carries no information.
 Pydantic ignores unknown keys by default, which here would silently change a
 run's physics, so `SheetConfig.reject_removed_mlip_keys` rejects it **by name**
 (`REMOVED_SHEET_KEYS` in `frictionsim2d/core/config.py`) with a `ValidationError` naming
-spec §5. Delete the line from any old config; do not translate it.
+this page. Delete the line from any old config; do not translate it.
 
 ### Hard validation rules
 
@@ -366,11 +356,14 @@ The two frameworks differ, and it matters for how you provision them:
 | Per-material work | none | re-extract per element set |
 | Size (as used here) | ~18 MB (`dpa3_alex2d.pth`) | ~120 MB (`mace-mpa-0-medium-Mo-S.json`) |
 
-Neither is shipped in `examples/potentials/`. They are foundation-model weights
+Neither is shipped in `frictionsim2d/data/potentials/mlip/`, which holds only a README with the recipe. They are foundation-model weights
 with their own licences and release channels, they are far too large for the
 repository, and the DeePMD one is a *derived* artefact (a freeze of a
 checkpoint at a chosen head) rather than a file with a canonical download URL.
-Both recipes below produce them from published sources in one command.
+`scripts/fetch_mlip_models.sh deepmd` and
+`scripts/fetch_mlip_models.sh mace --elements Mo S` run the recipes below (models
+land in `$MODELS_DIR`, default `$HOME/opt/models`); `--list-heads` prints a DeePMD
+checkpoint's heads.
 
 ### DeePMD — `dpa3_alex2d.pth` (the model actually used here)
 
@@ -428,9 +421,8 @@ symmetrix_extract_mace -m mace-mpa-0-medium.model --chemical-symbols Mo S
   meV level. It therefore adds `-f32` to the run directory (`pot_mace-f32_<stem>`,
   `pot_mace-d3-f32_<stem>`), so float32 and float64 results never mix. float32
   exists only as a Kokkos style (`-sf kk` or `-sf kk/host`), which the launcher
-  always passes; every sheet section of a cell must agree. Measure before using
-  it: see the float32 comparison in the spec's verification protocol
-  (`docs/superpowers/specs/TO-DO/2026-11-24-mace-gpu-design.md`, V2/V6).
+  always passes; every sheet section of a cell must agree. Measure float32
+  against float64 on your own cell before using it.
 
 #### Traps that decide whether your MACE numbers are real
 
@@ -479,7 +471,7 @@ selection, the layer floor and the `pot_` path token).
 |---|---|---|---|
 | [`sheet_mlip_full.ini`](../examples/mlip/sheet_mlip_full.ini) | `run sheetonsheet` | Full-cell DeePMD over a 3-layer stack; interlayer physics from the model, no LJ at all | **Yes** (needs the §7 binary) |
 | [`pes_sheet_mlip.ini`](../examples/mlip/pes_sheet_mlip.ini) | `run pes-sheet` | Full-cell DeePMD static corrugation scan; exactly 2 layers, no sliding, no drive atom — the cheapest MLIP run in the package | **Yes** (needs the §7 binary) |
-| [`afm_mlip_full.ini`](../examples/mlip/afm_mlip_full.ini) | `run afm` | v6 multi-component full cell: Si tip + crystalline matched Si substrate + MoS2 sheet on ONE DeePMD instance. Read [mlip_afm_gate.md](mlip_afm_gate.md) (Gate 4 open) before quoting a number | **Yes** |
+| [`afm_mlip_full.ini`](../examples/mlip/afm_mlip_full.ini) | `run afm` | v6 multi-component full cell: Si tip + crystalline matched Si substrate + MoS2 sheet on ONE DeePMD instance. Read section 13 (Gate 4 open) before quoting a number | **Yes** |
 
 **The v3 partition examples are deleted, not deprecated:** `sheet_mlip_lj.ini`
 and `afm_mlip_lj.ini` described partitioned cells (matrix row 2) and would be
@@ -600,8 +592,6 @@ is closer to experiment than D3's 3.136 Å): intralayer bonding is covalent and
 needs no dispersion, so D3 slightly over-contracts it. Feed the **D3** number
 (6.112 Å) into `lat_c` when running with D3.
 
-Raw JSON: `/home/mv923/opt/bench/deepmd_{base,d3}.json`.
-
 ### The verified `dispersion/d3` argument order
 
 `PairDispersionD3::settings()` takes exactly four arguments, in this order:
@@ -715,7 +705,7 @@ One binary, `pair_style deepmd` (via the plugin) **and** `dispersion/d3`. It
 works, and the E8 bit-identity check of §1 footnote 2 is what proves the
 backport is numerically the 2025 code, not merely a successful compile.
 
-Two things the spec did not anticipate, both now handled by the script:
+Two things that are not obvious in advance, both now handled by the script:
 
 1. **The 2025 d3 source does not compile clean against 2024 headers**, but the
    breakage is cosmetic: exactly **11 sites**, all inside `error->all(...)`
@@ -770,8 +760,8 @@ probe deck that asserts on it.
 
 ```bash
 export LMP_DEEPMD_D3=$HOME/opt/lammps-deepmd-d3/bin/lmp
-export LAMMPS_PLUGIN_PATH=/home/mv923/miniconda3/envs/mlip/lib/deepmd_lmp
-export LD_LIBRARY_PATH=/home/mv923/miniconda3/envs/mlip/lib
+export LAMMPS_PLUGIN_PATH=<mlip-conda-env>/lib/deepmd_lmp
+export LD_LIBRARY_PATH=<mlip-conda-env>/lib
 env -u PYTHONPATH "$LMP_DEEPMD_D3" -in deck.in
 ```
 
@@ -926,9 +916,10 @@ styles; `build_lammps_deepmd.sh` pins a 2025 tag at which the deepmd plugin will
 **not** load, so it is useful for standalone `dispersion/d3` only. All scripts
 are idempotent; a re-run after a failure resumes.
 
-**2. Run Milestone 0.** [`documentation/milestone0.md`](milestone0.md), top to
-bottom — geometries first, then the items. The DeePMD and D3 items are already
-executed and recorded there; the MACE items are not.
+**2. Re-run the feasibility decks (optional).** Section 12 records the results;
+the decks are in `scripts/milestone0/`, geometries first. The DeePMD and D3 items
+are executed; the decks for the ACEsuit `pair_style mace` (M0.3, M0.3b, M0.6) were
+superseded by symmetrix and have no recorded result.
 
 ```bash
 cd scripts/milestone0
@@ -941,7 +932,7 @@ binding wrong will get friction wrong.
 
 ```bash
 python scripts/mlip_bilayer_benchmark.py --framework sw \
-    --pot examples/potentials/sw/MoS2_wen.sw --lmp lmp --out sw_reference.json
+    --pot frictionsim2d/data/potentials/sw/MoS2_wen.sw --lmp lmp --out sw_reference.json
 
 python scripts/mlip_bilayer_benchmark.py --framework deepmd \
     --model $HOME/models/dpa3_alex2d.pth --lmp "$LMP_DEEPMD_D3" \
@@ -966,8 +957,8 @@ python -m frictionsim2d.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -
 
 [`scripts/run_local.sh`](../scripts/run_local.sh) resolves the binary from
 `settings.yaml`'s `hpc.frameworks.<framework>.binary` (then `hpc.lmp_binary`,
-`$FRICTIONSIM_SETTINGS` selects the file; falling back to `$LMP_DEEPMD` /
-`$LMP_MACE`, then `lmp` on `PATH`), applies the registry's launcher flags and
+`$FRICTIONSIM_SETTINGS` selects the file, else `./settings.yaml`, else the
+user config; then `$LMP_<FRAMEWORK>`, then `hpc.lmp_binary`, then `lmp` on `PATH`), applies the registry's launcher flags and
 env exports, `cd`s to the directory the generated relative paths are written
 against, and runs `system.in` then `slide.in`. `RUN_LOCAL_DRY_RUN=1` prints the
 commands without running them. `frictionsim2d/run/simulate.py` itself only *builds* inputs;
@@ -1108,7 +1099,7 @@ Documented, not implemented:
   highest-value item — it would restore the struck partial-cell setups (an MLIP
   sheet beside a classical tip/substrate) — but it is real surgery: the model receives all atoms,
   so masking types means rebuilding the coord/type arrays and mapping forces
-  back. Documented, not attempted (spec §7).
+  back. Documented, not attempted.
 - MACE partial-cell via the ML-IAP unified interface (`pair_style mliap
   unified`, undocumented hybrid/NULL behaviour) or a maintained fork of
   `pair_mace`. `build_lammps_mace.sh` already enables ML-IAP + ML-SNAP + PYTHON
@@ -1119,3 +1110,140 @@ Documented, not implemented:
   `scripts/run_local.sh` into `frictionsim2d/run/`; GUI exposure of the MLIP config surface;
   multi-GPU scaling; a foundation model fine-tuned on MoS2 sliding
   configurations.
+
+---
+
+## 12. Feasibility results (the Milestone-0 decks)
+
+Before any builder code existed, the mechanisms the design depends on were
+tested with hand-written LAMMPS decks in `scripts/milestone0/` (no FrictionSim2D
+code in the loop, so a failure is LAMMPS's or the model's, never the builder's).
+`make_geometries.py --outdir .` writes the three data files they read
+(`bilayer_mos2.data`, 24 atoms; `trilayer_mos2.data`, 36 atoms;
+`bilayer_plus_virtual.data`, 25 atoms). Those decks use one Mo and one S type per
+layer-pair (1 = Mo L1, 2 = S L1, 3 = Mo L2, ...), unlike the generator's
+element-first layout of section 5.
+
+Run 2026-08-10/11 on an RTX A4000 16 GB (CUDA 12.5), with DPA-3.1-3M frozen at
+head `Alex2D`. `conda` is conda-forge `lammps 2024.08.29` + `deepmd-kit 3.1.3`;
+`d3bp` is the backported binary of section 7.
+
+| item | build | result | notes |
+|---|---|---|---|
+| deepmd, full type map, in `hybrid` with `lj/cut` | conda | **PASS** | trilayer 36 atoms, `E_pair = -256.90309 eV` |
+| deepmd, `NULL`-partitioned map | conda | **FAIL** | `Pair hybrid sub-style deepmd is not used`; fails for one instance as for three |
+| deepmd restricted to a type range | conda | **FAIL** | `pair_deepmd.cpp:816`, `pair_coeff * *` required |
+| deepmd alone | d3bp | **PASS** | bilayer 24 atoms, `E_pair = -171.42832 eV` |
+| deepmd + `dispersion/d3` overlay | d3bp | **PASS** | `E_pair = -180.15327 eV` = `c_edp -171.42832` + `c_ed3 -8.7249526` (4.84 % D3); 20 NVE steps, no segfault |
+| `dispersion/d3` alone, the emitted string | src | **PASS** | `E_pair = -8.7249526 eV`, bit-identical to the overlay's D3 term |
+| virtual atom, deepmd | d3bp | **PASS** | placeholder `Mo` + `neigh_modify exclude`; offset **-4.64264 eV**, constant to all printed digits after two displacements; force on the atom 0 |
+| virtual atom, D3 | d3bp | **PASS** | PotEng identical to the run without the atom; force 0 |
+| `smd` / `fix_move` drive paths (M0.5) | - | not recorded | |
+| MACE decks M0.3, M0.3b, M0.6 | - | not recorded | written for the ACEsuit `pair_style mace`; MACE is now run through symmetrix (section 3, footnote 3) |
+| `constraint_mode` x MLIP neighbour lists (M0.7) | - | not run | `atom_bonds` / `com_spring` stay rejected (section 1) |
+
+Read the `compute pair <sub-style>` decomposition to see the D3 term rather than
+differencing two runs. `pair_coeff * * deepmd` with no element list does not
+error and gives `-61.89 eV` instead of `-256.90 eV` on the trilayer (section 10).
+
+### Findings from generating and running real trees (2026-08-11)
+
+- **F1, fixed.** `pair_style zero` has per-type coefficients, so the stacking
+  step's `write_data` wrote a `Pair Coeffs` block that aborts a later `read_data`
+  (`Must define pair_style before Pair Coeffs`). The stacking template now writes
+  with `nocoeff`.
+- **F2, fixed.** `comm_style tiled` makes `pair_deepmd` try to allocate hundreds
+  of GB (`DefaultCPUAllocator`, size varying run to run). Bisected: not system
+  size, not D3, not `balance rcb`; removing `comm_style tiled` alone makes the
+  deck run. The builders no longer emit it for an MLIP cell (`mlip_sheet`
+  template key); the cost is nil with one rank per GPU.
+- **F3, enforced.** D3's 16 Å cutoff makes the communication cutoff ~16.3 Å, so a
+  periodic box below that aborts. `x = y = 15` fails, `20` passes.
+  `mlip.check_d3_fits_box` now refuses it at generation time.
+- **F4, handled.** `fix rigid/nve` needs RIGID, which the first backported build
+  omitted; `build_lammps_deepmd_d3.sh` now enables `PKG_RIGID`, `PKG_KSPACE` and
+  `PKG_EXTRA-FIX`.
+
+---
+
+## 13. The AFM MLIP physics gate
+
+v6 allows a full-cell MLIP in a tip-bearing cell (AFM, `pes-tip`, `indent`). The
+failure mode of this stack is silent: LAMMPS maps unknown types onto the model's
+first N elements and returns a plausible, wrong energy. An exit code proves
+nothing, so no AFM MLIP number counts until these gates have been run against the
+generated tree. Run 2026-09-09 (RTX A4000 16 GB). **Gates 1-3 pass; Gate 4 is a
+finding, not a pass.**
+
+The reference cell is `examples/mlip/afm_mlip_full.ini` with absolute model
+paths: 3-layer h-MoS2 (30x30 Å), crystalline lattice-matched Si substrate, r = 15 Å
+crystalline Si tip. **1512 atoms** (702 Si, 270 Mo, 540 S) in 13 atom types, the
+13th the virtual drive atom.
+
+**Gate 1, deck shape: pass (both frameworks).** One `pair_coeff * *` for the model
+spanning all 13 types (Si x6, Mo x3, S x3, placeholder), no `NULL`, no
+inter-component `lj/cut`. Six Si types because Langevin splits substrate and tip
+into mobile/fix/thermo regions.
+
+**Gate 2, Si in isolation: pass.** An asperity is bulk Si, which a 2D-materials
+head has never seen. 64-atom diamond cell, lattice constant from a parabolic fit:
+
+| Model | a0 (Å) | vs PBE 5.468 | vs expt 5.431 | E_coh (eV/atom) |
+|---|---|---|---|---|
+| MACE-MPA-0 medium (Mo,S,Si extraction) | 5.4675 | -0.01 % | +0.67 % | 4.588 |
+| DPA-3.2, OMat24 head | 5.4760 | +0.15 % | +0.82 % | 4.370 |
+
+The lattice constant carries this gate; E_coh is the weaker number because the
+isolated-atom reference is itself out of domain.
+
+**Gate 3, energy agreement: pass.** Step-0 energy of the generated cell through
+LAMMPS `symmetrix/mace` (`-8843.15649620 eV`) and through ASE with `mace-torch`
+0.3.16 (`-8843.15675071 eV`): difference 2.55e-4 eV over 1512 atoms
+(1.7e-7 eV/atom). ASE was given the type map independently and recovered
+Si 702 / Mo 270 / S 540, which is what makes the emitted map trustworthy.
+
+**Gate 4, cross-framework: open.** MACE-MPA-0 against the DPA-3.2 **MPtrj** head
+(both trained on MPtrj, so a disagreement is architecture), compared on forces
+because each model has its own energy zero:
+
+| Quantity | as-built | MACE-relaxed |
+|---|---|---|
+| RMS \|F\|, MACE-MPA-0 (eV/Å) | 0.6707 | 0.0216 |
+| RMS \|F\|, DPA-3.2 MPtrj (eV/Å) | 0.5648 | 0.2708 |
+| RMS componentwise difference (eV/Å) | **0.1720** (44.4 % relative) | **0.1564** |
+| Pearson *r* | 0.8977 | 0.0309 |
+
+Relaxing under MACE (CG, 400 steps, -8843.16 to -9134.63 eV) did not soften it:
+the absolute disagreement is unchanged (0.172 to 0.156 eV/Å), so it was never a
+strain artifact; the two models do not share a minimum for this cell. The
+relative figure on the relaxed cell divides by a near-zero base and is not
+meaningful. No tolerance is declared passed. Do not report an AFM MLIP friction
+number as framework-independent.
+
+**Bridging measurement.** Comparing the sheet campaign's head with the AFM head on
+the 36-atom MoS2 trilayer (forces, same geometry): `dpa32_alex2d` to
+`dpa32_mptrj` differs by 42.8 % RMS (0.0840 eV/Å), `dpa3_alex2d` to
+`dpa32_mptrj` by 69.2 %. Swapping the head alone moves forces as much as any
+effect being looked for, so a sheet-vs-AFM difference across heads is not
+attributable to physics. Run both levels on the same head, or carry the offset.
+(Alex2D is a 2D-materials head and not valid for a tip-bearing cell.)
+
+**What the gate caught.** Three defects the unit suite missed, all a Jinja key no
+builder supplied, rendered behind `| default(...)` so its absence was silent: (1)
+`mlip_deck_directives` (`atom_modify map yes`, `newton on`) missing from the AFM
+family, so MACE aborts at `pair_symmetrix_mace.cpp:172`; (2) `mlip_sheet`
+(suppressing `comm_style tiled`) missing everywhere but sheet-on-sheet; (3)
+`afm/slide.lmp` had neither. `tests/builders/test_mlip_deck_directives.py` now
+derives the template list from the templates themselves.
+
+**Operational notes.** DPA-3.2 does not fit the 1512-atom cell on a 16 GB GPU
+(OOM at ~14.3 GB, `pair_deepmd.cpp:373`); the Gate 4 DeePMD numbers came from CPU.
+The MACE-capable LAMMPS is not the conda one and must find its own
+`liblammps.so.0` first, or it dies with `undefined symbol:
+lammps_plugin_finalize`:
+
+```bash
+B=<lammps-mace>/build-gpu
+CE=<mlip-conda-env>
+env -u PYTHONPATH LD_LIBRARY_PATH=$B:$CE/lib $B/lmp -in deck.in
+```
