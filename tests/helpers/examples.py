@@ -55,6 +55,9 @@ class Example:
     hetero: bool
     mlip: bool
     campaign: bool
+    #: Building runs ``lmp_serial``: a hetero stack (coincidence-cell relaxation)
+    #: or any sheet-on-sheet flake (``flake_slide._assemble_flake_on_sheet``).
+    needs_lammps: bool
 
 
 def list_entries(text: str) -> int:
@@ -79,15 +82,19 @@ def _example(path: Path, root: Path) -> Example:
             raise ValueError(f"{path}: '# settings: {match.group(1)}' does not exist")
     parser = configparser.ConfigParser(inline_comment_prefixes=('#',), interpolation=None)
     parser.read_string(text)
+    hetero = any(_PAIR_SECTION_RE.search(s) for s in parser.sections())
+    flake_slide = mode == 'sheetonsheet' and any(
+        s.lower().startswith('flake') for s in parser.sections())
     return Example(
         path=path,
         rel=path.relative_to(root).as_posix(),
         mode=mode,
         model=mode.replace('-', '_'),
         settings=settings,
-        hetero=any(_PAIR_SECTION_RE.search(s) for s in parser.sections()),
+        hetero=hetero,
         mlip=any(is_mlip(parser[s].get('pot_type', '')) for s in parser.sections()),
         campaign=list_entries(text) > CAMPAIGN_MIN_ENTRIES,
+        needs_lammps=hetero or flake_slide,
     )
 
 

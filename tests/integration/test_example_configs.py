@@ -236,9 +236,10 @@ def _builds_of(result) -> List[Tuple[Path, Path, List[Tuple[Path, str]]]]:
 # --------------------------------------------------------------------------
 
 def _param(example):
-    """Hetero builds shell out to lmp_serial (hetero_stack.run_lammps): the
+    """Hetero and sheet-on-sheet flake builds shell out to lmp_serial: the
     skipif is what conftest derives the ``lammps`` marker from."""
-    marks = [pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")] if example.hetero else []
+    marks = ([pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")]
+             if example.needs_lammps else [])
     return pytest.param(example, id=example.rel, marks=marks)
 
 

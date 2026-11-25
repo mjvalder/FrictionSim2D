@@ -18,8 +18,9 @@ is tested as soon as it exists. Tests that pin an example's exact values read
 the frozen copy in `tests/fixtures/examples/` instead.
 
 **Needs** column:
-- *lammps* -- a heterostructure: building it runs `lmp_serial` to relax the
-  coincidence cell, so LAMMPS must be on `PATH` at build time.
+- *lammps* -- building it runs `lmp_serial` (a heterostructure's coincidence
+  cell, or a sheet-on-sheet flake, is relaxed first), so LAMMPS must be on
+  `PATH` at build time.
 - *settings* -- pass the settings file named in its header with
   `--settings-file` (the option is a `settings.yaml` key, not an `.ini` one).
 - *MLIP model* -- names a machine-learned potential file that is not shipped;
@@ -54,7 +55,7 @@ the frozen copy in `tests/fixtures/examples/` instead.
 | `sheetonsheet/hetero_twist.ini` | twisted MoS2/WS2 heterostructure (`twist_angle`) | lammps |
 | `sheetonsheet/hetero_alternating.ini` | layers interleaved A B A B (`hetero_stacking`) | lammps |
 | `sheetonsheet/hetero_ilp.ini` | heterostructure with the ILP interlayer potential | lammps |
-| `sheetonsheet/flake_slide.ini` | a finite MoS2 flake sliding on a bilayer | |
+| `sheetonsheet/flake_slide.ini` | a finite MoS2 flake sliding on a bilayer | lammps |
 | `sheetonsheet/flake_slide_hetero.ini` | a two-material flake (`[Flake-1]`, `[Flake-2]`) sliding on a bilayer | lammps |
 | `sheetonsheet/reaxff_speed_sweep.ini` | ReaxFF sheet, swept over two sliding speeds | |
 | `sheetonsheet/mlip_full.ini` | full-cell DeePMD stack, interlayer physics from the model | MLIP model |

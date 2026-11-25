@@ -369,7 +369,7 @@ EXAMPLE_DEFAULTS = {
 
 
 #: Example values that would fail validation, replaced with the reason shown on
-#: the change note. examples/pes-tip/basic.ini (fixture data, left as is) uses a
+#: the change note. examples/pes-tip/basic.ini (kept small for a quick scan) uses a
 #: 60 x 60 Angstrom sheet with [tip] r = 25, below the 2x-tip-diameter footprint
 #: (100 Angstrom) the AFM models require.
 EXAMPLE_OVERRIDES = {

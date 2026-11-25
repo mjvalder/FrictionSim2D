@@ -85,3 +85,21 @@ def test_no_stale_example_paths():
             if not (REPO_ROOT / ref).exists():
                 stale.append(f"{doc.relative_to(REPO_ROOT)}: {ref}")
     assert not stale, "\n".join(stale)
+
+
+def test_a_sheetonsheet_flake_needs_lammps(tmp_path):
+    """A sheet-on-sheet flake build relaxes the flake with lmp_serial
+    (sheetonsheet/flake_slide.py, _assemble_flake_on_sheet) even with one material."""
+    for mode in ('sheetonsheet', 'afm'):
+        (tmp_path / mode).mkdir()
+        (tmp_path / mode / 'x.ini').write_text("[2D]\nmat = a\n[Flake]\nshape = hexagon\n",
+                                               encoding='utf-8')
+    needs = {e.mode: e.needs_lammps for e in discover(tmp_path)}
+    assert needs == {'sheetonsheet': True, 'afm': False}
+
+
+def test_readme_marks_every_lammps_example():
+    readme = (EXAMPLES / 'README.md').read_text(encoding='utf-8').splitlines()
+    for example in _EXAMPLES:
+        row = next(line for line in readme if f"`{example.rel}`" in line)
+        assert row.rstrip(' |').endswith('lammps') == example.needs_lammps, row
