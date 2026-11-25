@@ -16,7 +16,7 @@ is reused only when its material, potential bytes and quench conditions match
   :func:`run_quench_root_local` runs serially), and :func:`import_quench_root`
   copies the finished blocks into the user library.
 
-Spec: ``docs/superpowers/specs/TO-DO/2026-11-24-amorphous-quench-design.md``.
+Spec: ``docs/superpowers/specs/COMPLETED/2026-11-24-amorphous-quench-design.md``.
 """
 from __future__ import annotations
 
