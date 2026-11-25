@@ -25,7 +25,8 @@ rather than as directory names nobody parsed.
     incomplete_materials_<size>.txt  the materials those points belong to
 ```
 
-A *size* is the `100x100y` token built from the run's `size_x`/`size_y`. One export file
+A *size* is the `100x100y` token built from the run's `size_x`/`size_y` (the run
+directory itself is spelled `100x_100y`). One export file
 per size, because a size is the one axis along which two runs are rarely compared
 directly.
 
@@ -343,19 +344,6 @@ FrictionSim2D analyse export NAME DATASET OUT.csv [--param NAME=VALUE ...] [--pr
   the default-params result. When there is none but results under other params are
   stored, they refuse and name those params.
 
-### Analyses as plot sources
-
-- A table field takes `TableSource(analysis=<name>, dataset=<dataset>)` (in JSON
-  `{"analysis": ..., "dataset": ..., "version": <optional>, "params": {<optional>}}`;
-  default version: the registered one). A CSV path is not accepted: every table is a
-  stored result, so a publication table can be reproduced from the store.
-- `aiida://analysis/<name>/<dataset>[?k=v&k2=v2]` in `data_dirs` reads a summary-shaped
-  result (`period_summary`) as that label's summary rows.
-- Both select by params as `analyse show` does: the result under exactly those params
-  (none: the defaults); results stored only under other params are refused, named.
-- The plotter never computes an analysis; see
-  [Stored analyses as plot sources](#stored-analyses-as-plot-sources).
-
 ---
 
 ## Plot documents
@@ -401,12 +389,17 @@ FrictionSim2D aiida export-results <label> <dir>
 
 ### Stored analyses as plot sources
 
-- `aiida://analysis/<name>/<dataset>` in `data_dirs`: a summary-shaped analysis result
-  (`period_summary`) becomes that label's summary rows, as `aiida://dataset/` does.
+- `aiida://analysis/<name>/<dataset>[?k=v&k2=v2]` in `data_dirs`: a summary-shaped
+  analysis result (`period_summary`) becomes that label's summary rows, as
+  `aiida://dataset/` does.
 - A table field (`ranking_file`, `traces_file`, ...) takes
-  `{"analysis": <name>, "dataset": <dataset>, "version": <optional>, "params": {...}}`.
-  URI query values are text, parsed by the analysis' params model (a dict or list as
-  JSON text).
+  `{"analysis": <name>, "dataset": <dataset>, "version": <optional>, "params": {...}}`
+  (the `TableSource` model; default version: the registered one). A CSV path is not
+  accepted: every table is a stored result, so a publication table can be reproduced
+  from the store. URI query values are text, parsed by the analysis' params model (a
+  dict or list as JSON text).
+- Both select by params as `analyse show` does: the result under exactly those params
+  (none: the defaults); results stored only under other params are refused, named.
 - `stickslip_period_histogram` and `contact_cof_scatter` read the load from `load_nN`, or
   from `force` as `stick_slip` and `contact` name it. Those analyses hold every layer:
   `filter_layer` keeps one.

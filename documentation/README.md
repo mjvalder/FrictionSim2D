@@ -7,12 +7,12 @@ Read in this order if you are new; each document also stands alone.
 | # | Document | Covers |
 |---|---|---|
 | 1 | [installation.md](installation.md) | Environment setup, optional extras, verification, troubleshooting |
-| 2 | [overview.md](overview.md) | What the package does, the five simulation models, output layout, quick start |
+| 2 | [overview.md](overview.md) | What the package does, the five simulation models, output layout, where materials and potentials are found, quick start |
 | 3 | [configuration.md](configuration.md) | Writing `.ini` config files, sweep behaviour, heterostructure pairs, worked examples |
-| 4 | [commands.md](commands.md) | Complete CLI reference for every command group |
+| 4 | [commands.md](commands.md) | Complete CLI reference for every command group (`run`, `quench`, `hpc`, `aiida`, `analyse`, `postprocess`, `compare`, `fetch`, `settings`, `gui`) |
 | 5 | [gui.md](gui.md) | Desktop application: configure, preview in 3D, generate, build heterostructures |
 | 5a | [assistant.md](assistant.md) | The GUI Assistant side pane: providers, keys, cards |
-| 6 | [examples.md](examples.md) | End-to-end workflows from generation to plots |
+| 6 | [examples.md](examples.md) | End-to-end workflows from generation to plots, including making amorphous blocks (melt-quench) |
 | 7 | [settings.md](settings.md) | Every `settings.yaml` section and its defaults |
 | 8 | [pes_scan.md](pes_scan.md) | Static potential-energy-surface (corrugation-barrier) scans |
 | 9 | [indent.md](indent.md) | Indentation runs: penetration on hold, adhesion on retract |
@@ -20,8 +20,8 @@ Read in this order if you are new; each document also stands alone.
 | 11 | [hpc_jobs.md](hpc_jobs.md) | Scheduler script generation and two-phase submission |
 | 12 | [provenance.md](provenance.md) | Provenance manifest model and file tracking internals |
 | 13 | [python_api.md](python_api.md) | Driving the package from Python instead of the CLI |
-| 14 | [postprocessing.md](postprocessing.md) | The `outputs/` schemas, plot documents, the plot schema, settings presets |
-| 15 | [testing.md](testing.md) | Test tiers and how to run them, markers, layout, the integration tier |
+| 14 | [postprocessing.md](postprocessing.md) | The `outputs/` schemas, the stored analyses (`analyse`), plot documents, the plot schema, settings presets |
+| 15 | [testing.md](testing.md) | Test tiers and how to run them, markers, layout, the integration and scenario tiers |
 | 16 | [integrity.md](integrity.md) | The post-run integrity check: rules, statuses, quarantine and rulings, thresholds |
 | 17 | [mlip.md](mlip.md) | Machine-learned potentials (DeePMD via `pair_style deepmd`, MACE via `symmetrix/mace`): the full-cell capability matrix (one MLIP across every component), how to obtain each model, the example configs, the D3 overlay, the builds and GPU job settings |
 | 18 | [milestone0.md](milestone0.md) | MLIP feasibility runbook — the hand-written LAMMPS decks, and the executed results the v4 matrix is built on |

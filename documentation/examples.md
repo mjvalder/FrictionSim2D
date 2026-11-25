@@ -101,8 +101,18 @@ FrictionSim2D aiida import ./simulation_20260421_143404 --label 251113-afm --dry
 FrictionSim2D aiida import ./simulation_20260421_143404 --label 251113-afm
 ```
 
+Override an integrity threshold for one import with `--integrity KEY=VALUE`
+(repeatable), and re-judge a set later under other thresholds with `aiida recheck`;
+the old verdicts are superseded, not deleted:
+
+```bash
+FrictionSim2D aiida import ./simulation_20260421_143404 -l 251113-afm --integrity hole_bonds=2.5
+FrictionSim2D aiida recheck 251113-afm --integrity hole_bonds=2
+```
+
 A tree built before provenance schema 2.2.0 needs a `run_uuid` first: stamp it with the
-standalone script kept beside the data.
+standalone script kept beside the data (there is no `aiida stamp-uuid` command; see
+[aiida.md](aiida.md#42-legacy-runs-stamp-then-import)).
 
 Summarise the complete points, collect them into a dataset, and compare two
 sets:
@@ -156,7 +166,9 @@ on the other (see [aiida.md](aiida.md#9-archives)).
 
 ## 11. Make an amorphous block (melt-quench)
 
-An `amorph = a` tip or substrate is cut from a pre-made amorphous block. A run
+An `amorph = a` tip or substrate is cut from a pre-made amorphous block. The package
+ships some (`amor_Si`, used by `examples/afm_config.ini`); `FrictionSim2D fetch materials`
+installs the materials pack of further pre-quenched blocks. A run
 reuses a block only when its material, potential (sha256) and the
 `settings.quench` conditions match and it is large enough; otherwise it stops,
 writes nothing, and prints the command below. No friction run ever melt-quenches.

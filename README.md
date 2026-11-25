@@ -4,8 +4,9 @@ FrictionSim2D generates and manages LAMMPS friction simulation workflows for 2D 
 It supports AFM sliding, sheet-on-sheet shear, static PES scans, and indentation setups,
 with HPC script generation and an optional AiiDA provenance store for finished runs.
 Sheets can be driven by classical potentials (Stillinger-Weber, Tersoff, ReaxFF, ...)
-or by a **machine-learned interatomic potential** — DeePMD or MACE — selected the
-same way, with one `pot_type` line.
+or by a **machine-learned interatomic potential** (DeePMD or MACE) selected the
+same way, with one `pot_type` line. Amorphous tips and substrates are cut from
+melt-quenched blocks made with `run quench`.
 
 Full documentation lives in [documentation/](documentation/) — start with
 [documentation/README.md](documentation/README.md).
@@ -59,47 +60,16 @@ lmp -h
 atomsk --version
 ```
 
-### Option B – With AiiDA (provenance tracking, HPC submission)
-
-Install base package + AiiDA with bundled PostgreSQL and RabbitMQ:
+### Option B – With AiiDA (provenance store)
 
 ```bash
 conda create -n frictionsim2d-aiida -c conda-forge frictionsim2d-aiida
 conda activate frictionsim2d-aiida
+FrictionSim2D aiida setup
 ```
 
-Then bootstrap AiiDA and start services (one-time setup):
-
-```bash
-frictionsim2d-start-aiida
-```
-
-This:
-- Starts RabbitMQ with automatic `consumer_timeout` patching (36000000 ms default)
-- Starts PostgreSQL
-- Creates your first AiiDA profile (`friction2d`)
-
-Options: `--profile NAME` to use a custom profile name, `--no-daemon` to skip daemon startup.
-
-Override RabbitMQ timeout if needed:
-```bash
-export RABBITMQ_CONSUMER_TIMEOUT_MS=72000000
-frictionsim2d-start-aiida
-```
-
-Optional: install conda activate/deactivate hooks for automatic service lifecycle:
-```bash
-frictionsim2d-install-hooks
-```
-
-After this, PostgreSQL and RabbitMQ start/stop automatically with `conda activate/deactivate`.
-
-Verify AiiDA setup:
-```bash
-verdi --version
-verdi profile show
-verdi daemon status
-```
+`aiida setup` creates the profile only (SQLite is enough). There is no broker and
+no daemon to start.
 
 ### Option D – Postprocessing / plotting
 
@@ -113,7 +83,7 @@ conda activate frictionsim2d-plotting
 ```bash
 conda create -n frictionsim2d-all -c conda-forge frictionsim2d-all
 conda activate frictionsim2d-all
-frictionsim2d-start-aiida
+FrictionSim2D aiida setup
 ```
 -->
 
@@ -140,7 +110,7 @@ FrictionSim2D run sheetonsheet examples/mlip/sheet_mlip_full.ini --output-dir ./
 ```
 
 See [documentation/mlip.md](documentation/mlip.md) and
-[examples/potentials/mlip/README.md](examples/potentials/mlip/README.md).
+[frictionsim2d/data/potentials/mlip/README.md](frictionsim2d/data/potentials/mlip/README.md).
 
 Generate static PES (corrugation-barrier) scans — cheap energy-vs-lateral-position maps:
 
@@ -173,18 +143,23 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 
 ## CLI overview
 
-- `FrictionSim2D run afm|sheetonsheet|pes-sheet|pes-tip|indent ...`
-- `FrictionSim2D hpc generate ...`
+- `FrictionSim2D run afm|sheetonsheet|pes-sheet|pes-tip|indent|quench ...`
+- `FrictionSim2D quench import|list`: the amorphous block library
+- `FrictionSim2D hpc generate|enrich-provenance ...`
 - `FrictionSim2D settings show|init|reset`
 - `FrictionSim2D aiida status|setup|preflight|import|rule|recheck|postprocess|dataset|query|list-sets|export-results|rebuild|reindex|verify|delete|clear|export|import-archive`
+- `FrictionSim2D analyse list|run|show|export`: on-demand analyses of a dataset
 - `FrictionSim2D postprocess read|plot|pes-scan|indent`
+- `FrictionSim2D compare LABEL_A LABEL_B`
+- `FrictionSim2D fetch materials|model`: the materials pack, the assistant model
+- `FrictionSim2D gui`
 
 Full reference: [documentation/commands.md](documentation/commands.md).
 
 ## Machine-learned potentials (DeePMD / MACE)
 
-An MLIP is a **third potential category** alongside the classical ones, not a
-separate workflow. You select it exactly as you select Stillinger-Weber:
+An MLIP is a third potential category alongside the classical ones, not a separate
+workflow. Select it as you select Stillinger-Weber:
 
 ```ini
 [2D]
@@ -194,56 +169,20 @@ dispersion = d3                        # Grimme-D3 overlay; the only vdW lever
 lat_c = 6.112                          # interlayer distance, MANDATORY for MLIP
 ```
 
-Everything else — staging the model, the `pair_style`/`pair_coeff` lines, the D3
-overlay, hiding the virtual drive atom from the model's neighbour graph, the
-per-framework HPC launcher flags — is generated for you.
+- Models are third-party weights and are not in this repository:
+  `./scripts/fetch_mlip_models.sh deepmd` or `mace --elements Mo S`.
+- Every model can host an MLIP; every component of a cell must name the same one.
+  Unsupported combinations are refused at generation time.
+- MACE runs on the GPU (`device`) backend by default; `hpc.frameworks.mace.backend: host`
+  selects the CPU one. `precision = float32` is opt-in and adds `-f32` to the run directory.
+- Tip-bearing MLIP cells generate, but the two frameworks disagree by ~44% RMS on
+  forces for the reference cell. Read
+  [documentation/mlip_afm_gate.md](documentation/mlip_afm_gate.md) before trusting an
+  AFM, pes-tip or indent number.
+- LAMMPS builds for the two frameworks are in [`scripts/hpc/`](scripts/hpc/); read
+  its README first.
 
-**Getting the models.** They are not in this repository (18-120 MB of
-third-party weights). One command each:
-
-```bash
-./scripts/fetch_mlip_models.sh deepmd                 # 118 elements: one file, every material
-./scripts/fetch_mlip_models.sh mace --elements Mo S   # element-specific: re-extract per material
-```
-
-See [examples/potentials/mlip/README.md](examples/potentials/mlip/README.md) for
-the difference between the two and for why the defaults are what they are.
-
-**What is supported today.** One MLIP instance covers the *whole cell* — both
-frameworks reject the `NULL`-padded type maps a partitioned cell would need — and
-that instance's type map spans every atom type, so every model can host an MLIP:
-
-| Model | MLIP? |
-|---|---|
-| `run sheetonsheet`, `run pes-sheet` | **Yes** |
-| `run afm`, `run pes-tip`, `run indent` | **Yes** — tip, sheet and substrate all on the same MLIP |
-| hetero / flake stacks | **Yes** — every layer and flake on the same MLIP |
-
-The rules that replace the old "single component only" limit:
-
-- **Uniformity** — every component in a cell (tip, substrate, sheets, flake) must
-  name the *same* MLIP (`pot_type` and `pot_path`). Mixing an MLIP with a
-  classical potential, or two different models, is refused.
-- **No amorphous components** — `amorph = a` is refused under an MLIP; for an AFM
-  substrate use `amorph = c` with `match = true`.
-- **`dispersion = d3`** is the only vdW lever; `interlayer_style` other than `lj`
-  and `interlayer_comparison` are refused.
-
-Unsupported combinations are refused **at generation time** with a message that
-names the rule, not at 3 a.m. on a cluster.
-
-**Physics caveat (Gate 4 open).** Generating a tip-bearing MLIP cell is verified,
-but MACE-MPA-0 and the DPA-3.2 MPtrj head disagree by ~44% RMS on forces for the
-reference cell. Do not treat an AFM / pes-tip / indent MLIP number as
-framework-independent — read
-[documentation/mlip_afm_gate.md](documentation/mlip_afm_gate.md) first.
-
-Full capability matrix, model provisioning, builds and GPU job settings
-(`hpc.gpu`, `hpc.frameworks`): **[documentation/mlip.md](documentation/mlip.md)**.
-
-LAMMPS binaries for the two frameworks are mutually incompatible and are built
-by [`scripts/hpc/`](scripts/hpc/) — read that directory's README before
-building, especially the mandatory symmetrix patch for MACE.
+Details: [documentation/mlip.md](documentation/mlip.md).
 
 ## AiiDA notes
 
@@ -251,6 +190,7 @@ building, especially the mandatory symmetrix patch for MACE.
 - The store is import-only: runs are generated and run outside AiiDA, then registered with `FrictionSim2D aiida import`.
 - `FrictionSim2D aiida setup` creates the profile only (SQLite is enough; no broker or daemon). Computers and Codes are created at import.
 - For secure HPC clusters, running AiiDA natively on the HPC environment is often more robust than local SSH transport.
+- `aiida import` and `aiida recheck` accept `--integrity KEY=VALUE` to override an integrity threshold for that call.
 - Use archive transfer when needed: `aiida export` on source environment and `aiida import-archive` on target.
 
 ## Output structure
@@ -258,7 +198,7 @@ building, especially the mandatory symmetrix patch for MACE.
 Generated simulation roots typically contain:
 
 - `afm/`, `sheetonsheet/`, `pes_sheet/`, `pes_tip/`, or `indent/` runs
-- per-run `lammps/`, `data/`, `results/`, `visuals/`, `provenance/`
+- per-run `lammps/`, `build/`, `data/`, `results/`, `visuals/`, `provenance/`, `provenance.json`
 - optional `hpc/` submission scripts
 
 Full layout in [documentation/overview.md](documentation/overview.md).
@@ -280,8 +220,11 @@ reading order. Most-used entries:
 Run tests:
 
 ```bash
-pytest -v
+pytest                          # fast tier; real-LAMMPS tests are deselected
+pytest -m lammps                # the real-LAMMPS set (slow)
 ```
+
+See [documentation/testing.md](documentation/testing.md).
 
 Run lint (example):
 

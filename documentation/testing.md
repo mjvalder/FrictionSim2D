@@ -6,11 +6,11 @@ hanging a run, and how `-m integration` can mislead you.
 ## Tiers
 
 ```bash
-pytest tests                             # default: 5927 tests, ~23 min (gui and aiida included)
-pytest -m lammps                         # real LAMMPS runs: 80 tests
-pytest -m 'integration and not lammps'   # cross-package tier: 105 tests
-pytest -m integration                    # the same tier PLUS the LAMMPS smoke: 116 tests
-pytest tests/aiida -m aiida              # the AiiDA tier: 291 tests, ~11 min, broker-less SQLite profile
+pytest                                   # default: 6075 tests (gui and aiida included); bare `pytest` is safe
+pytest -m lammps                         # real LAMMPS runs: 126 tests
+pytest -m 'integration and not lammps'   # cross-package tier: 139 tests
+pytest -m integration                    # the same tier PLUS the LAMMPS smoke: 150 tests
+pytest tests/aiida -m aiida              # the AiiDA tier: 380 tests, broker-less SQLite profile
 pytest -m scenario                       # fake-LAMMPS end-to-end tier: 17 tests, < 60 s
 pytest -m ""                             # everything
 pytest tests/builders                    # one package
@@ -18,8 +18,9 @@ pytest tests/core/test_config.py::test_name              # one test
 pytest --cov=frictionsim2d --cov-report=term-missing tests/core    # coverage for one package
 ```
 
-`pyproject.toml` sets `addopts = "-v --tb=short -m 'not lammps'"`, so the fast tier is
-the default.
+`pyproject.toml` sets `testpaths = ["tests"]` and
+`addopts = "-v --tb=short -m 'not lammps and not agent_eval and not publication'"`, so the
+fast tier is the default. Counts are the collected numbers at the time of writing.
 
 ### Two things to know
 
@@ -39,6 +40,9 @@ The main ones, all registered in `pyproject.toml`:
 | `lammps` | executes a real LAMMPS run. Skipped when `lmp_serial` is absent. |
 | `integration` | cross-package, artifact-level. Lives in `tests/integration/`. |
 | `scenario` | tiny end-to-end runs with a fake LAMMPS. Lives in `tests/scenarios/`; part of the default run. |
+| `aiida` | needs aiida-core; runs against a temporary broker-less SQLite profile, never the daemon. |
+| `agent_eval` | live-LLM evaluation of the GUI assistant (`AGENT_EVAL_PROVIDER`: `gemini` needs `GEMINI_API_KEY`, `ollama` a running server). Deselected by default; 234 tests. |
+| `publication` | read-only checks against the frozen publication tables and the `friction2d_pub` profile. Skips when absent; deselected by default. |
 
 A file may carry both. **`lammps` is derived, not written by hand**: `tests/conftest.py`
 reads each test's `skipif(... lmp_serial ...)` guard and applies the marker from it, so a
@@ -47,15 +51,17 @@ test cannot claim to be LAMMPS-free while calling LAMMPS.
 
 ## Layout
 
-`tests/` mirrors `frictionsim2d/`, one directory per package, plus four that do not:
+`tests/` mirrors `frictionsim2d/`, one directory per package, plus five that do not:
 
 | directory | holds |
 |---|---|
-| `core/ run/ potentials/ lattice/ builders/ interfaces/ hpc/ cli/` | tests for the `frictionsim2d` package of the same name |
+| `core/ run/ potentials/ lattice/ builders/ interfaces/ hpc/ cli/ aiida/ data/ postprocessing/ analysis/ agent/ gui/` | tests for the `frictionsim2d` package of the same name |
+| `tools/` | the scripts and tools that live outside the package |
 | `integration/` | cross-package, artifact-level tests — see below |
+| `scenarios/` | the scenario tier — see below |
 | `repo/` | repo-wide invariants: import surface, import weight, marker derivation, settings isolation, mock-target rule |
 | `helpers/` | code shared by more than one test module (a test module never imports another test module) |
-| `fixtures/` | data files |
+| `fixtures/` | data files. `fixtures/examples/` is a frozen copy of `examples/*.ini`: the deck snapshot and every test that asserts an example's exact values read it, so rewriting `examples/` never moves them |
 
 ## The integration tier
 
@@ -71,7 +77,10 @@ example set and the build helper live in `tests/helpers/examples.py`.
 
 | module | covers |
 |---|---|
-| `test_example_configs.py` | all ten `examples/*.ini` through parse → expand → build → render |
+| `test_example_configs.py` | every run config in `examples/` (the eight single configs, the two campaigns, the hetero pair sweep) through parse → expand → build → render; the campaigns are built one material wide and their member count is asserted separately |
+| `test_examples_mlip.py` | every `examples/mlip/*.ini` validates, including the MLIP cell rules |
+| `test_mlip_end_to_end.py` | the MLIP topology that runs, from `run_simulations` to the on-disk tree |
+| `test_interlayer_lammps.py` | the interlayer styles against the installed LAMMPS (`lammps` marker) |
 | `test_hpc_over_a_real_tree.py` | HPC generation over a builder's own output, both schedulers × all three job shapes |
 | `test_settings_layering.py` | a settings value surviving into the rendered script |
 | `test_sweep_expansion.py` | one directory per swept value, on disk |

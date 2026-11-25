@@ -5,7 +5,8 @@ Driving the package from Python instead of the CLI, using the APIs exposed in
 
 > `frictionsim2d/core/` was split into `core/` + `run/` + `potentials/` + `lattice/`. The old
 > `frictionsim2d.core.run` / `frictionsim2d.core.potential_manager` paths no longer exist — import from
-> the canonical modules shown below. See CLAUDE.md for the full mapping.
+> the canonical modules shown below (`run/simulate.py`, `potentials/manager.py`,
+> `lattice/matching.py`, `builders/simulation_base.py`). There are no compatibility shims.
 
 ## High-level imports
 
@@ -19,6 +20,8 @@ Available builders:
 from frictionsim2d import AFMSimulation, SheetOnSheetSimulation
 ```
 
+These names are resolved lazily, so `import frictionsim2d` stays cheap.
+
 
 ## 1. Run AFM from Python
 
@@ -27,6 +30,12 @@ from frictionsim2d import afm
 
 afm(config_file="afm_config.ini", output_root="./simulation_output", generate_hpc=True)
 ```
+
+`afm()` and `sheetonsheet()` are wrappers over `run_simulations` that print one line
+per created simulation. Unlike the CLI, they pick up a `settings.yaml` in the current
+directory when `settings_file` is not given; the CLI reads only `--settings-file` or
+the per-user file (see [settings.md](settings.md)). The other models
+(`indent`, `pes_tip`, `pes_sheet`) have no wrapper: call `run_simulations` with `model=`.
 
 ## 2. Run sheet-on-sheet from Python
 
@@ -50,6 +59,14 @@ created, root, expanded, settings = run_simulations(
 
 print(len(created), root)
 ```
+
+`model` is one of `afm`, `indent`, `pes_tip`, `sheetonsheet`, `pes_sheet` (the
+underscore spellings, not the CLI's `pes-tip`), or `quench`, which writes
+melt-quench decks instead of friction runs (`quench_for=True` reads a friction config
+and makes only the blocks it lacks; `force=True` keeps satisfied ones). A friction
+run whose amorphous block is missing from the library raises
+`frictionsim2d.builders.construction.amorphous.AmorphousMissing` before the root
+exists.
 
 Return values:
 
@@ -106,9 +123,20 @@ same_but_load = related(df.point_uuid[0], "load", table=table)
 
 See [aiida.md](aiida.md) for the graph, `related()` and the archive export.
 
+## 7. The amorphous block library
+
+```python
+from frictionsim2d.builders.construction.amorphous import import_quench_root
+
+report = import_quench_root("./quench/quench_20261125_101500")
+```
+
+This is what `FrictionSim2D quench import` calls: only complete members are
+copied into the user library. See [examples.md](examples.md#11-make-an-amorphous-block-melt-quench).
+
 ## Notes
 
-- `frictionsim2d.__init__` defines convenience wrappers `afm()` and `sheetonsheet()`.
+- `frictionsim2d.__init__` defines the convenience wrappers `afm()` and `sheetonsheet()`.
 - Internal helper `_run_all()` exists in source but is intentionally internal by naming convention.
 - For long sweeps, call patterns that return created paths and log metadata immediately to your run notebook.
 
