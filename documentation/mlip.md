@@ -136,7 +136,7 @@ pair_coeff * * dispersion/d3 Si Si Si Si Si Si Mo Mo Mo S S S Mo
 (13 types: sub Si x3 and tip Si x3 — Langevin splits each into
 mobile/fix/thermo — then the 3-layer sheet as Mo(L1..L3), S(L1..L3), then the
 virtual drive atom taking the placeholder element.) So **AFM, pes-tip, indent,
-hetero and flake can all host an MLIP**, and `examples/mlip/afm_mlip_full.ini`
+hetero and flake can all host an MLIP**, and `examples/afm/mlip_full.ini`
 is a worked AFM example.
 
 What replaces the old rule is **uniformity**, not component count:
@@ -462,21 +462,21 @@ which also makes `dispersion/d3` native (no backport, unlike DeePMD).
 
 ## 4. The example configs
 
-All live in [`examples/mlip/`](../examples/mlip) and are validated on every test
+Each lives in the folder of the mode it runs (`examples/<mode>/`), and all are validated on every test
 run by `tests/integration/test_examples_mlip.py`
 (parse → sweep-expand → pydantic → `validate_mlip_cell`, plus the builder
 selection, the layer floor and the `pot_` path token).
 
 | File | Command | Demonstrates | D3 toggleable? |
 |---|---|---|---|
-| [`sheet_mlip_full.ini`](../examples/mlip/sheet_mlip_full.ini) | `run sheetonsheet` | Full-cell DeePMD over a 3-layer stack; interlayer physics from the model, no LJ at all | **Yes** (needs the §7 binary) |
-| [`pes_sheet_mlip.ini`](../examples/mlip/pes_sheet_mlip.ini) | `run pes-sheet` | Full-cell DeePMD static corrugation scan; exactly 2 layers, no sliding, no drive atom — the cheapest MLIP run in the package | **Yes** (needs the §7 binary) |
-| [`afm_mlip_full.ini`](../examples/mlip/afm_mlip_full.ini) | `run afm` | v6 multi-component full cell: Si tip + crystalline matched Si substrate + MoS2 sheet on ONE DeePMD instance. Read section 13 (Gate 4 open) before quoting a number | **Yes** |
+| [`sheetonsheet/mlip_full.ini`](../examples/sheetonsheet/mlip_full.ini) | `run sheetonsheet` | Full-cell DeePMD over a 3-layer stack; interlayer physics from the model, no LJ at all | **Yes** (needs the §7 binary) |
+| [`pes-sheet/mlip.ini`](../examples/pes-sheet/mlip.ini) | `run pes-sheet` | Full-cell DeePMD static corrugation scan; exactly 2 layers, no sliding, no drive atom — the cheapest MLIP run in the package | **Yes** (needs the §7 binary) |
+| [`afm/mlip_full.ini`](../examples/afm/mlip_full.ini) | `run afm` | v6 multi-component full cell: Si tip + crystalline matched Si substrate + MoS2 sheet on ONE DeePMD instance. Read section 13 (Gate 4 open) before quoting a number | **Yes** |
 
 **The v3 partition examples are deleted, not deprecated:** `sheet_mlip_lj.ini`
 and `afm_mlip_lj.ini` described partitioned cells (matrix row 2) and would be
 rejected by `validate_mlip_cell` before a builder touched them. The current
-`afm_mlip_full.ini` is a new v6 file (one instance over the whole cell), not the
+`afm/mlip_full.ini` is a new v6 file (one instance over the whole cell), not the
 v3 one of the same name.
 
 Layer-count floors are enforced inside `build()`: sheet-on-sheet needs **≥ 3**
@@ -486,9 +486,9 @@ layers (`SheetOnSheetSimulation.MIN_LAYERS`) and the static PES sheet scan needs
 Run one:
 
 ```bash
-FrictionSim2D run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
+FrictionSim2D run sheetonsheet examples/sheetonsheet/mlip_full.ini -o ./out
 # or, without installing the package (see CLAUDE.md):
-python -m frictionsim2d.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
+python -m frictionsim2d.cli run sheetonsheet examples/sheetonsheet/mlip_full.ini -o ./out
 ```
 
 The two sheet examples name `../models/dpa3_alex2d.pth`, the frozen DPA-3.1-3M/`Alex2D`
@@ -633,7 +633,7 @@ component (§1).
 | Sheet-on-sheet | `run sheetonsheet` | **Yes** | One component (the sheet stack). ≥ 3 layers. Pressure-controlled (GPa). |
 | Interlayer PES scan | `run pes-sheet` | **Yes** | One component, exactly 2 layers, static single points, no sliding, no drive atom — the cheapest and least constrained MLIP case in the package. |
 | Hetero sheet-on-sheet | `run sheetonsheet` with `[2D-1]`/`[2D-2]` | **Yes** (v6) | Two sheet components, ONE instance spanning both materials. The headline hetero case: no reliable cross-material SW parametrization, one model covers both. |
-| AFM sliding | `run afm` | **Yes** (v6) | tip + sheet + substrate, all on ONE model. An SW tip beside an MLIP sheet is still refused (E2/E3). Needs `[sub] amorph = c, match = true`. Force-controlled (nN). See `examples/mlip/afm_mlip_full.ini`. |
+| AFM sliding | `run afm` | **Yes** (v6) | tip + sheet + substrate, all on ONE model. An SW tip beside an MLIP sheet is still refused (E2/E3). Needs `[sub] amorph = c, match = true`. Force-controlled (nN). See `examples/afm/mlip_full.ini`. |
 | Tip PES scan | `run pes-tip` | **Yes** (v6) | Same AFM stack, inherited for free. |
 | Indentation | `run indent` | **Yes** (v6) | Same component structure as AFM. |
 | Hetero AFM | `run afm` with `[2D-1]`/`[2D-2]` | **Yes** | The hetero cell plus tip and substrate, all on ONE model; needs `[sub] amorph = c, match = true`. |
@@ -946,7 +946,7 @@ atom count. `--dry-run` prints the decks without invoking LAMMPS.
 **4. First full-cell run.** Generate, then execute locally.
 
 ```bash
-python -m frictionsim2d.cli run sheetonsheet examples/mlip/sheet_mlip_full.ini -o ./out
+python -m frictionsim2d.cli run sheetonsheet examples/sheetonsheet/mlip_full.ini -o ./out
 ./scripts/run_local.sh out/<sim_root>/sheetonsheet/h-MoS2/30x_30y/K0/pot_deepmd-d3_dpa3_alex2d deepmd
 ```
 
@@ -1170,7 +1170,7 @@ nothing, so no AFM MLIP number counts until these gates have been run against th
 generated tree. Run 2026-09-09 (RTX A4000 16 GB). **Gates 1-3 pass; Gate 4 is a
 finding, not a pass.**
 
-The reference cell is `examples/mlip/afm_mlip_full.ini` with absolute model
+The reference cell is `examples/afm/mlip_full.ini` with absolute model
 paths: 3-layer h-MoS2 (30x30 Å), crystalline lattice-matched Si substrate, r = 15 Å
 crystalline Si tip. **1512 atoms** (702 Si, 270 Mo, 540 S) in 13 atom types, the
 13th the virtual drive atom.

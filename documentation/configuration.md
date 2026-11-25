@@ -257,7 +257,7 @@ Use placeholder replacement from a text list:
 
 ```ini
 [2D]
-materials_list = examples/material_list.txt
+materials_list = examples/lists/material_list.txt
 mat = {mat}
 cif_path = materials/{mat}.cif
 pot_path = potentials/sw/sw_lammps/{mat}.sw
@@ -286,7 +286,7 @@ h-MoSe2 + h-WS2
 
 ```ini
 [2D-1]
-materials_list = examples/hetero_pairs.txt
+materials_list = examples/lists/hetero_pairs.txt
 mat = {mat1}
 cif_path = materials/{mat1}.cif
 pot_path = potentials/sw/sw_lammps/{mat1}.sw
@@ -297,8 +297,8 @@ cif_path = materials/{mat2}.cif
 pot_path = potentials/sw/sw_lammps/{mat2}.sw
 ```
 
-The runnable version is [../examples/hetero_pair_sweep.ini](../examples/hetero_pair_sweep.ini)
-with [../examples/hetero_pairs.txt](../examples/hetero_pairs.txt); the three
+The runnable version is [../examples/sheetonsheet/hetero_pair_sweep.ini](../examples/sheetonsheet/hetero_pair_sweep.ini)
+with [../examples/lists/hetero_pairs.txt](../examples/lists/hetero_pairs.txt); the three
 lines above expand into three runs.
 
 The desktop application writes exactly this form — a second material, the pair
@@ -476,7 +476,7 @@ meaningless COF. A `run pes-sheet` scan applies no load and needs none.
 
 ### [quench]
 
-Required by `run quench` (see `examples/quench_config.ini`); reference:
+Required by `run quench` (see `examples/quench/basic.ini`); reference:
 [commands.md](commands.md#run-quench). Unset conditions come from `settings.quench`;
 a list value makes one member per value.
 
@@ -525,7 +525,7 @@ g (meV): MoS2 175.68, graphene 94.87, black phosphorus 123.0. Override per sheet
 
 - `lj` measures the interlayer force with `compute group/group` at the shearing interface.
 - `lj_g`, `ilp`, `kc` use the bottom-layer reaction force (`group/group` cannot run under them).
-- `interlayer_comparison = true` forces every style, `lj` included, onto the reaction-force measurement, so a style sweep compares like with like. See `examples/sheet_config_interlayer.ini`.
+- `interlayer_comparison = true` forces every style, `lj` included, onto the reaction-force measurement, so a style sweep compares like with like. See `examples/sheetonsheet/interlayer_styles.ini`.
 
 ### Output and provenance
 

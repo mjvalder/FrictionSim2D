@@ -165,7 +165,7 @@ _RUN_COMMANDS = (
     sliding run. Reuses the sheet-on-sheet geometry; needs [2D] layers = [2].
 
     Example:
-        FrictionSim2D run pes-sheet examples/pes_sheet_config.ini -o ./pes_output
+        FrictionSim2D run pes-sheet examples/pes-sheet/basic.ini -o ./pes_output
     """),
     ('pes-tip', 'pes_tip', """Generate tip-on-sheet (AFM) surface PES scan files.
 
@@ -174,7 +174,7 @@ _RUN_COMMANDS = (
     tip-felt surface PES (energy + lateral force on the tip) instead of sliding.
 
     Example:
-        FrictionSim2D run pes-tip examples/pes_tip_config.ini -o ./pes_output
+        FrictionSim2D run pes-tip examples/pes-tip/basic.ini -o ./pes_output
     """),
     ('indent', 'indent',
      """Generate AFM indentation ("indent") simulation files: hold + pull-off retract.
@@ -189,7 +189,7 @@ _RUN_COMMANDS = (
     separate poke (hold-only) and adhesion (retract-only) commands.
 
     Example:
-        FrictionSim2D run indent examples/indent_config.ini -o ./indent_output --hpc-scripts
+        FrictionSim2D run indent examples/indent/basic.ini -o ./indent_output --hpc-scripts
     """),
 )
 
@@ -224,15 +224,15 @@ def run_quench(config_file: Optional[str], for_config: Optional[str],  # pylint:
                run_local: bool, force: bool):
     """Generate melt-quench jobs that make amorphous blocks.
 
-    CONFIG has a [quench] section (see examples/quench_config.ini); with
+    CONFIG has a [quench] section (see examples/quench/basic.ini); with
     --for, the members are the blocks a friction config is missing. Only
     decks are written: run them on the HPC (`hpc generate`, or --hpc-scripts)
     and `FrictionSim2D quench import ROOT`, or add --local to run and import
     them here.
 
     Examples:
-        FrictionSim2D run quench examples/quench_config.ini -o ./quench
-        FrictionSim2D run quench --for examples/afm_config.ini -o ./quench --hpc-scripts
+        FrictionSim2D run quench examples/quench/basic.ini -o ./quench
+        FrictionSim2D run quench --for examples/afm/basic.ini -o ./quench --hpc-scripts
     """
     if bool(config_file) == bool(for_config):
         raise click.UsageError('give either CONFIG (a [quench] config) or --for FRICTION_CONFIG')

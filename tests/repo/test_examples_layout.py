@@ -58,3 +58,30 @@ def test_a_missing_settings_header_file_raises(tmp_path):
         "# settings: examples/settings/nope.yaml\n[2D]\nmat = a\n", encoding='utf-8')
     with pytest.raises(ValueError, match='x.ini'):
         discover(tmp_path)
+
+
+_EXAMPLE_PATH_RE = re.compile(r'(?<![\w/])examples/[\w./-]+?\.(?:ini|txt|yaml)\b')
+#: Where an ``examples/...`` path is shown to a person. ``core/utils/paths.py``
+#: is excluded: its ``examples/`` is the legacy materials lookup, not this folder.
+_DOC_FILES = sorted(
+    [REPO_ROOT / 'README.md', REPO_ROOT / 'CLAUDE.md', EXAMPLES / 'README.md',
+     *(REPO_ROOT / 'documentation').glob('*.md'),
+     *(p for p in (REPO_ROOT / 'frictionsim2d').rglob('*')
+       if p.suffix in ('.py', '.md') and p.name != 'paths.py')])
+
+
+def test_readme_lists_every_example():
+    readme = (EXAMPLES / 'README.md').read_text(encoding='utf-8')
+    missing = [e.rel for e in _EXAMPLES if e.rel not in readme]
+    assert not missing, f"examples/README.md does not list {missing}"
+
+
+def test_no_stale_example_paths():
+    stale = []
+    for doc in _DOC_FILES:
+        if not doc.is_file():
+            continue
+        for ref in _EXAMPLE_PATH_RE.findall(doc.read_text(encoding='utf-8')):
+            if not (REPO_ROOT / ref).exists():
+                stale.append(f"{doc.relative_to(REPO_ROOT)}: {ref}")
+    assert not stale, "\n".join(stale)

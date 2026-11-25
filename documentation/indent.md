@@ -91,10 +91,10 @@ seed = 20260710               # campaign base seed; per-run seeds are derived fr
   comfortably exceed the adhesive tail so the curve reaches full detachment. The
   postprocessor warns if a curve's `fz_tip` minimum sits at the last steps.
 
-Runnable example: [../examples/indent_config.ini](../examples/indent_config.ini).
+Runnable example: [../examples/indent/basic.ini](../examples/indent/basic.ini).
 
 ```bash
-FrictionSim2D run indent examples/indent_config.ini -o ./indent_output --hpc-scripts
+FrictionSim2D run indent examples/indent/basic.ini -o ./indent_output --hpc-scripts
 ```
 
 ## Postprocessing

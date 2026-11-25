@@ -54,7 +54,7 @@ relaxed. This removes the disordered sheet-substrate registry.
 Each grid point is evaluated either by a static `minimize` (`[pes] eval_mode = minimize`,
 the cheapest) or by a short finite-temperature MD run with the `layer_2` Langevin band
 (`eval_mode = md`, a thermalized PES). Descriptor extraction is unchanged. Example:
-[../examples/afm_freestanding_pes_config.ini](../examples/afm_freestanding_pes_config.ini).
+[../examples/pes-tip/freestanding.ini](../examples/pes-tip/freestanding.ini).
 
 ### Multi-cell tip scan
 
@@ -93,13 +93,13 @@ md_steps = 2000      # freestanding tip scan: steps per grid point when eval_mod
 - **Tip scan** should set `[general] force` to a single low load, for example 2 nN;
   the corrugation is clearest before ploughing sets in.
 
-Runnable examples: [../examples/pes_sheet_config.ini](../examples/pes_sheet_config.ini),
-[../examples/pes_tip_config.ini](../examples/pes_tip_config.ini), and
-[../examples/afm_freestanding_pes_config.ini](../examples/afm_freestanding_pes_config.ini).
+Runnable examples: [../examples/pes-sheet/basic.ini](../examples/pes-sheet/basic.ini),
+[../examples/pes-tip/basic.ini](../examples/pes-tip/basic.ini), and
+[../examples/pes-tip/freestanding.ini](../examples/pes-tip/freestanding.ini).
 
 ```bash
-FrictionSim2D run pes-sheet examples/pes_sheet_config.ini -o ./pes_output --hpc-scripts
-FrictionSim2D run pes-tip   examples/pes_tip_config.ini   -o ./pes_output --hpc-scripts
+FrictionSim2D run pes-sheet examples/pes-sheet/basic.ini -o ./pes_output --hpc-scripts
+FrictionSim2D run pes-tip   examples/pes-tip/basic.ini   -o ./pes_output --hpc-scripts
 ```
 
 ## Descriptor extraction

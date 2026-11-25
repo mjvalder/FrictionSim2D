@@ -56,10 +56,10 @@ finished runs in AiiDA is a separate, later step (`aiida import`).
 
 ```bash
 # Generate AFM simulations
-FrictionSim2D run afm examples/afm_config.ini --output-dir ./simulation_output
+FrictionSim2D run afm examples/afm/basic.ini --output-dir ./simulation_output
 
 # Generate sheet-on-sheet simulations
-FrictionSim2D run sheetonsheet examples/sheet_config.ini --output-dir ./simulation_output
+FrictionSim2D run sheetonsheet examples/sheetonsheet/basic.ini --output-dir ./simulation_output
 
 # Generate scheduler scripts for an existing simulation root
 FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --scheduler pbs

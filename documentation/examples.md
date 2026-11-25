@@ -2,10 +2,14 @@
 
 End-to-end workflows, from generating a simulation tree through to plots and the AiiDA store.
 
+The configs live in `examples/`, one folder per `run` subcommand (`afm/`, `sheetonsheet/`,
+`pes-tip/`, `pes-sheet/`, `indent/`, `quench/`) with one file per feature;
+[../examples/README.md](../examples/README.md) lists every file and what it shows.
+
 ## 1. Generate AFM simulations
 
 ```bash
-FrictionSim2D run afm examples/afm_config.ini --output-dir ./simulation_output
+FrictionSim2D run afm examples/afm/basic.ini --output-dir ./simulation_output
 ```
 
 Result: a timestamped simulation root under `./simulation_output/`.
@@ -13,7 +17,7 @@ Result: a timestamped simulation root under `./simulation_output/`.
 ## 2. Generate sheet-on-sheet simulations
 
 ```bash
-FrictionSim2D run sheetonsheet examples/sheet_config.ini --output-dir ./simulation_output
+FrictionSim2D run sheetonsheet examples/sheetonsheet/basic.ini --output-dir ./simulation_output
 ```
 
 ### Sweeping over heterostructure pairs
@@ -22,10 +26,10 @@ FrictionSim2D run sheetonsheet examples/sheet_config.ini --output-dir ./simulati
 lines sweeps the pair:
 
 ```bash
-FrictionSim2D run sheetonsheet examples/hetero_pair_sweep.ini --output-dir ./hetero_output
+FrictionSim2D run sheetonsheet examples/sheetonsheet/hetero_pair_sweep.ini --output-dir ./hetero_output
 ```
 
-The three lines in `examples/hetero_pairs.txt` become three runs, one per pair,
+The three lines in `examples/lists/hetero_pairs.txt` become three runs, one per pair,
 under `sheetonsheet/h-MoS2+h-WS2/`, `sheetonsheet/h-MoSe2+h-WSe2/` and
 `sheetonsheet/h-MoTe2+h-WTe2/`. See
 [configuration.md](configuration.md#heterostructure-pair-sweeps) for the list
@@ -36,8 +40,8 @@ format and which models accept these sections.
 Interlayer scan on a frozen bilayer, then a tip-on-sheet scan:
 
 ```bash
-FrictionSim2D run pes-sheet examples/pes_sheet_config.ini --output-dir ./pes_output
-FrictionSim2D run pes-tip   examples/pes_tip_config.ini   --output-dir ./pes_output
+FrictionSim2D run pes-sheet examples/pes-sheet/basic.ini --output-dir ./pes_output
+FrictionSim2D run pes-tip   examples/pes-tip/basic.ini   --output-dir ./pes_output
 ```
 
 Reduce the finished grids to per-material descriptors:
@@ -52,7 +56,7 @@ See [pes_scan.md](pes_scan.md).
 ## 4. Generate an indentation run
 
 ```bash
-FrictionSim2D run indent examples/indent_config.ini --output-dir ./indent_output
+FrictionSim2D run indent examples/indent/basic.ini --output-dir ./indent_output
 ```
 
 Reduce the finished runs to penetration and adhesion descriptors:
@@ -79,7 +83,7 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 ## 6. Generate simulations and HPC scripts in one step
 
 ```bash
-FrictionSim2D run afm examples/afm_config.ini --hpc-scripts --output-dir ./simulation_output
+FrictionSim2D run afm examples/afm/basic.ini --hpc-scripts --output-dir ./simulation_output
 ```
 
 ## 7. AiiDA setup
@@ -167,7 +171,7 @@ on the other (see [aiida.md](aiida.md#9-archives)).
 ## 11. Make an amorphous block (melt-quench)
 
 An `amorph = a` tip or substrate is cut from a pre-made amorphous block. The package
-ships some (`amor_Si`, used by `examples/afm_config.ini`); `FrictionSim2D fetch materials`
+ships some (`amor_Si`, used by `examples/afm/basic.ini`); `FrictionSim2D fetch materials`
 installs the materials pack of further pre-quenched blocks. A run
 reuses a block only when its material, potential (sha256) and the
 `settings.quench` conditions match and it is large enough; otherwise it stops,
@@ -175,9 +179,9 @@ writes nothing, and prints the command below. No friction run ever melt-quenches
 
 ```bash
 # 1. Write one quench job per missing block (decks only; nothing runs)
-FrictionSim2D run quench --for examples/afm_config.ini -o ./quench
+FrictionSim2D run quench --for examples/afm/basic.ini -o ./quench
 #    or from a [quench] config, members = material x every listed condition
-FrictionSim2D run quench examples/quench_config.ini -o ./quench
+FrictionSim2D run quench examples/quench/basic.ini -o ./quench
 
 # 2. Run it on the HPC like any simulation (one array task per member) ...
 FrictionSim2D hpc generate ./quench/quench_YYYYMMDD_HHMMSS --scheduler pbs

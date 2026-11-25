@@ -60,7 +60,7 @@ test cannot claim to be LAMMPS-free while calling LAMMPS.
 | `scenarios/` | the scenario tier — see below |
 | `repo/` | repo-wide invariants: import surface, import weight, marker derivation, settings isolation, mock-target rule |
 | `helpers/` | code shared by more than one test module (a test module never imports another test module) |
-| `fixtures/` | data files. `fixtures/examples/` is a frozen copy of `examples/*.ini`: the deck snapshot and every test that asserts an example's exact values read it, so rewriting `examples/` never moves them |
+| `fixtures/` | data files. `fixtures/examples/` is a frozen copy of the pre-2026-11-25 flat `examples/*.ini`: the deck snapshot and every test that asserts an example's exact values read it, so rewriting `examples/` never moves them |
 
 ## The integration tier
 
@@ -77,7 +77,7 @@ example set and the build helper live in `tests/helpers/examples.py`.
 | module | covers |
 |---|---|
 | `test_example_configs.py` | every run config in `examples/` (the eight single configs, the two campaigns, the hetero pair sweep) through parse → expand → build → render; the campaigns are built one material wide and their member count is asserted separately |
-| `test_examples_mlip.py` | every `examples/mlip/*.ini` validates, including the MLIP cell rules |
+| `test_examples_mlip.py` | every MLIP example (any `examples/<mode>/*.ini` with an MLIP `pot_type`) validates, including the MLIP cell rules |
 | `test_mlip_end_to_end.py` | the MLIP topology that runs, from `run_simulations` to the on-disk tree |
 | `test_interlayer_lammps.py` | the interlayer styles against the installed LAMMPS (`lammps` marker) |
 | `test_hpc_over_a_real_tree.py` | HPC generation over a builder's own output, both schedulers × all three job shapes |

@@ -86,7 +86,7 @@ FrictionSim2D run quench --for FRICTION_CONFIG [OPTIONS]
 
 Write melt-quench jobs that make amorphous blocks: one member
 (`quench/<mat>/<key8>/`) per block. `CONFIG_FILE` has a `[quench]` section
-(`examples/quench_config.ini`); with `--for`, the members are the blocks a friction
+(`examples/quench/basic.ini`); with `--for`, the members are the blocks a friction
 config is missing. Nothing runs: submit with `hpc generate`, then `quench import`.
 
 Options: those of `run afm`, plus

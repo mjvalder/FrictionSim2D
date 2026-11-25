@@ -1047,7 +1047,7 @@ class SectionForm(QGroupBox):
                 # unconditionally: this branch runs on *every* commit while
                 # the box is unticked, including one triggered by an
                 # unrelated keystroke on a config that was never a sweep at
-                # all -- examples/sheet_config.ini ships with {mat} in all
+                # all -- examples/sheetonsheet/basic.ini ships with {mat} in all
                 # three fields and no materials_list, and clearing them on
                 # sight would destroy a documented, shipped configuration
                 # form on the first commit.

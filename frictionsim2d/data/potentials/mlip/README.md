@@ -25,7 +25,7 @@ dispersion = d3
 lat_c = 6.112
 ```
 
-`examples/mlip/*.ini` are working configs that need only the `pot_path` line
+The MLIP examples (`examples/afm/mlip_full.ini`, `examples/sheetonsheet/mlip_full.ini`, `examples/pes-sheet/mlip.ini`) are working configs that need only the `pot_path` line
 changed. Full background, traps and the capability matrix:
 [`documentation/mlip.md`](../../../documentation/mlip.md).
 

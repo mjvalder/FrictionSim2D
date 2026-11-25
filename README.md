@@ -92,13 +92,13 @@ FrictionSim2D aiida setup
 Generate AFM simulations:
 
 ```bash
-FrictionSim2D run afm examples/afm_config.ini --output-dir ./simulation_output
+FrictionSim2D run afm examples/afm/basic.ini --output-dir ./simulation_output
 ```
 
 Generate sheet-on-sheet simulations:
 
 ```bash
-FrictionSim2D run sheetonsheet examples/sheet_config.ini --output-dir ./simulation_output
+FrictionSim2D run sheetonsheet examples/sheetonsheet/basic.ini --output-dir ./simulation_output
 ```
 
 Drive the sheet with a machine-learned potential instead — same command, one
@@ -106,7 +106,7 @@ extra key in the `.ini`:
 
 ```bash
 ./scripts/fetch_mlip_models.sh deepmd       # one-time: fetch + freeze the model
-FrictionSim2D run sheetonsheet examples/mlip/sheet_mlip_full.ini --output-dir ./simulation_output
+FrictionSim2D run sheetonsheet examples/sheetonsheet/mlip_full.ini --output-dir ./simulation_output
 ```
 
 See [documentation/mlip.md](documentation/mlip.md) and
@@ -115,8 +115,8 @@ See [documentation/mlip.md](documentation/mlip.md) and
 Generate static PES (corrugation-barrier) scans — cheap energy-vs-lateral-position maps:
 
 ```bash
-FrictionSim2D run pes-sheet examples/pes_sheet_config.ini --output-dir ./simulation_output
-FrictionSim2D run pes-tip   examples/pes_tip_config.ini   --output-dir ./simulation_output
+FrictionSim2D run pes-sheet examples/pes-sheet/basic.ini --output-dir ./simulation_output
+FrictionSim2D run pes-tip   examples/pes-tip/basic.ini   --output-dir ./simulation_output
 ```
 
 See [documentation/pes_scan.md](documentation/pes_scan.md).
@@ -124,7 +124,7 @@ See [documentation/pes_scan.md](documentation/pes_scan.md).
 Generate an indentation run — penetration on hold, adhesion on retract:
 
 ```bash
-FrictionSim2D run indent examples/indent_config.ini --output-dir ./simulation_output
+FrictionSim2D run indent examples/indent/basic.ini --output-dir ./simulation_output
 ```
 
 See [documentation/indent.md](documentation/indent.md).
