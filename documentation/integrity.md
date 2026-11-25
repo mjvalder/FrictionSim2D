@@ -186,6 +186,11 @@ FrictionSim2D postprocess read ./simulation_output --integrity-settings strict.y
 FrictionSim2D postprocess read ./simulation_output --no-integrity     # stage 3 off
 ```
 
+In the AiiDA store, `aiida import` and `aiida recheck` take the settings from
+`--settings-file` and accept repeatable `--integrity KEY=VALUE` overrides of single
+thresholds (`--integrity hole_bonds=2 --integrity margins.hole=0.1`; `none` turns a
+threshold off). See [aiida.md](aiida.md#51-a-verdict-for-every-point-at-import).
+
 Thresholds are applied at read time, never frozen into the run. The ones used are written into
 the export metadata as `integrity_thresholds`, with the rule set `version`.
 

@@ -35,6 +35,14 @@ plus `hpc.gpu`, use the framework's binary and launcher flags from
 `hpc.frameworks`, and MACE groups export `OMP_NUM_THREADS` = the requested
 cores. See [mlip.md](mlip.md) §8.
 
+MACE specifics:
+
+- `hpc.frameworks.mace.backend` is `device` (default: GPU, needs `hpc.gpu`,
+  generation fails without it) or `host` (OpenMP on the CPU, no GPU requested).
+- `precision = float32` (a sheet key in the `.ini`) selects the float32 style
+  and adds `-f32` to the `pot_` directory token (`pot_mace-f32_<stem>`), so it
+  forms its own job group and its results never mix with float64 ones.
+
 ### The manifest is a script list
 
 `JobManifest` (`frictionsim2d/hpc/manifest.py`) is built in memory from the tree, one
@@ -63,6 +71,10 @@ From a generated simulation root:
 FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --scheduler pbs
 ```
 
+Options: `-s/--scheduler pbs|slurm`, `-o/--output-dir` (default
+`<simulation root>/hpc`), `--settings-file`, and `--preflight` (also write
+`preflight.sh` and its submit wrapper; same as `hpc.preflight` in settings).
+
 Or produce scripts during generation:
 
 ```bash
@@ -82,7 +94,9 @@ FrictionSim2D run afm afm_config.ini --hpc-scripts
 The supported "remote" workflow when the cluster blocks direct AiiDA
 connections (which is the normal case — see [aiida.md](aiida.md)) is
 **remote-manual**: rsync out, run on the cluster with the generated scripts,
-rsync the results back, then ingest locally with a plain import — no AiiDA
+rsync the results back, optionally fold the run logs into the provenance
+(`FrictionSim2D hpc enrich-provenance -r ./simulation_YYYYMMDD_HHMMSS`), then
+ingest locally with a plain import — no AiiDA
 component ever runs on the cluster itself:
 
 ```bash

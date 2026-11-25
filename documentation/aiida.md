@@ -257,12 +257,15 @@ a rounded `16.02`; for those the check also accepts that factor.
 ```bash
 FrictionSim2D aiida import ./simulation_20260421_143404 --label 260421-afm --machine archer2
 FrictionSim2D aiida import ./simulation_20260421_143404 --dry-run
+FrictionSim2D aiida import ./simulation_20260421_143404 --integrity hole_bonds=2
 ```
 
 Options: `-l/--label` (default: the folder name), `--machine`, `--profile`,
 `--settings-file` (whose `aiida.machine`, `aiida.profile` and `integrity`
-thresholds apply), `--dry-run` (classify every deck against the store; create
-nothing).
+thresholds apply), `--integrity KEY=VALUE` (repeatable; overrides one
+integrity threshold of those settings for this import, e.g.
+`--integrity margins.hole=0.1`; `none` turns a threshold off), `--dry-run`
+(classify every deck against the store; create nothing).
 
 ### 4.1 Identity never comes from a path or a label
 
@@ -378,7 +381,11 @@ Edit the `integrity:` block (bump its `version` when thresholds change), then ru
 
 ```bash
 FrictionSim2D aiida recheck 260421-afm --settings-file ./settings.yaml
+FrictionSim2D aiida recheck 260421-afm --integrity hole_bonds=2.5
 ```
+
+`recheck` takes `--profile`, `--settings-file` and the same repeatable
+`--integrity KEY=VALUE` as `import`.
 
 - `aiida recheck` re-checks every live point whose live verdict has another
   `thresholds_version`, or whose stored settings differ from the current ones.
@@ -719,7 +726,11 @@ FrictionSim2D aiida rebuild 260421-afm -o ~/rebuild_test --hpc-scripts
   statuses it gave on the source tree.
 - **`rebuild LABEL`** regenerates a set's *inputs*: it hands each run's stored
   `config.json` and `settings.yaml` to the builder router `FrictionSim2D run`
-  uses. `--hpc-scripts` also writes the job scripts.
+  uses. `--hpc-scripts` also writes the job scripts. For a legacy tree whose
+  amorphous substrate was built before quench blocks were keyed, rebuild falls
+  back to the packaged legacy `amor_*` block of the same material and potential
+  that is large enough (rebuild only; `run` keeps strict keyed matching, see
+  [commands.md](commands.md)).
 
 ## 9. Archives
 

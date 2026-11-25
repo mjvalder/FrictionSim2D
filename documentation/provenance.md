@@ -105,11 +105,15 @@ validation.
   provenance/
     config.json
     settings.yaml
+    manifest.json
     cif/
       <files>.cif
     potentials/
       <potential files>
 ```
+
+`manifest.json` lists each CIF and potential file copied into the tree and
+the component that uses it.
 
 AFM-family runs additionally nest per-layer directories (`L1`, `L2`, ...)
 under the model root; each holds its own `provenance.json`.
