@@ -493,11 +493,6 @@ quench_rate = 1e12                  # K/s
 Optional: `melt_temp`, `quench_temp`, `timestep`, `melt_steps`,
 `equilibrate_steps`.
 
-### [settings_override]
-
-Documented in legacy workflows but not currently merged in the active runtime path.
-Prefer editing global settings directly when reproducibility is required.
-
 ## Interlayer interactions
 
 `interlayer_style` (in `[general]`, sheet-on-sheet and AFM) chooses how the 2D layers of a sheet interact with each other. It is sweepable: `interlayer_style = [lj, lj_g, ilp]`.
