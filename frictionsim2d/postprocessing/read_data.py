@@ -597,7 +597,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     stores it in a structured format.
     """
 
-    def __init__(self, results_dir: str = 'results_110725_test', *,
+    def __init__(self, results_dir: str, *,
                  skip_fraction: float = 0.2,
                  complete_only: bool = False, integrity: bool = True,
                  integrity_settings: Optional[IntegritySettings] = None

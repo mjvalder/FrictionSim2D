@@ -228,3 +228,31 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
             if "lmp_serial" in str(mark.kwargs.get("reason", "")):
                 item.add_marker(pytest.mark.lammps)
                 break
+
+
+# --------------------------------------------------------------------------
+# No test may leave files in the repository root
+# --------------------------------------------------------------------------
+# A test that writes relative to the working directory (pytest's is the repo
+# root) leaves a stray folder in the checkout -- `results_110725_test/` came
+# from `DataReader()`'s old default. Write under `tmp_path` instead.
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+#: Created by the tools themselves, not by a test.
+_ROOT_EXEMPT = {'.pytest_cache', '.coverage'}
+
+
+def pytest_sessionstart(session):
+    session.config._fs2d_root_before = {p.name for p in _REPO_ROOT.iterdir()}
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
+    before = getattr(session.config, '_fs2d_root_before', None)
+    if before is None:
+        return
+    new = sorted({p.name for p in _REPO_ROOT.iterdir()} - before - _ROOT_EXEMPT)
+    if new:
+        session.config.get_terminal_writer().line(
+            f"\nERROR: the test run left new entries in the repository root: {new}. "
+            "Write under tmp_path, never the working directory.", red=True)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED

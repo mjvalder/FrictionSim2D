@@ -63,8 +63,9 @@ def test_a_missing_settings_header_file_raises(tmp_path):
 _EXAMPLE_PATH_RE = re.compile(r'(?<![\w/])examples/[\w./-]+?\.(?:ini|txt|yaml)\b')
 #: Where an ``examples/...`` path is shown to a person. ``core/utils/paths.py``
 #: is excluded: its ``examples/`` is the legacy materials lookup, not this folder.
+#: CLAUDE.md is excluded too: it is gitignored, so it differs per machine.
 _DOC_FILES = sorted(
-    [REPO_ROOT / 'README.md', REPO_ROOT / 'CLAUDE.md', EXAMPLES / 'README.md',
+    [REPO_ROOT / 'README.md', EXAMPLES / 'README.md',
      *(REPO_ROOT / 'documentation').glob('*.md'),
      *(p for p in (REPO_ROOT / 'frictionsim2d').rglob('*')
        if p.suffix in ('.py', '.md') and p.name != 'paths.py')])

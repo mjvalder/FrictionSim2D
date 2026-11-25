@@ -318,7 +318,7 @@ def test_headerless_sheet_file_raises(tmp_path):
                  "1000 1.0 0.5 2.0\n"
                  "2000 1.1 0.6 2.1\n")
     with pytest.raises(SchemaError):
-        DataReader()._read_dataframe(f, 'sheet')
+        DataReader(str(tmp_path))._read_dataframe(f, 'sheet')
 
 
 def test_family_marker_wins_over_path_inference(tmp_path):
