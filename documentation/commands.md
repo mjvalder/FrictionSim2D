@@ -120,6 +120,18 @@ FrictionSim2D quench list [MATERIAL] [--json]
 Every block in the packaged library, the materials pack and the user library, with
 its key, box, atom count and conditions (`unkeyed (…)` when its sidecar cannot key it).
 
+## gui
+
+```bash
+FrictionSim2D gui [--check] [--verbose]
+```
+
+Launch the desktop simulation builder ([gui.md](gui.md)).
+
+- `--check` — diagnose the GUI environment and exit without launching
+- `--verbose` — show all log output and library warnings in the terminal (also
+  `FRICTIONSIM2D_GUI_VERBOSE=1`)
+
 ## settings
 
 ### settings show
@@ -153,6 +165,7 @@ FrictionSim2D settings reset [--global]
 Options:
 
 - `--global` — remove the global settings file instead of the local one
+- `--yes` — do not ask for confirmation
 
 ## hpc
 
@@ -167,6 +180,8 @@ Options:
 - `--settings-file PATH`
 - `-s, --scheduler {pbs|slurm}` (default: `pbs`)
 - `-o, --output-dir TEXT` (default: `SIMULATION_DIR/hpc`)
+- `--preflight` — also write `preflight.sh` and its submit wrapper (or set
+  `hpc.preflight` in settings; see [settings.md](settings.md))
 
 MLIP runs are split into per-framework GPU job scripts using `hpc.gpu` and
 `hpc.frameworks` from the settings file; point `--settings-file` at another
@@ -477,6 +492,13 @@ Options:
 - `--hpc-scripts` — also generate PBS/SLURM scripts
 - `--profile TEXT`
 
+A tree built before the keyed amorphous-block library may record quench
+conditions its shipped block was never made under; a rebuild falls back to the
+packaged legacy block of the same material and potential that is large
+enough. A run whose amorphous block is missing is skipped and named (a rebuild
+never melt-quenches). Live runs and `run quench --for` keep strict keyed
+matching.
+
 ### aiida query
 
 ```bash
@@ -597,18 +619,20 @@ Prints the row count, the dropped count and the result's uuid.
 ### analyse show
 
 ```bash
-FrictionSim2D analyse show NAME DATASET [--rows INT] [--profile TEXT]
+FrictionSim2D analyse show NAME DATASET [--rows INT] [--param NAME=VALUE ...] [--profile TEXT]
 ```
 
-Prints the newest stored result's metadata and its first `--rows` (default 10) rows.
+Prints the stored result's metadata and its first `--rows` (default 10) rows.
+`--param` (repeatable) names the parameters the result was run with (default:
+the analysis defaults).
 
 ### analyse export
 
 ```bash
-FrictionSim2D analyse export NAME DATASET OUT [--profile TEXT]
+FrictionSim2D analyse export NAME DATASET OUT [--param NAME=VALUE ...] [--profile TEXT]
 ```
 
-Writes the newest stored result's CSV to `OUT`.
+Writes the stored result's CSV to `OUT`; `--param` as for `analyse show`.
 
 ## postprocess
 
@@ -623,8 +647,10 @@ FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT]
 
 Options:
 
-- `--export` — write `outputs/output_full_<size>.json` (schema 2) **and**
+- `--export` — write `outputs/output_full_<size>.json` (schema 3) **and**
   `outputs/summary_<size>.csv`
+- `--complete-only` — export only load points whose status is `complete`
+  (the pre-schema-3 behaviour)
 - `--skip-fraction FLOAT` (default `0.2`) — transient fraction dropped before the
   summary statistics
 - `--integrity-settings FILE` — YAML with an `integrity:` mapping that replaces the
@@ -711,10 +737,29 @@ an `aiida export` sidecar. Prefix one with `pk:`, `uuid:`, `point:`, `group:`
 or `sidecar:` to say which (`sidecar:` takes the `<archive>.params/`
 directory, a directory holding one, or one deck's JSON in it). Unprefixed, a
 directory counts as a sidecar only when it is, or holds, a `.params` directory
-with its `schema-*.json`; anything else is looked up in the store, so a local
-folder that shares a set's name never shadows the set.
+with its `schema-*.json`; anything else is looked up in the store (an all-digit
+reference is a pk, else a group label; anything else a group, uuid or point), so
+a local folder that shares a set's name never shadows the set. A group gives
+the fields shared by all its decks; a field that varies inside it shows as
+`<varies>`. `--rtol` (default `1e-06`) and `--atol` (default `1e-09`) set the
+tolerances for derived values.
 
 ## fetch
+
+### fetch materials
+
+Install the materials pack (pre-quenched amorphous blocks) from huggingface.co:
+
+```bash
+FrictionSim2D fetch materials
+FrictionSim2D fetch materials --remove    # delete the installed pack
+```
+
+Downloads every file the pack's manifest lists into
+`$XDG_DATA_HOME/FrictionSim2D/materials-pack`, checking each sha256 before the
+pack replaces what is installed; a failed fetch changes nothing. Material
+lookups then find its blocks after the packaged ones (lookup order:
+[configuration.md](configuration.md)).
 
 ### fetch model
 

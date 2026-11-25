@@ -8,8 +8,9 @@ Settings are global to a run and loaded through `load_settings()` in `frictionsi
 
 `load_settings()` takes the **first readable** of these, and nothing else:
 
-1. An explicit path, passed as `--settings-file` to `run`, `hpc generate` and
-   `settings show`.
+1. An explicit path, passed as `--settings-file` to `run`, `hpc generate`,
+   `settings show` and the `aiida` commands that read settings (`import`,
+   `recheck`, `postprocess`, `dataset`).
 2. `$XDG_CONFIG_HOME/FrictionSim2D/settings.yaml` — in practice
    `~/.config/FrictionSim2D/settings.yaml`.
 
@@ -34,10 +35,12 @@ For reproducibility, keep a copy of the exact settings file used in your simulat
 ## CLI helpers
 
 ```bash
-FrictionSim2D settings show
-FrictionSim2D settings init
-FrictionSim2D settings reset
+FrictionSim2D settings show [--settings-file PATH] [--origin]
+FrictionSim2D settings init [--global] [--force]
+FrictionSim2D settings reset [--global] [--yes]
 ```
+
+See [commands.md](commands.md#settings).
 
 ## Top-level sections
 
@@ -66,8 +69,15 @@ simulation:
   slide_run_steps: 500000
   drive_method: virtual_atom
   constraint_mode: none
+  sheet_hold_steps: 20000
   halt_temperature_factor: 10.0
+  ramp_max_iterations: 40
 ```
+
+`sheet_hold_steps` is the constant-pressure compression hold before a sheet
+slide, the sheet's analogue of tip penetration. `ramp_max_iterations` caps the
+AFM settle loop after the load ramp; on exhaustion the run records
+`RAMP_STATUS converged=0` and continues.
 
 `halt_temperature_factor` is a physics guard, not a thermostat setting: every
 template that integrates in time emits a `fix halt` that ends the run the first
@@ -109,7 +119,7 @@ Defaults:
 ```yaml
 thermostat:
   type: langevin
-  time_int_type: nve
+  time_int_type: nve     # also accepted: time_integration; verlet | respa | nvt | nve
   langevin_boundaries:
     tip:
       fix: [3.0, 0.0]
@@ -127,9 +137,20 @@ Defaults:
 geometry:
   tip_reduction_factor: 2.25
   rigid_tip: false
+  tip_start_clearance: 20.0
   lat_c_default: 6.0
+  finite_sheet_edge_width: 4.0
+  finite_sheet_afm_edge_mode: none          # none | spring
+  finite_sheet_edge_spring_k: 10.0
+  finite_sheet_sheetonsheet_edge_mode: none # none | rigid
   z_vacuum_margin: 8.0
 ```
+
+`tip_start_clearance` (Å) is the extra height above the contact gap that keeps
+the tip clear of the surface during equilibration. The `finite_sheet_*` keys
+apply to `[general] finite_sheet = true` runs: the edge band width (Å), the
+AFM edge restraint (`spring` tethers edge atoms with a
+`finite_sheet_edge_spring_k` eV/Å² spring) and the sheet-on-sheet edge mode.
 
 `z_vacuum_margin` (Å, ≥ 0): every run box is periodic in z, so the builder sets
 the box z extent from the atoms it reads: `zlo = zmin - V/2`, `zhi = zmax + V/2`, with
@@ -149,7 +170,7 @@ output:
     system_init: true
     slide: true
   dump_frequency:
-    system_init: 10000
+    system_init: 1000
     slide: 10000
   results_frequency: 1000
   channels:
@@ -187,8 +208,8 @@ Defaults:
 
 ```yaml
 potential:
-  LJ_type: LJ_base
-  LJ_cutoff: 11.0
+  LJ_type: LJ_base       # also accepted: lj_type
+  LJ_cutoff: 11.0        # also accepted: lj_cutoff
   reaxff_safezone: 1.2
   reaxff_mincap: 50
   d3_functional: pbe     # MLIP `dispersion = d3` only (pair_style dispersion/d3)

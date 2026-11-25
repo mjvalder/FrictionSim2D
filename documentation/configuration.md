@@ -15,7 +15,27 @@ Global parameters live in `settings.yaml` and are documented separately in
 | Tip PES scan | `[2D]`, `[tip]`, `[general]` | `[pes]`; omit `[sub]` for the freestanding builder |
 | Indentation | `[2D]`, `[tip]`, `[sub]`, `[general]` | `[indent]` |
 
-Optional in any model: `[lj_override]`.
+Optional in any model: `[lj_override]`. `run quench` takes a `[quench]` section
+instead (see [`[quench]`](#quench)).
+
+## File paths
+
+`cif_path`, `pot_path` and `interlayer_file` are looked up in this order; the
+first hit wins:
+
+1. as given (absolute, or relative to the working directory);
+2. next to the config file, then up to four directories above it;
+3. the packaged library, `frictionsim2d/data/{materials,potentials}` — name a
+   file `materials/h-MoS2.cif` or `potentials/sw/MoS2_wen.sw`;
+4. the materials pack (`FrictionSim2D fetch materials`; materials only);
+5. the user library, `$XDG_DATA_HOME/FrictionSim2D/amorphous` (materials only);
+6. the old repository `examples/materials` / `examples/potentials` folders, with
+   a deprecation warning. The spelling `examples/materials/...` still resolves
+   through the same roots, with the same warning.
+
+A file of your own never loses to a library one of the same name. A stored
+config records library files by their portable `materials/...` /
+`potentials/...` name, so it resolves on another install.
 
 Every model's `[2D]` may instead be written as numbered `[2D-1]`/`[2D-2]`
 sections, which stack the two materials into a heterostructure — see
@@ -57,6 +77,12 @@ and `dispersion = d3` is the only vdW lever (`interlayer_style` must stay
 - `pot_type`
 - `cif_path`
 
+`amorph = a` cuts the tip (or substrate, below) from a pre-made amorphous block
+of the material. A block is reused only when material, potential and quench
+conditions match; if none is found the run exits 1 before writing anything and
+prints the `run quench --for` command to make it
+([examples.md](examples.md) §11).
+
 ### [sub]
 
 - `mat`
@@ -90,11 +116,11 @@ versions; the two below are trimmed to the minimum.
 ```ini
 [2D]
 mat = h-MoS2
-cif_path = examples/materials/h-MoS2.cif
+cif_path = materials/h-MoS2.cif
 x = 100
 y = 100
 layers = [1,2,3]
-pot_path = examples/potentials/sw/MoS2_wen.sw
+pot_path = potentials/sw/MoS2_wen.sw
 pot_type = sw
 stack_type = AB
 
@@ -103,17 +129,17 @@ mat = Si
 r = 25
 amorph = c
 dspring = 1.6e-6
-pot_path = examples/potentials/sw/Si.sw
+pot_path = potentials/sw/Si.sw
 pot_type = sw
-cif_path = examples/materials/Si.cif
+cif_path = materials/Si.cif
 
 [sub]
 mat = Si
 thickness = 12
 amorph = a
-pot_path = examples/potentials/sw/Si.sw
+pot_path = potentials/sw/Si.sw
 pot_type = sw
-cif_path = examples/materials/Si.cif
+cif_path = materials/Si.cif
 
 [general]
 temp = 300
@@ -128,11 +154,11 @@ driving_spring = 50
 ```ini
 [2D]
 mat = h-MoS2
-cif_path = examples/materials/h-MoS2.cif
+cif_path = materials/h-MoS2.cif
 x = 100
 y = 100
 layers = [3]
-pot_path = examples/potentials/sw/MoS2_wen.sw
+pot_path = potentials/sw/MoS2_wen.sw
 pot_type = sw
 stack_type = AB
 
@@ -233,14 +259,14 @@ Use placeholder replacement from a text list:
 [2D]
 materials_list = examples/material_list.txt
 mat = {mat}
-cif_path = examples/materials/{mat}.cif
-pot_path = examples/potentials/sw/sw_lammps/{mat}.sw
+cif_path = materials/{mat}.cif
+pot_path = potentials/sw/sw_lammps/{mat}.sw
 ```
 
 `materials_list` format: one material token per line, no header. Blank lines and
 `#` comments (whole-line or trailing) are ignored. Potential and CIF paths
-resolve literally — there is no search path — so every `{mat}` must have a
-matching file; a name whose files cannot be found is skipped with a warning, and
+resolve like any other path (see [File paths](#file-paths)), so every `{mat}`
+must have a matching file; a name whose files cannot be found is skipped with a warning, and
 a list where none resolve is an error rather than a run that generates nothing.
 
 A comma-separated line is several separate single materials: `h-MoS2, h-WS2`
@@ -262,13 +288,13 @@ h-MoSe2 + h-WS2
 [2D-1]
 materials_list = examples/hetero_pairs.txt
 mat = {mat1}
-cif_path = examples/materials/{mat1}.cif
-pot_path = examples/potentials/sw/sw_lammps/{mat1}.sw
+cif_path = materials/{mat1}.cif
+pot_path = potentials/sw/sw_lammps/{mat1}.sw
 
 [2D-2]
 mat = {mat2}
-cif_path = examples/materials/{mat2}.cif
-pot_path = examples/potentials/sw/sw_lammps/{mat2}.sw
+cif_path = materials/{mat2}.cif
+pot_path = potentials/sw/sw_lammps/{mat2}.sw
 ```
 
 The runnable version is [../examples/hetero_pair_sweep.ini](../examples/hetero_pair_sweep.ini)
@@ -448,6 +474,25 @@ anything is built when `[general] pressure` is unset: `[general] pressure is req
 a loaded slide`. Without it the run would slide at 0 GPa and report a
 meaningless COF. A `run pes-sheet` scan applies no load and needs none.
 
+### [quench]
+
+Required by `run quench` (see `examples/quench_config.ini`); reference:
+[commands.md](commands.md#run-quench). Unset conditions come from `settings.quench`;
+a list value makes one member per value.
+
+```ini
+[quench]
+material = Si                       # a list is allowed, e.g. [Si, Ge]
+potential = potentials/sw/{mat}.sw  # {mat} is replaced per material
+pot_type = sw
+cif = materials/{mat}.cif           # default <mat>.cif
+slab = [200, 200, 50]               # crystal slab to melt, Angstrom
+quench_rate = 1e12                  # K/s
+```
+
+Optional: `melt_temp`, `quench_temp`, `timestep`, `melt_steps`,
+`equilibrate_steps`.
+
 ### [settings_override]
 
 Documented in legacy workflows but not currently merged in the active runtime path.
@@ -472,7 +517,7 @@ g (meV): MoS2 175.68, graphene 94.87, black phosphorus 123.0. Override per sheet
 
 ### Parameter files
 
-`interlayer_file` is looked up like `pot_path` (working directory, then relative to the config), then in `examples/potentials/ilp/` and `examples/potentials/kc/`.
+`interlayer_file` is looked up like `pot_path` ([File paths](#file-paths)), then in the bundled `frictionsim2d/data/potentials/ilp/` or `.../kc/`.
 
 ### Scope
 
