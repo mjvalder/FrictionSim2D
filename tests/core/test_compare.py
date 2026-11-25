@@ -1,5 +1,5 @@
 """Field-level comparison of parameter blocks (aiida-free)."""
-from frictionsim2d.core.compare import VARIES, compare_blocks, merge_varying
+from frictionsim2d.core.compare import VARIES, CompareReport, compare_blocks, merge_varying
 
 UNITS = {'general.temp': 'K', 'derived.geometry.lat_c': 'angstrom',
          'sheets.x': 'angstrom'}
@@ -17,6 +17,24 @@ def test_differing_fields_carry_units():
     assert report.differs['potential__sheet_0'] == [('pot_file_sha256', 'aa', 'bb', '')]
     text = report.render()
     assert 'thermostat' in text and 'temp' in text and 'K' in text
+
+
+def test_render_lists_blocks_in_name_order_and_names_the_identical_ones():
+    """Two differing blocks given out of order, one identical, one one-sided."""
+    a = {'zeta': {'x': 1}, 'alpha': {'x': 1}, 'same': {'x': 5}, 'only_a': {}}
+    b = {'zeta': {'x': 2}, 'alpha': {'x': 2}, 'same': {'x': 5}}
+
+    lines = compare_blocks(a, b, units={}).render().splitlines()
+
+    assert lines == ['alpha:', "  x: 1 -> 2", 'zeta:', "  x: 1 -> 2",
+                     'only in A: only_a', 'identical blocks: same']
+
+
+def test_render_sorts_a_report_built_out_of_order():
+    """`render` orders blocks by name whatever order the report was filled in."""
+    report = CompareReport(differs={'zeta': [('x', 1, 2, '')], 'alpha': [('x', 1, 2, '')]})
+
+    assert report.render().splitlines() == ['alpha:', '  x: 1 -> 2', 'zeta:', '  x: 1 -> 2']
 
 
 def test_identical_sets():

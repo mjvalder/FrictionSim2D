@@ -211,6 +211,18 @@ class TestInFileLoopsDoNotMultiplyConfigs:
         assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 3)
 
 
+    def test_outer_loop_scan_angle_with_two_angles_already_splits(self, monkeypatch):
+        """The split starts at the second value, not the third."""
+        monkeypatch.chdir(REPO_ROOT)
+        raw = parse_config(EXAMPLES / 'afm_flake_config.ini')
+        raw['general']['scan_angle'] = [0, 45]
+        raw['general']['outer_loop'] = 'scan_angle'
+        raw['general'] = GeneralConfig(**raw['general']).model_dump()
+
+        summary = count_expansion(raw, 'afm')
+        assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 2)
+
+
 class TestPredictionFollowsBuilderRouting:
     """The prediction must count what the *selected* builder writes.
 

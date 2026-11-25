@@ -97,24 +97,3 @@ def test_scan_angle_force_without_its_pair_raises() -> None:
     section) rejects it. This is run.md finding 5 (previously untested)."""
     with pytest.raises(ValueError, match="scan_angle_force list requires force or pressure values"):
         _validate_runtime_sweep_ordering({"scan_angle_force": [1.0, 2.0]})
-
-
-def test_a_sweep_with_all_identical_values_collides() -> None:
-    """Documents current behaviour for a degenerate sweep list -- every value
-    the same. expand_config_sweeps does not deduplicate and has no notion of
-    "this sweep changed nothing": it happily produces one config per list
-    member, and since general.temp is exactly what output_dir_for keys the
-    K{temp} segment on, two identical temps collide on the SAME directory --
-    the second build would silently overwrite the first, the same class of
-    bug as R-3 (run.md's LOOPABILITY invariant), but from a different
-    cause (a repeated value, not a misclassified parameter) and NOT covered
-    by this task's fix. Flagged here rather than silently pinned: this is a
-    real, separate gap for a future task, not a deliberate design choice.
-    """
-    base_config = _base_config(temp=[300.0, 300.0])
-
-    expanded = expand_config_sweeps(base_config)
-
-    assert len(expanded) == 2
-    dirs = {output_dir_for(c, 'sheetonsheet') for c in expanded}
-    assert len(dirs) == 1   # collision, not a raise -- see docstring

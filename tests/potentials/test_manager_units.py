@@ -1,12 +1,10 @@
 """Unit tests for PotentialManager pieces the larger suite only reached through builds."""
 
-import logging
 from pathlib import Path
 
 import pytest
 
 from frictionsim2d.core.config import SheetConfig
-from frictionsim2d.potentials import manager as manager_module
 from frictionsim2d.potentials.manager import PotentialManager, TypeRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,18 +76,6 @@ def test_mass_lines_split_an_element_across_components(mock_settings):
     contiguous.register('a', 'Mo', 'Mo')
     pm.types = contiguous
     assert pm.get_masses_string().startswith('mass 1*2 ')
-
-
-def test_unknown_element_mass_falls_back_with_a_warning(mock_settings, caplog):
-    assert manager_module._element_mass('Mo') == pytest.approx(95.95)
-    with caplog.at_level(logging.WARNING):
-        assert manager_module._element_mass('Xx') is None
-    assert "Could not find mass for element 'Xx'" in caplog.text
-    reg = TypeRegistry()
-    reg.register('a', 'Xx', 'Xx')
-    pm = PotentialManager(mock_settings, use_langevin=False)
-    pm.types = reg
-    assert pm.get_masses_string() == 'mass 1 1.0 #Xx (unknown)'
 
 
 def test_padded_maps_pad_with_null_and_narrow_by_layer():

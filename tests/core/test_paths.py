@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from frictionsim2d.core.utils.paths import get_material_path, get_potential_path, search_paths
+from frictionsim2d.core.utils.paths import (
+    PATH_SEARCH_MAX_PARENTS, get_material_path, get_potential_path, search_paths)
 
 
 def test_search_paths_tries_base_dir_before_climbing_to_parents(tmp_path):
@@ -16,6 +17,19 @@ def test_search_paths_tries_base_dir_before_climbing_to_parents(tmp_path):
     cands = search_paths('h-MoS2.cif', base_dir=tmp_path)
     assert cands[0] == Path('h-MoS2.cif')
     assert cands[1] == tmp_path / 'h-MoS2.cif'
+
+
+def test_search_climbs_at_most_the_documented_number_of_parents(tmp_path):
+    deep = tmp_path.joinpath(*'abcdefgh')            # more parents than the bound
+    cands = search_paths('x.cif', base_dir=deep)
+    # the bare name, base_dir itself, then PATH_SEARCH_MAX_PARENTS parents
+    assert len(cands) == 1 + 1 + PATH_SEARCH_MAX_PARENTS
+    assert cands[-1] == deep.parents[PATH_SEARCH_MAX_PARENTS - 1] / 'x.cif'
+
+
+def test_an_absolute_name_is_the_only_candidate(tmp_path):
+    absolute = tmp_path / 'x.cif'
+    assert search_paths(str(absolute), base_dir=tmp_path) == [absolute]
 
 
 def test_get_material_path_finds_a_file_relative_to_base_dir(tmp_path):

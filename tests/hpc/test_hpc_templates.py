@@ -242,7 +242,7 @@ def _require_bash():
 @pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
 @pytest.mark.parametrize("shape", ["array", "combined"])
 def test_job_scripts_carry_no_troubleshooting_machinery(tmp_path, scheduler, shape, use_tmpdir):
-    text = _render_all(tmp_path, use_tmpdir=use_tmpdir)[("pbs", shape)]
+    text = _render_all(tmp_path, use_tmpdir=use_tmpdir)[(scheduler, shape)]
 
     for gone in ("tee", "PIPESTATUS", "save_run_log", "enrich-provenance",
                  "rsync", "-l none", "STATUS", "RUN_ROOT", "while ", "exit"):

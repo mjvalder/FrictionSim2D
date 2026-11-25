@@ -1,7 +1,6 @@
 import pytest
 
 from frictionsim2d.core.utils.structures import cifread, count_atomtypes
-from frictionsim2d.core.utils.tokens import normalize_element_symbol
 
 
 def test_cifread_returns_lattice_and_elements(materials_path):
@@ -25,7 +24,3 @@ def test_count_atomtypes_skips_comments_and_blank_lines(tmp_path):
     pot = tmp_path / 'x.sw'; pot.write_text('#Mo9 S9 S9\n\n   \nMo S S 1\n')
     assert count_atomtypes(pot, ['Mo', 'S'], 'sw') == {'Mo': 1, 'S': 1}
 
-
-@pytest.mark.parametrize('raw, sym', [('mo', 'Mo'), ('MO', 'Mo'), (' s ', 'S'), ('', '')])
-def test_normalize_element_symbol(raw, sym):
-    assert normalize_element_symbol(raw) == sym

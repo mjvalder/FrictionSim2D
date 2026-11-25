@@ -135,6 +135,21 @@ def test_a_glob_entry_in_lammps_scripts_selects_matching_trees(tmp_path):
     assert hpc_dispatch.collect_hpc_simulation_paths(root, ["quench*.in"]) == []
 
 
+def test_a_quench_member_is_always_a_job_and_its_deck_is_in_the_manifest(tmp_path):
+    """A `run quench` member has only a quench*.in; whatever scripts the settings
+    name (slide.in by default), it is still dispatched, and its deck is a row."""
+    member = tmp_path / "quench" / "Si" / "ab12cd34" / "lammps"
+    member.mkdir(parents=True)
+    (member / "quench.in").write_text("# quench\n", encoding="utf-8")
+
+    assert hpc_dispatch.collect_hpc_simulation_paths(
+        tmp_path, ["slide.in"]) == ["quench/Si/ab12cd34"]
+
+    assert generate_hpc_scripts_for_root(tmp_path, _settings()) is None
+    manifest = (tmp_path / "hpc" / "manifest_1.txt").read_text(encoding="utf-8")
+    assert "quench/Si/ab12cd34/lammps/quench.in" in manifest
+
+
 def test_system_in_is_satisfied_by_any_system_deck(tmp_path):
     root = _lammps_dir(tmp_path, "system_x.in")
 

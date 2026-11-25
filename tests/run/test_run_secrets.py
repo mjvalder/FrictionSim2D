@@ -199,3 +199,18 @@ def test_redact_secrets_mapping_leaves_non_secret_lookalikes_alone():
            'passwordless': 'unaffected'}
 
     assert redact_secrets_mapping(data) == data
+
+
+def test_redact_secrets_mapping_blanks_a_credential_inside_a_list():
+    """A secret in a list of mappings (e.g. `env_lines`-style entries) must not
+    slip past because the walk stops at the list."""
+    data = {'hpc': {'frameworks': [
+        {'name': 'a', 'password': PASSWORD},
+        [{'api_key': API_KEY, 'host': 'x.example.org'}],
+    ]}}
+
+    safe = redact_secrets_mapping(data)
+
+    assert safe['hpc']['frameworks'][0] == {'name': 'a', 'password': ''}
+    assert safe['hpc']['frameworks'][1] == [{'api_key': '', 'host': 'x.example.org'}]
+    assert data['hpc']['frameworks'][0]['password'] == PASSWORD   # input untouched

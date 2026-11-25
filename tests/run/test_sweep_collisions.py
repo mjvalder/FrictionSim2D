@@ -19,16 +19,13 @@ def _afm(**general):
     }
 
 
-def test_temperatures_that_differ_only_in_decimals_collide():
-    base = _afm(temp=[300.0, 300.5])
-
-    with pytest.raises(ValueError, match=r"\[general\] temp.*300\.0.*300\.5"):
-        expand_config_sweeps(base, base_dir=ROOT, model='afm')
-
-
-def test_a_repeated_temperature_collides():
-    with pytest.raises(ValueError, match=r"\[general\] temp"):
-        expand_config_sweeps(_afm(temp=[300.0, 300.0]), base_dir=ROOT, model='afm')
+@pytest.mark.parametrize('temps, pattern', [
+    ([300.0, 300.5], r"\[general\] temp.*300\.0.*300\.5"),   # differ only in decimals
+    ([300.0, 300.0], r"\[general\] temp"),                     # repeated value
+])
+def test_colliding_temperatures_raise(temps, pattern):
+    with pytest.raises(ValueError, match=pattern):
+        expand_config_sweeps(_afm(temp=temps), base_dir=ROOT, model='afm')
 
 
 def test_whole_kelvin_temperatures_expand_to_distinct_directories():
@@ -42,8 +39,9 @@ def test_count_expansion_reports_the_collision():
         count_expansion(_afm(temp=[300.0, 300.5]), 'afm', ROOT)
 
 
-def test_without_a_model_the_collision_is_not_checked():
-    assert len(expand_config_sweeps(_afm(temp=[300.0, 300.5]), base_dir=ROOT)) == 2
+@pytest.mark.parametrize('temps', [[300.0, 300.5], [300.0, 300.0]], ids=['decimals', 'repeated'])
+def test_without_a_model_the_collision_is_not_checked(temps):
+    assert len(expand_config_sweeps(_afm(temp=temps), base_dir=ROOT)) == 2
 
 
 def _with_material_list(tmp_path, section_overrides):
@@ -89,19 +87,15 @@ def test_single_material_sweep_with_a_marker_still_expands(tmp_path):
     assert [c['2D']['mat'] for c in configs] == ['h-MoS2', 'h-WS2']
 
 
-def test_two_pot_paths_with_the_same_type_and_stem_collide():
+@pytest.mark.parametrize('paths, pattern', [
+    (['sw/a/x.sw', 'sw/b/x.sw'], r"\[2D\] pot_path.*sw/a/x\.sw.*sw/b/x\.sw"),   # same type + stem
+    (['sw/a/x.sw', 'sw/a/x.sw'], r"\[2D\] pot_path"),                              # repeated path
+])
+def test_colliding_pot_paths_raise(paths, pattern):
     base = _afm()
-    base['2D']['pot_path'] = ['sw/a/x.sw', 'sw/b/x.sw']
+    base['2D']['pot_path'] = paths
 
-    with pytest.raises(ValueError, match=r"\[2D\] pot_path.*sw/a/x\.sw.*sw/b/x\.sw"):
-        expand_config_sweeps(base, base_dir=ROOT, model='afm')
-
-
-def test_a_repeated_pot_path_collides():
-    base = _afm()
-    base['2D']['pot_path'] = ['sw/a/x.sw', 'sw/a/x.sw']
-
-    with pytest.raises(ValueError, match=r"\[2D\] pot_path"):
+    with pytest.raises(ValueError, match=pattern):
         expand_config_sweeps(base, base_dir=ROOT, model='afm')
 
 

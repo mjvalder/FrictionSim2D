@@ -355,6 +355,12 @@ def test_tier_frequencies_come_from_tier_args():
     assert tier_frequencies(CFG) == {'window': 1000, 'raw': 100, 'peratom': 1000}
 
 
+@pytest.mark.parametrize('freq', [0, -1000])
+def test_a_non_positive_results_frequency_has_no_tier_frequencies(freq):
+    cfg = {'settings': {'output': {'results_frequency': freq}}}
+    assert tier_frequencies(cfg) == {}
+
+
 def test_per_layer_channels_render_the_pinned_statements():
     """The shared per-layer builders keep the exact LAMMPS strings decks depend on."""
     by_name = {ob.name: ob for ob in layer_channels(3)}

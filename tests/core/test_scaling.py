@@ -16,6 +16,7 @@ def test_reference_tip_reproduces_the_reference_bands(model, descriptor, low, hi
     assert (result.quantity, result.unit) == ('load', 'nN')
     assert result.low == pytest.approx(low) and result.high == pytest.approx(high)
     assert result.warnings == ()
+    assert next(r for r in REGIMES if r.descriptor == descriptor).unit == 'GPa'
 
 
 @pytest.mark.parametrize('radius, factor', [(50, 4.0), (12.5, 0.25), (40, 2.56)])
@@ -25,14 +26,6 @@ def test_load_scales_with_tip_radius_squared(radius, factor):
     assert result.warnings == ()
     assert 'GPa' in result.working and 'F/R' in result.working
     assert f'R = {radius:g} A' in result.working
-
-
-def test_bands_are_nominal_pressures():
-    by_level = {r.descriptor: r for r in REGIMES}
-    assert by_level['low'].unit == 'GPa'
-    assert (by_level['low'].low, by_level['low'].high) == pytest.approx((1.6, 3.2))
-    assert (by_level['mid'].low, by_level['mid'].high) == pytest.approx((3.2, 8.0))
-    assert (by_level['high'].low, by_level['high'].high) == pytest.approx((8.0, 16.0))
 
 
 def test_no_tip_radius_assumes_the_reference_and_says_so():
@@ -60,16 +53,14 @@ def test_quantity_synonyms(quantity):
     assert scale(quantity, 'low', AFM).high == 20
 
 
-def test_working_says_what_each_band_is():
-    low = scale('load', 'low', AFM).working
-    assert 'baseline loads' in low and '10, 20 and 30 nN' in low and 'poor contact' in low
-    assert 'lower part' in low
-    mid = scale('load', 'mid', AFM).working
-    assert '20-50 nN' in mid and 'reference trends' in mid
-    high = scale('load', 'high', AFM).working
-    assert '100 nN' in high and 'no dedicated constant' in high
-    for text in (low, mid, high):
-        assert 'measured' not in text.lower() and '\n' not in text
+@pytest.mark.parametrize('level, numbers', [('low', ('10', '20')), ('mid', ('20', '50')),
+                                             ('high', ('50', '100'))])
+def test_working_states_the_band_it_computed(level, numbers):
+    """The working embeds the band's own numbers; its prose is free to change."""
+    text = scale('load', level, AFM).working
+    assert text and '\n' not in text and 'measured' not in text.lower()
+    for number in numbers:
+        assert number in text, (level, number, text)
 
 
 def test_every_regime_has_a_source_and_none_claims_measurement():

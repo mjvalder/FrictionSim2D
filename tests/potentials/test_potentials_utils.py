@@ -20,34 +20,20 @@ from frictionsim2d.potentials.utils import (
 class TestLjParams:
     """Test cases for lj_params function with case-insensitive handling."""
 
-    def test_lj_params_uppercase(self):
-        """Test LJ parameters with uppercase atom types."""
+    def test_lj_params_exact_value(self):
+        """C-H pins the UFF table: geometric-mean epsilon, arithmetic-mean sigma."""
         eps, sig = lj_params('C', 'H')
-        assert isinstance(eps, float)
-        assert isinstance(sig, float)
-        assert eps > 0
-        assert sig > 0
+        assert eps == pytest.approx(0.002947435529942462)
+        assert sig == pytest.approx(3.3685)
 
-    def test_lj_params_lowercase(self):
-        """Test LJ parameters with lowercase atom types."""
-        eps_lower, sig_lower = lj_params('c', 'h')
-        eps_upper, sig_upper = lj_params('C', 'H')
-        assert eps_lower == eps_upper
-        assert sig_lower == sig_upper
-
-    def test_lj_params_mixed_case(self):
-        """Test LJ parameters with mixed-case atom types."""
-        eps_mixed, sig_mixed = lj_params('c', 'H')
-        eps_upper, sig_upper = lj_params('C', 'H')
-        assert eps_mixed == eps_upper
-        assert sig_mixed == sig_upper
-
-    def test_lj_params_two_letter_symbols_case_normalization(self):
-        """Test that two-letter element symbols normalize correctly."""
-        eps_upper, sig_upper = lj_params('NB', 'NI')
-        eps_canonical, sig_canonical = lj_params('Nb', 'Ni')
-        assert eps_upper == eps_canonical
-        assert sig_upper == sig_canonical
+    @pytest.mark.parametrize('given, canonical', [
+        (('c', 'h'), ('C', 'H')),
+        (('c', 'H'), ('C', 'H')),
+        (('NB', 'NI'), ('Nb', 'Ni')),
+    ], ids=['lowercase', 'mixed-case', 'two-letter'])
+    def test_lj_params_case_insensitive(self, given, canonical):
+        """Atom types are case-normalised: any spelling equals the canonical one."""
+        assert lj_params(*given) == lj_params(*canonical)
 
     def test_lj_params_symmetric(self):
         """Test that LJ parameters are symmetric for swapped atoms."""
@@ -277,6 +263,13 @@ def test_internal_pair_cutoff_reaxff_variants(tmp_path):
     broken = tmp_path / 'broken.reax'
     broken.write_text('too short\n', encoding='utf-8')
     assert internal_pair_cutoff('reaxff', broken, 11.0) == 10.0  # unparseable: QEq
+
+
+def test_internal_pair_cutoff_rebomos_uses_the_largest_sigma(tmp_path):
+    from frictionsim2d.potentials.utils import internal_pair_cutoff
+    two = tmp_path / 'two.rebomos'
+    two.write_text('3.13 sigma_SS\n4.2 sigma_MM\n1.0 epsilon_MM\n', encoding='utf-8')
+    assert internal_pair_cutoff('rebomos', two, 11.0) == pytest.approx(2.5 * 4.2)
 
 
 def test_internal_pair_cutoff_rebomos_without_sigma_raises(tmp_path):

@@ -114,6 +114,7 @@ class TestLayerSelection:
         result = generated['indent_config.ini']
         target = discover_preview_target(result.simulation_root, result.created[0])
         assert target.layer == 1
+        assert target.run_dir.name == 'L1'
 
     def test_explicit_layer_is_honoured(self, generated):
         result = generated['indent_config.ini']
@@ -142,8 +143,10 @@ class TestFindAssemblyScript:
     def test_falls_back_to_the_plain_name_when_none_has_a_box(self, tmp_path):
         lammps = tmp_path / 'lammps'
         lammps.mkdir()
+        # The refinement variant sorts FIRST, so only the explicit preference
+        # for the plain name can pick slide.in.
+        (lammps / 'a_refine.in').write_text('read_data build/x.lmp\n', encoding='utf-8')
         (lammps / 'slide.in').write_text('read_data build/x.lmp\n', encoding='utf-8')
-        (lammps / 'slide_refine.in').write_text('read_data build/x.lmp\n', encoding='utf-8')
         assert find_assembly_script(lammps).name == 'slide.in'
 
     def test_returns_none_for_an_empty_directory(self, tmp_path):

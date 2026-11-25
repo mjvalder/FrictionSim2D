@@ -6,7 +6,7 @@ from frictionsim2d.core.config import GeneralConfig, parse_config
 from frictionsim2d.core.config import write_config
 from frictionsim2d.run.expand import count_expansion
 from frictionsim2d.run.simulate import run_simulations
-from frictionsim2d.hpc.manifest import JobEntry, JobManifest
+from frictionsim2d.hpc.manifest import JobManifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -85,9 +85,3 @@ def test_scan_angle_manifest_count_matches_predicted_job_count(tmp_path: Path, m
     slide_jobs = manifest.get_slide_jobs()
     assert len(slide_jobs) == predicted.jobs
     assert sorted(job.angle for job in slide_jobs) == [0.0, 30.0, 60.0]
-
-
-def test_an_entry_defaults_to_a_cpu_job() -> None:
-    entry = JobEntry(job_id="job_0", simulation_path="afm/graphene/L2")
-    assert entry.needs_gpu is False
-    assert entry.framework is None

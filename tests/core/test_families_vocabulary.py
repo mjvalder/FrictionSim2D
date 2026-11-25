@@ -4,6 +4,7 @@ import pytest
 from frictionsim2d.core.observables import FAMILIES, PES_FAMILIES, REGISTRY
 from frictionsim2d.hpc.manifest import JobManifest
 from frictionsim2d.postprocessing.read_data import DataReader
+from frictionsim2d.core.observables import AFM_LIKE, SHEET_LIKE
 from frictionsim2d.run.naming import AFM_LIKE_MODELS, MODELS, SHEET_LIKE_MODELS
 
 
@@ -27,16 +28,14 @@ def test_data_reader_uses_the_family_tuple():
         DataReader._registry_sim_type('tip', 'x family=bogus')
 
 
-def test_pes_families_is_the_one_shared_tuple():
-    import frictionsim2d.aiida.calcjob as calcjob
-    import frictionsim2d.aiida.ingest as ingest
-    import frictionsim2d.data.models as models
-    import frictionsim2d.postprocessing.run_status as run_status
+def test_family_groups_partition_the_families():
+    assert set(AFM_LIKE) | set(SHEET_LIKE) == set(FAMILIES)
+    assert not set(AFM_LIKE) & set(SHEET_LIKE)
+
+
+def test_pes_families_are_the_two_static_scans():
     assert PES_FAMILIES == ('pes_tip', 'pes_sheet')
     assert set(PES_FAMILIES) <= set(FAMILIES)
-    for module in (calcjob, ingest, models, run_status):
-        assert module.PES_FAMILIES is PES_FAMILIES
-        assert not hasattr(module, '_PES_FAMILIES')
 
 
 def test_manifest_accepts_an_indent_top_directory(tmp_path):

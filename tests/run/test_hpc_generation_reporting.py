@@ -27,16 +27,10 @@ def _settings_with_modules() -> GlobalSettings:
 
 class TestBlocker:
 
-    def test_unset_modules_are_reported_as_the_reason(self):
+    def test_unset_modules_are_reported_with_the_settings_to_change(self):
         reason = hpc_generation_blocker(GlobalSettings())
         assert reason is not None
         assert 'modules' in reason
-
-    def test_the_reason_names_the_setting_to_change(self):
-        assert "'Modules'" in hpc_generation_blocker(GlobalSettings())
-
-    def test_the_reason_names_all_three_environment_settings(self):
-        reason = hpc_generation_blocker(GlobalSettings())
         for setting in ("'Modules'", "'Conda environment'", "'env_lines'"):
             assert setting in reason
 

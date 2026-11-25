@@ -81,3 +81,29 @@ def test_unparseable_runs_reports_exactly_what_discover_runs_skipped(tmp_path):
     _write_run(tmp_path, 'sheetonsheet/h-MoS2/100x_100y/K300', 'sheetonsheet')
 
     assert unparseable_runs(tmp_path) == ['afm/h-MoS2/nonsense']
+
+
+def test_runs_are_sorted_by_path_not_by_model_walk_order(tmp_path):
+    """MODELS walks sheetonsheet before pes_sheet; the result is still ordered by path."""
+    _write_run(tmp_path, 'sheetonsheet/h-MoS2/100x_100y/K300', 'sheetonsheet')
+    _write_run(tmp_path, 'pes_sheet/h-MoS2/100x_100y/K300', 'pes_sheet')
+
+    assert [loc.tokens.rel_path for loc in discover_runs(tmp_path)] == [
+        'pes_sheet/h-MoS2/100x_100y/K300', 'sheetonsheet/h-MoS2/100x_100y/K300']
+
+
+def test_a_corrupt_provenance_json_keeps_the_family_from_the_path(tmp_path):
+    run_dir = _write_run(tmp_path, 'sheetonsheet/h-MoS2/100x_100y/K300', 'hetero')
+    (run_dir / 'provenance.json').write_text('{not json', encoding='utf-8')
+
+    loc, = discover_runs(tmp_path)
+
+    assert loc.tokens.family == 'sheetonsheet'
+
+
+def test_a_run_with_its_own_provenance_dir_does_not_borrow_the_parents(tmp_path):
+    run_dir = _write_run(tmp_path, 'sheetonsheet/h-MoS2/100x_100y/K300', 'sheetonsheet')
+
+    loc, = discover_runs(tmp_path)
+
+    assert loc.provenance_dir == run_dir / 'provenance'

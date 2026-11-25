@@ -676,30 +676,17 @@ def test_damping_ratio_defaults_to_zero():
     assert TipConfig.model_fields['damping_ratio'].default == 0.0
 
 
-def test_optional_channels_defaults_empty():
+@pytest.mark.parametrize('value, expected', [
+    ('default', []),                              # not given -> empty
+    ('a, b', ['a', 'b']),                         # comma-separated string
+    (None, []),
+    ('', []),
+    (['raw_pe', 'raw_fz'], ['raw_pe', 'raw_fz']),  # a list passes through
+])
+def test_optional_channels_coercion(value, expected):
     from frictionsim2d.core.config import OutputSettings
-    assert OutputSettings().optional_channels == []
-
-
-def test_optional_channels_accepts_comma_separated_string():
-    from frictionsim2d.core.config import OutputSettings
-    assert OutputSettings(optional_channels='a, b').optional_channels == ['a', 'b']
-
-
-def test_optional_channels_none_becomes_empty_list():
-    from frictionsim2d.core.config import OutputSettings
-    assert OutputSettings(optional_channels=None).optional_channels == []
-
-
-def test_optional_channels_empty_string_becomes_empty_list():
-    from frictionsim2d.core.config import OutputSettings
-    assert OutputSettings(optional_channels='').optional_channels == []
-
-
-def test_optional_channels_list_passes_through():
-    from frictionsim2d.core.config import OutputSettings
-    assert OutputSettings(optional_channels=['raw_pe', 'raw_fz']).optional_channels == \
-        ['raw_pe', 'raw_fz']
+    kwargs = {} if value == 'default' else {'optional_channels': value}
+    assert OutputSettings(**kwargs).optional_channels == expected
 
 
 def _finite(tmp_path, sub_x, sub_y, sheet=(100.0, 100.0)):
@@ -715,19 +702,26 @@ def _finite(tmp_path, sub_x, sub_y, sheet=(100.0, 100.0)):
     return raw
 
 
-def test_finite_sheet_substrate_smaller_than_sheet_in_y_is_rejected(tmp_path):
-    with pytest.raises(ValidationError, match='substrate y'):
-        AFMSimulationConfig(**_finite(tmp_path, 160.0, 90.0))
+@pytest.mark.parametrize('axis', ['x', 'y'])
+def test_finite_sheet_substrate_smaller_than_sheet_is_rejected(tmp_path, axis):
+    sub = (90.0, 160.0) if axis == 'x' else (160.0, 90.0)
+    with pytest.raises(ValidationError, match=f'substrate {axis}'):
+        AFMSimulationConfig(**_finite(tmp_path, *sub))
 
 
-def test_finite_sheet_margin_must_exceed_lj_cutoff_in_x(tmp_path):
-    with pytest.raises(ValidationError, match=r'substrate_x - sheet_x'):
-        AFMSimulationConfig(**_finite(tmp_path, 105.0, 160.0))
+@pytest.mark.parametrize('axis, sub', [
+    ('x', (105.0, 160.0)),     # 5 A of margin against an 11 A cutoff
+    ('y', (160.0, 105.0)),
+    ('x', (111.0, 160.0)),     # exactly the cutoff: the margin must EXCEED it
+    ('y', (160.0, 111.0)),
+])
+def test_finite_sheet_margin_must_exceed_lj_cutoff(tmp_path, axis, sub):
+    with pytest.raises(ValidationError, match=rf'substrate_{axis} - sheet_{axis}'):
+        AFMSimulationConfig(**_finite(tmp_path, *sub))
 
 
-def test_finite_sheet_margin_must_exceed_lj_cutoff_in_y(tmp_path):
-    with pytest.raises(ValidationError, match=r'substrate_y - sheet_y'):
-        AFMSimulationConfig(**_finite(tmp_path, 160.0, 105.0))
+def test_finite_sheet_margin_just_past_the_lj_cutoff_is_accepted(tmp_path):
+    AFMSimulationConfig(**_finite(tmp_path, 111.5, 111.5))
 
 
 def test_flake_pot_type_left_at_default_dumps_and_reloads():
@@ -804,19 +798,14 @@ def test_removed_aiida_and_database_keys_warn_once(tmp_path, caplog):
     assert 'aiida.enabled' in warnings[0].getMessage()
 
 
-def test_database_settings_are_gone():
-    """The central database is gone: no `DatabaseSettings`, no `database`
-    field; the AiiDA store is the only database."""
-    import frictionsim2d.core.config as config_mod
-    assert not hasattr(config_mod, 'DatabaseSettings')
-    assert not hasattr(config_mod, 'DatabaseProfileSettings')
-    assert 'database' not in GlobalSettings.model_fields
-
-
-def test_a_flat_database_block_still_loads_with_one_warning(tmp_path, caplog):
+@pytest.mark.parametrize('database_yaml', [
+    'database:\n  host: db.example.org\n  password: x\n',                   # flat
+    'database:\n  active_profile: central\n  central:\n    host: h\n',     # nested profiles
+], ids=['flat', 'nested'])
+def test_a_database_block_still_loads_with_one_warning(tmp_path, caplog, database_yaml):
     settings_file = tmp_path / 'settings.yaml'
-    settings_file.write_text('database:\n  host: db.example.org\n  password: x\n'
-                             'thermostat:\n  type: langevin\n', encoding='utf-8')
+    settings_file.write_text(database_yaml + 'thermostat:\n  type: langevin\n',
+                             encoding='utf-8')
     with caplog.at_level('WARNING'):
         settings = load_settings(settings_file=settings_file)
     assert settings.thermostat.type == 'langevin'

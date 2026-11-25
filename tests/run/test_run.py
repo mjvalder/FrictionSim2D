@@ -130,30 +130,18 @@ class TestRoutingViewMatchesTheModel:
             '2D-2': {'mat': 'h-WS2'},
         }
 
-    def test_a_false_string_is_not_a_finite_sheet(self):
-        from frictionsim2d.builders.afm.hetero import HeteroAFMSimulation
-        from frictionsim2d.run.expand import _builder_cls_for_count
-
-        assert _builder_cls_for_count(
-            self._hetero_afm_raw('false'), 'afm') is HeteroAFMSimulation
-
-    def test_a_true_string_still_routes_to_the_finite_builder(self):
-        from frictionsim2d.builders.afm.hetero import FiniteHeteroAFMSimulation
-        from frictionsim2d.run.expand import _builder_cls_for_count
-
-        assert _builder_cls_for_count(
-            self._hetero_afm_raw('true'), 'afm') is FiniteHeteroAFMSimulation
-
-    def test_a_real_bool_is_unaffected(self):
+    @pytest.mark.parametrize('value, finite', [
+        ('false', False), (False, False), ('true', True), (True, True),
+    ])
+    def test_finite_sheet_routing(self, value, finite):
+        """A 'false' string is not a finite sheet; a real bool is unaffected."""
         from frictionsim2d.builders.afm.hetero import (
             FiniteHeteroAFMSimulation, HeteroAFMSimulation,
         )
         from frictionsim2d.run.expand import _builder_cls_for_count
 
-        assert _builder_cls_for_count(
-            self._hetero_afm_raw(False), 'afm') is HeteroAFMSimulation
-        assert _builder_cls_for_count(
-            self._hetero_afm_raw(True), 'afm') is FiniteHeteroAFMSimulation
+        expected = FiniteHeteroAFMSimulation if finite else HeteroAFMSimulation
+        assert _builder_cls_for_count(self._hetero_afm_raw(value), 'afm') is expected
 
     def test_a_blank_twist_angle_is_not_a_twist(self):
         """An empty `.ini` key reads as None, but a blank string reaching the
@@ -202,6 +190,18 @@ class TestAngleSplitWithAForceGate:
                             generate_hpc=False)
 
         assert not (tmp_path / 'out').exists()
+
+    def test_a_single_angle_with_a_force_gate_is_no_conflict(self):
+        """One angle is not split into scripts, so the selector survives."""
+        from frictionsim2d.core.config import parse_config
+        from frictionsim2d.run.expand import outer_loop_conflict
+
+        raw = parse_config(EXAMPLES / 'afm_flake_config.ini')
+        raw['general'].update({'scan_angle': [30], 'scan_angle_force': 30,
+                               'outer_loop': 'scan_angle'})
+        assert outer_loop_conflict(raw, 'afm') is None
+        raw['general']['scan_angle'] = [0, 30]
+        assert 'scan_angle_force' in outer_loop_conflict(raw, 'afm')
 
     def test_the_indent_still_builds(self, tmp_path, monkeypatch):
         """IndentSimulation never splits by angle (SPLIT_OUTER_LOOPS), so the

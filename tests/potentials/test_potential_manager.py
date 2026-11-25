@@ -785,9 +785,9 @@ def test_unknown_element_mass_falls_back_to_one_with_a_warning(
     with caplog.at_level(logging.WARNING):
         out = pm.get_masses_string()
 
-    assert 'mass' in out
-    assert '1.0' in out
-    assert '(unknown)' in out
+    xx_line = next(line for line in out.splitlines() if 'Xx' in line)
+    assert xx_line.endswith(' 1.0 #Xx (unknown)')
+    assert xx_line.startswith(f'mass {len(pm.types)} ')   # the unknown element's own type
     assert "Could not find mass for element 'Xx'" in caplog.text
 
 
