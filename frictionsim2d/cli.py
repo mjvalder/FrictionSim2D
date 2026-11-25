@@ -1354,7 +1354,34 @@ def analyse_export(name: str, dataset: str, out: Path, params: Tuple[str, ...],
 
 @cli.group('fetch')
 def fetch_group():
-    """Download published add-ons: the assistant's fine-tuned models."""
+    """Download published add-ons: the assistant's fine-tuned models and the materials pack."""
+
+
+@fetch_group.command('materials')
+@click.option('--remove', is_flag=True, help='Delete the installed materials pack.')
+def fetch_materials_cmd(remove: bool):
+    """Install the materials pack (pre-quenched amorphous blocks) from huggingface.co.
+
+    Downloads every file the pack's manifest lists into
+    $XDG_DATA_HOME/FrictionSim2D/materials-pack and checks each sha256 before
+    the pack replaces what is installed; a failed fetch changes nothing.
+    Material lookups then find its blocks after the packaged ones.
+
+    \b
+    Examples:
+        FrictionSim2D fetch materials
+        FrictionSim2D fetch materials --remove
+    """
+    from .data.fetch import FetchError, fetch_materials, remove_materials  # noqa: PLC0415
+    if remove:
+        click.echo("Removed the materials pack" if remove_materials()
+                   else "No materials pack is installed")
+        return
+    try:
+        folder = fetch_materials(click.echo)
+    except FetchError as exc:
+        _raise_abort(f"❌ {exc}", exc)
+    click.echo(f"Installed the materials pack in {folder}")
 
 
 @fetch_group.command('model')
