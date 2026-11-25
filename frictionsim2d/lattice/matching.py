@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from itertools import chain
 from typing import List, NamedTuple, Optional, Tuple
 
 import numpy as np
@@ -691,45 +692,74 @@ def _circle_overlap_area(d: float, r: float) -> float:
     return 2.0 * r * r * math.acos(arg) - half_d * math.sqrt(max(4.0 * r * r - d * d, 0.0))
 
 
-def _ri_raw(
-    cart_a: np.ndarray,
-    cart_b: np.ndarray,
-    cell: np.ndarray,
-    shift_cart: np.ndarray,
-    radius: float,
-) -> float:
-    """Unnormalised overlap integral at a single shift.
+class _OverlapScan:  # pylint: disable=too-few-public-methods
+    """Overlap integral of two layers at many lateral shifts of the second.
 
-    Sums circle-overlap areas for all (i, j) pairs within 2*radius using minimum
-    image convention in the common supercell ``cell``.
+    For each shift only the (i, j) pairs that can lie within ``2 * radius`` are
+    evaluated. They come from a k-d tree of layer A's periodic images (built
+    once), as a superset of the pairs the minimum-image rule below can keep; the
+    arithmetic on each candidate is exactly the dense formula's, and the pairs
+    are summed in (i, j) order with ``cumsum``. The result is therefore bit
+    for bit what the original all-pairs loop returned -- which the
+    argmin/argmax tie-breaking of the RI grid depends on (``np.arccos`` differs
+    from ``math.acos`` in the last ulp, so ``math.acos`` is kept).
 
-    Args:
-        cart_a: (N_a, 2) Cartesian positions of layer A atoms (Å).
-        cart_b: (N_b, 2) Cartesian positions of layer B atoms (Å).
-        cell: 2×2 common supercell lattice (row vectors, Å).
-        shift_cart: (2,) Cartesian shift applied to layer B (Å).
-        radius: Effective atomic radius for disk-overlap model (Å).
-
-    Returns:
-        Raw overlap sum (Å²).
+    The minimum image is the fractional ``round`` of the pair difference, which
+    on a skewed cell is not always the geometrically nearest image; that is the
+    current, intended behaviour and is reproduced, not corrected.
     """
-    cell_inv = np.linalg.inv(cell)
-    b_shifted = cart_b + shift_cart
 
-    total = 0.0
-    cutoff = 2.0 * radius
+    def __init__(self, cart_a: np.ndarray, cart_b: np.ndarray, cell: np.ndarray, radius: float):
+        from scipy.spatial import cKDTree  # pylint: disable=import-outside-toplevel
 
-    for pa in cart_a:
-        diff = b_shifted - pa                          # (N_b, 2) Cartesian
-        frac_diff = diff @ cell_inv                    # fractional in supercell
-        frac_diff -= np.round(frac_diff)               # minimum image
-        cart_diff = frac_diff @ cell
-        dists = np.linalg.norm(cart_diff, axis=1)      # (N_b,)
-        nearby = dists[dists < cutoff]
-        for d in nearby:
-            total += _circle_overlap_area(d, radius)
+        self.cart_a = cart_a
+        self.cart_b = cart_b
+        self.cell = cell
+        self.cell_inv = np.linalg.inv(cell)
+        self.radius = radius
+        self.cutoff = 2.0 * radius
+        n_a = len(cart_a)
+        # Image range: |fractional difference| <= extent, so the rounded image
+        # vector L satisfies |L| <= extent + 1/2; cover it, plus the shift in [0, 1).
+        frac = np.concatenate([cart_a, cart_b]) @ self.cell_inv
+        extent = float(np.ptp(frac, axis=0).max()) + 1.0 if len(frac) else 1.0
+        k = int(math.ceil(extent)) + 1
+        rng = np.arange(-k, k + 1)
+        lattice = np.array([[i, j] for i in rng for j in rng], dtype=float) @ cell
+        self.n_a = n_a
+        self.tree = cKDTree((cart_a[None, :, :] - lattice[:, None, :]).reshape(-1, 2))
 
-    return total
+    def total(self, shift_cart: np.ndarray) -> float:
+        """Raw overlap sum (Å²) with layer B displaced by ``shift_cart``."""
+        if self.cutoff <= 0.0 or self.n_a == 0 or len(self.cart_b) == 0:
+            return 0.0
+        b_shifted = self.cart_b + shift_cart
+        hits = self.tree.query_ball_point(b_shifted, self.cutoff * (1.0 + 1e-6) + 1e-9)
+        counts = np.fromiter(map(len, hits), dtype=np.intp, count=len(hits))
+        if counts.sum() == 0:
+            return 0.0
+        j_idx = np.repeat(np.arange(len(hits)), counts)
+        n_hits = int(counts.sum())
+        i_idx = np.fromiter(chain.from_iterable(hits), dtype=np.intp, count=n_hits) % self.n_a
+        key = np.unique(i_idx * len(self.cart_b) + j_idx)       # sorted: i-major, then j
+        i_idx, j_idx = np.divmod(key, len(self.cart_b))
+        diff = b_shifted[j_idx] - self.cart_a[i_idx]
+        frac_diff = diff @ self.cell_inv
+        frac_diff -= np.round(frac_diff)                        # minimum image
+        cart_diff = frac_diff @ self.cell
+        # sqrt(x^2 + y^2) is bit-identical to np.linalg.norm.
+        dists = np.sqrt(cart_diff[:, 0] ** 2 + cart_diff[:, 1] ** 2)
+        dists = dists[dists < self.cutoff]
+        if dists.size == 0:
+            return 0.0
+        radius = self.radius
+        half_d = dists / 2.0
+        acos = np.fromiter(map(math.acos, np.minimum(half_d / radius, 1.0).tolist()),
+                           dtype=float, count=dists.size)
+        areas = 2.0 * radius * radius * acos - half_d * np.sqrt(
+            np.maximum(4.0 * radius * radius - dists * dists, 0.0))
+        areas[dists <= 0.0] = math.pi * radius * radius
+        return float(np.cumsum(areas)[-1])
 
 
 def scan_registry_index(
@@ -761,11 +791,12 @@ def scan_registry_index(
     fy = np.linspace(0.0, 1.0, n_grid, endpoint=False)
 
     raw_grid = np.zeros((n_grid, n_grid))
+    scan = _OverlapScan(cart_a, cart_b, cell, atomic_radius)
 
     for i, xi in enumerate(fx):
         for j, yj in enumerate(fy):
             shift = np.array([xi, yj]) @ cell       # Cartesian
-            raw_grid[i, j] = _ri_raw(cart_a, cart_b, cell, shift, atomic_radius)
+            raw_grid[i, j] = scan.total(shift)
 
     raw_max = raw_grid.max()
     ri_grid = raw_grid / raw_max if raw_max > 0.0 else raw_grid
