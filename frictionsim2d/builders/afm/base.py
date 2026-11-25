@@ -834,7 +834,7 @@ class AFMSimulation(SimulationBase):
             # Same silent-default hazard, same cause. Suppresses `comm_style
             # tiled` / `balance 1.0 rcb`: under pair_deepmd tiled makes the
             # style derive a bogus ghost count and try to allocate hundreds of
-            # GB (F2, documentation/milestone0.md). Costs an MLIP run nothing --
+            # GB (F2, documentation/mlip.md §12). Costs an MLIP run nothing --
             # both frameworks run one rank per GPU, and tiled/RCB only pay off
             # across many ranks.
             'mlip_sheet': is_mlip(self.config.sheet.pot_type or ''),

@@ -177,7 +177,7 @@ lat_c = 6.112                          # interlayer distance, MANDATORY for MLIP
   selects the CPU one. `precision = float32` is opt-in and adds `-f32` to the run directory.
 - Tip-bearing MLIP cells generate, but the two frameworks disagree by ~44% RMS on
   forces for the reference cell. Read
-  [documentation/mlip_afm_gate.md](documentation/mlip_afm_gate.md) before trusting an
+  [documentation/mlip.md §13](documentation/mlip.md) before trusting an
   AFM, pes-tip or indent number.
 - LAMMPS builds for the two frameworks are in [`scripts/hpc/`](scripts/hpc/); read
   its README first.

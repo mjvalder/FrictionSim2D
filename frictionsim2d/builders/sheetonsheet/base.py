@@ -787,7 +787,7 @@ class SheetOnSheetSimulation(SimulationBase):
             'pot_type': pot_type,
             # `mlip_sheet` suppresses `comm_style tiled` / `balance rcb`, which
             # make pair_deepmd derive a bogus ghost count and try to allocate
-            # hundreds of GB (F2 in documentation/milestone0.md). Costs nothing:
+            # hundreds of GB (F2 in documentation/mlip.md §12). Costs nothing:
             # both frameworks run one MPI rank per GPU, and tiled/RCB only pay
             # off when spreading irregular work over many ranks.
             # `mlip_deck_directives`: extra deck lines the MLIP style demands

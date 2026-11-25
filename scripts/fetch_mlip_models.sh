@@ -9,7 +9,7 @@
 # MB with their own licences and release channels, and the DeePMD one is a
 # *derived* artefact (a freeze of a checkpoint at a chosen head) with no
 # canonical download URL. This script is the recipe instead. See
-# examples/potentials/mlip/README.md.
+# frictionsim2d/data/potentials/mlip/README.md.
 #
 # Environment:
 #   MODELS_DIR   where the finished models land (default: $HOME/opt/models)
@@ -28,7 +28,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 # documentation/mlip.md section 5 rests on them, and `lat_c = 6.112` in the
 # shipped configs is that model's equilibrium. Overriding either is a
 # measurement exercise, not a config edit: re-run scripts/mlip_bilayer_benchmark.py
-# and update the configs. See examples/potentials/mlip/README.md.
+# and update the configs. See frictionsim2d/data/potentials/mlip/README.md.
 DP_MODEL="${DP_MODEL:-DPA-3.1-3M}"
 DP_HEAD="${DP_HEAD:-Alex2D}"
 MACE_MODEL="${MACE_MODEL:-mace-mpa-0-medium}"

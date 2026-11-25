@@ -22,7 +22,7 @@
 # only worth trying if this deck passes.
 #
 # Model: produced by `mace_create_lammps_model --format=mliap` (see
-# documentation/milestone0.md). The trailing `0` is the ghost-neighbour flag.
+# documentation/mlip.md §12). The trailing `0` is the ghost-neighbour flag.
 #
 # Run:  $PREFIX/lammps-mace/build/lmp -k on g 1 -sf kk -in m0_6_mliap_hybrid.in
 

@@ -234,7 +234,7 @@ def test_generated_classical_deck_is_unchanged(tmp_path, monkeypatch):
 # `mlip_sheet` gates the MPI decomposition commands `comm_style tiled` and
 # `balance 1.0 rcb`. Under `pair_deepmd` these are not a tuning choice: tiled
 # makes the pair style derive a bogus ghost count and try to allocate hundreds
-# of GB (measured 2026-08-11, F2 in documentation/milestone0.md). Suppressing
+# of GB (measured 2026-08-11, F2 in documentation/mlip.md §12). Suppressing
 # them costs a classical-free MLIP run nothing, because both frameworks run one
 # MPI rank per GPU and tiled/RCB only pay off across many ranks.
 #

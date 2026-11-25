@@ -125,7 +125,7 @@ _profile_option = click.option('--profile', default=None,
 # =============================================================================
 
 @click.group()
-@click.version_option(version='0.1.0', prog_name='FrictionSim2D')
+@click.version_option(prog_name='FrictionSim2D')
 def cli():
     """FrictionSim2D - Generate LAMMPS input files for 2D material friction simulations."""
 

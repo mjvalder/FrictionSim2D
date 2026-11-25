@@ -21,7 +21,7 @@ atom_style atomic
 read_data bilayer_mos2.data
 # NOTE: dispersion/d3 argument order below is the runbook's verification target —
 # adjust to the pinned build's docs (https://docs.lammps.org/pair_dispersion_d3.html)
-# and record the working form in documentation/milestone0.md results.
+# and record the working form in documentation/mlip.md §12 results.
 pair_style hybrid/overlay deepmd frozen_model.pth dispersion/d3 bj pbe 16.0 8.0
 pair_coeff * * deepmd Mo S Mo S
 pair_coeff * * dispersion/d3 Mo S Mo S

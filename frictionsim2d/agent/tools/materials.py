@@ -327,8 +327,8 @@ def material_ops(deps, names: List[str],
                               for group in (structure_dirs, potential_dirs, suffixes)):
         raise ToolInputError(
             'a material sweep needs one structure folder and one potential folder whose '
-            'files are named after the materials (e.g. examples/materials with '
-            'examples/potentials/sw/sw_lammps); set up one material at a time or ask '
+            'files are named after the materials (e.g. frictionsim2d/data/materials with '
+            'frictionsim2d/data/potentials/sw/sw_lammps); set up one material at a time or ask '
             'the user. Found: ' + '; '.join(notes))
     ops = [Op('material_dirs', value=(str(structure_dirs.pop()), str(potential_dirs.pop()),
                                        suffixes.pop())),

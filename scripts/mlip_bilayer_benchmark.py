@@ -708,7 +708,7 @@ def resolve_launcher(framework: str,
     ``LAMMPS_PLUGIN_PATH`` export live in ``frictionsim2d/core/mlip.py``; this script
     never re-derives them. Env lines are *shell* lines, so they are reported
     rather than executed — export them in the calling shell (see
-    ``documentation/milestone0.md``).
+    ``documentation/mlip.md §12``).
     """
     if not is_mlip(framework):
         return [], []

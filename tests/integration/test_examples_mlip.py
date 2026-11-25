@@ -69,7 +69,7 @@ def _example_paths():
 
 #: Examples kept as they are although they fail validation, by user decision
 #: (2026-11-19): afm_mlip_full.ini is the cell the MLIP AFM gate was run on
-#: (documentation/mlip_afm_gate.md), and main's tip-footprint check (sheet >= 2x
+#: (documentation/mlip.md §13), and main's tip-footprint check (sheet >= 2x
 #: the tip diameter, AFMSimulationConfig.validate_tip_sheet_footprint) refuses
 #: its 30x30 sheet under an r=15 tip. strict=True: the day the cell is fixed,
 #: these xfails turn into failures and the marker must be removed.

@@ -4,7 +4,7 @@ visuals
 ptest
 # Ignore the scripts/ scratch area by default, but keep the MLIP deliverables
 # tracked: the build recipes, Milestone-0 decks, local runner and benchmark are
-# referenced by documentation/mlip.md and documentation/milestone0.md, so an
+# referenced by documentation/mlip.md (§12 for Milestone 0), so an
 # unqualified `scripts` entry would silently drop them from the repo.
 # NB: only /scripts/* is excluded (not /scripts itself), or git would refuse to
 # descend into the directory and these negations would never be consulted.

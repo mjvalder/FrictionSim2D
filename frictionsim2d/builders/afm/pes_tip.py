@@ -160,17 +160,15 @@ class PESTipSimulation(AFMSimulation):
         """Render the self-contained static tip PES scan (single ``slide.in``).
 
         The scan assembles the tip + sheet + substrate itself; no separate
-        ``system.in`` indentation phase is generated. Tip placement has two modes:
+        ``system.in`` indentation phase is generated. The tip sits at the fixed
+        ``PES_TIP_CONTACT_GAP`` (``contact_gap`` in the template); there is no
+        in-deck gap calibration. ``pes.tip_load`` is only the target for an
+        external gap→load calibration step (see ``documentation/pes_scan.md``).
+        The gap→load calibration (``gap_load_calibration``) showed the fixed gap
+        sits in the *attractive* well for every material, giving an adhesion, not
+        load, descriptor.
 
-        - ``pes.tip_load`` set (preferred): the tip self-calibrates its gap by
-          bisection until the reaction normal force hits the target load (nN), so
-          the scan runs at a firm, repulsive contact in the friction regime. The
-          gap→load calibration (``gap_load_calibration``) showed the fixed gap below
-          sits in the *attractive* well for every material, giving an adhesion — not
-          load — descriptor; the load setpoint is the deployable one.
-        - ``pes.tip_load`` unset: fall back to the fixed ``PES_TIP_CONTACT_GAP``.
-
-        Either way the recorded ``fz`` column reports the actually-achieved load
+        The recorded ``fz`` column reports the actually-achieved load
         (compliant materials that cannot reach the target cap at the firmest gap).
         """
         logger.info("Writing tip PES scan inputs...")

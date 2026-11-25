@@ -72,7 +72,7 @@ So this script **backports** instead: it builds the ABI-matching 2024 release
 with `pair_dispersion_d3.{cpp,h}` and `d3_parameters.h` copied in from
 `stable_22Jul2025_update1`. Verified numerically — under `hybrid/overlay` each
 sub-style reproduces its standalone energy bit-for-bit
-([`documentation/milestone0.md`](../../documentation/milestone0.md), M0.2).
+([`documentation/mlip.md`](../../documentation/mlip.md) §12, M0.2).
 
 - **Binary lands at `$PREFIX/lammps-deepmd-d3/bin/lmp`.**
 - Builds no venv: it expects an existing deepmd install to supply the runtime
@@ -246,7 +246,7 @@ surfaces as a failing test rather than as wrong physics.
 Consequence: if you change `LAMMPS_TAG` or `LAMMPS_BRANCH` here, the D3 golden
 tests must be re-run against the new binary and the registry's token table
 updated. The verified argument order is recorded in
-[`documentation/milestone0.md`](../../documentation/milestone0.md) (item M0.2)
+[`documentation/mlip.md`](../../documentation/mlip.md) §12 (item M0.2)
 and flows from there into the registry.
 
 ## Where these paths are consumed

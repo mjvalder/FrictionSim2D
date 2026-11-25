@@ -20,7 +20,7 @@
 #              device backend `-k on g 1 ... -sf kk`; `hpc.frameworks.mace.backend: host`
 #              picks `-sf kk/host`; DeePMD's LAMMPS_PLUGIN_PATH export). Never
 #              re-spelled here: the registry is the single source of truth.
-#              See scripts/hpc/README.md and documentation/milestone0.md.
+#              See scripts/hpc/README.md and documentation/mlip.md §12.
 #   workdir    the simulation root the HPC job scripts cd into
 #              (frictionsim2d/templates/hpc/pbs_combined.j2: decks are addressed
 #              relative to the directory holding <model>/).

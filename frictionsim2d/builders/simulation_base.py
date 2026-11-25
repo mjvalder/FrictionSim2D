@@ -82,7 +82,7 @@ def mlip_template_context(pot_type: Optional[str]) -> Dict[str, Any]:
     silently renders nothing (directives) or the classical branch
     (``mlip_sheet``: ``comm_style tiled`` / ``balance rcb``, which make
     pair_deepmd derive a bogus ghost count and try to allocate hundreds of GB,
-    F2 in documentation/milestone0.md), the build still reports success, and
+    F2 in documentation/mlip.md §12), the build still reports success, and
     the omission surfaces only when LAMMPS aborts. Every builder that renders
     a run deck must merge this into its context. A classical ``pot_type``
     gives ``False`` / ``[]``, so a classical deck renders unchanged.

@@ -12,7 +12,7 @@
 # implementation, which is older than pinned mainline and may use the pre-rename
 # damping tokens. Verify against the build's own docs, keep it identical to the
 # form verified in M0.2 only if both builds agree, and record BOTH in
-# documentation/milestone0.md — spec §1.2 makes d3_damping a canonical name
+# documentation/mlip.md §12 — spec §1.2 makes d3_damping a canonical name
 # precisely because the two builds can disagree.
 #
 # Run:  $PREFIX/lammps-mace/build/lmp -k on g 1 -sf kk -in m0_3b_mace_overlay_d3.in
