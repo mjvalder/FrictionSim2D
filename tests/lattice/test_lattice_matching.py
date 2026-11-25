@@ -197,6 +197,7 @@ def test_find_coincidence_lattice_skips_degenerate_sub_angstrom_cells():
     candidate regardless of tolerance, so no match is ever found."""
     tiny = np.array([[0.1, 0.0], [0.0, 0.1]])
     assert find_coincidence_lattice(tiny, np.eye(2) * 3.0, max_supercell=2) is None
+    assert find_coincidence_lattice(tiny, tiny, max_supercell=1) is None   # even a perfect match
 
 
 # ---------------------------------------------------------------------------

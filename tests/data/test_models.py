@@ -45,6 +45,7 @@ def test_stats_drop_the_leading_transient():
     assert out['mean_nf'] == pytest.approx(10.0)
     assert out['mean_lf'] == pytest.approx(5.0)
     assert out['mean_cof'] == pytest.approx(0.5)
+    assert out['std_nf'] == pytest.approx(0.0)       # the kept samples are constant
     kept_all = compute_friction_stats(nf, lfx, np.zeros(10), skip_fraction=0.0)
     assert kept_all['mean_nf'] == pytest.approx(28.0)
 
