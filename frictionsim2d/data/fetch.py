@@ -3,7 +3,7 @@
 The pack is a Hugging Face dataset repo (:data:`PACK_REPO`) holding flat
 ``amor_<mat>__<key8>.lmp`` + ``.lmp.json`` files (the user-library format, so a
 user block uploads as is) and a ``manifest.json`` naming every file with its
-sha256 and size (written by ``tools/materials_pack/make_manifest.py``).
+sha256 and size (written by the pack's ``make_manifest.py``, kept outside this repository).
 
 :func:`fetch_materials` downloads the manifest and every file into a staging
 folder next to the pack, checks each size and sha256, and only then swaps the

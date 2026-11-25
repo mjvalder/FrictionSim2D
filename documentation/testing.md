@@ -56,7 +56,6 @@ test cannot claim to be LAMMPS-free while calling LAMMPS.
 | directory | holds |
 |---|---|
 | `core/ run/ potentials/ lattice/ builders/ interfaces/ hpc/ cli/ aiida/ data/ postprocessing/ analysis/ agent/ gui/` | tests for the `frictionsim2d` package of the same name |
-| `tools/` | the scripts and tools that live outside the package |
 | `integration/` | cross-package, artifact-level tests — see below |
 | `scenarios/` | the scenario tier — see below |
 | `repo/` | repo-wide invariants: import surface, import weight, marker derivation, settings isolation, mock-target rule |

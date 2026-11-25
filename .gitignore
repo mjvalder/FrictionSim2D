@@ -40,7 +40,6 @@ assistant_models/*/model.gguf
 
 # Agent worktrees and agent data (not source)
 .claude/
-tools/agent_data/
 
 # Scratch output of scripts/mlip_bilayer_benchmark.py (defaults to
 # `bench_<framework>/` in the CWD); regenerable -- pass --workdir to move it.

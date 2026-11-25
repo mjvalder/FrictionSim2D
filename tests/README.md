@@ -10,7 +10,7 @@
 | `repo/` | repo-wide invariants: import surface, import weight, marker derivation, settings isolation, mock-target rule |
 | `helpers/` | code shared by more than one test module — a test module never imports another test module |
 | `fixtures/` | data files. `fixtures/examples/` is a frozen copy of `examples/*.ini` (Task 22): the deck snapshot and every test that asserts an example's exact values read it; the live `examples/` is read only by contract tests -- every example parses and renders (`integration/` through `build_example`, `test_example_configs.py`, `test_examples_mlip.py`, `test_mlip_end_to_end.py`, `gui/test_config_validation.py`), the pair sweep stays runnable (`run/test_run_hetero_naming.py`), the assistant's example defaults match the files (`agent/test_tools_recipes.py`) |
-| `gui/ aiida/ data/ postprocessing/ analysis/ agent/ tools/` | the package of the same name (`tools/`: scripts outside the package) |
+| `gui/ aiida/ data/ postprocessing/ analysis/ agent/` | the package of the same name |
 
 ## Tiers and how to run them
 
