@@ -5,6 +5,7 @@ The store is the one of `tests/aiida/test_store_consumers.py`: one AFM run at
 dataset `paper` holds 30 and 50 nN).
 """
 import math
+from importlib import import_module
 
 import pandas as pd
 import pytest
@@ -66,6 +67,9 @@ def store(aiida_profile_clean, no_profile_switch, tmp_path):
 @pytest.fixture
 def probe(monkeypatch):
     """A trivial registered analysis: one row per pass point."""
+    # Register the catalogue first: copied before its lazy import, the copy would
+    # receive the registrations and later tests would see an empty registry.
+    import_module('frictionsim2d.analysis.catalogue')
     monkeypatch.setattr(base, 'ANALYSES', dict(base.ANALYSES))
     calls = []
 

@@ -1,4 +1,5 @@
 """The analysis registry and the run source (plan Task 1), without a store."""
+from importlib import import_module
 from types import SimpleNamespace
 
 import pandas as pd
@@ -13,6 +14,9 @@ from frictionsim2d.analysis.source import RunSource
 @pytest.fixture
 def registry(monkeypatch):
     """A private copy of the registry: test analyses never leak out."""
+    # Register the catalogue first: copied before its lazy import, the copy would
+    # receive the registrations and later tests would see an empty registry.
+    import_module('frictionsim2d.analysis.catalogue')
     monkeypatch.setattr(base, 'ANALYSES', dict(base.ANALYSES))
     return base.ANALYSES
 

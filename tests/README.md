@@ -20,7 +20,7 @@ pytest -m lammps            # real lmp_serial runs, 56 tests / ~24 min — ask b
 pytest -m integration       # cross-package tier, 103 tests / ~3:20 -- NOTE it overrides the
                             # 'not lammps' default, so the real-LAMMPS smoke runs too
 pytest -m 'integration and not lammps'   # the same tier without LAMMPS: 97 tests / ~23 s
-pytest -m scenario          # fake-LAMMPS end-to-end tier, 16 tests, < 60 s (test_tier_budget asserts it)
+pytest -m scenario          # fake-LAMMPS end-to-end tier, 17 tests, < 60 s (a session check in scenarios/conftest.py)
 pytest -m ""                # everything
 pytest tests/builders       # one package
 pytest --cov=frictionsim2d --cov-report=term-missing tests/core   # coverage for one package

@@ -90,21 +90,30 @@ EXTRA_CASES: List[RenderCase] = [
 
 _SCENARIO_DIR = _REPO_ROOT / "tests" / "scenarios" / "configs"
 #: The scenario tier's matrix (``tests/scenarios/test_scenarios.py``): one row
-#: per (family, potential, condition). Three rows are existing ``EXTRA_CASES``
-#: (afm-hetero with the default lj interlayer, sheet-hetero twist, quench),
-#: reused rather than copied so the snapshot holds each build once.
+#: per (family, potential, condition). Substitutions for the planned matrix:
+#: - afm-hetero (lj = the default interlayer), sheet-hetero twist and quench
+#:   are the existing ``EXTRA_CASES`` afm_hetero_finite, sheet_hetero_twist and
+#:   quench_si, reused rather than copied so the snapshot holds each build once;
+#: - afm-freestanding + tersoff is a freestanding ``pes_tip`` run (the only
+#:   freestanding builder) on b-SiGe with 1989_SiGe.tersoff;
+#: - pes-sheet + kc is pes_sheet_ljg (lj_g): kc has bundled C/H parameters
+#:   only, and no carbon material ships;
+#: - MLIP (mace) reads configs/fake_mace.json, junk bytes nothing parses.
+#: Four rows skip ``aiida import`` in the tier (its ``AIIDA_ROWS``):
+#: afm_rebomos_angle_finite, afm_freestanding_tersoff, sheet_sw_ilp and
+#: afm_hetero_finite.
 SCENARIO_CASES: List[RenderCase] = [
     RenderCase(n, m, _SCENARIO_DIR / f"{n}.ini") for n, m in [
         ("afm_sw_load", "afm"),
         ("afm_rebomos_angle_finite", "afm"),
-        ("afm_freestanding_tersoff", "pes_tip"),
+        ("afm_freestanding_tersoff", "pes_tip"),   # afm-freestanding + tersoff
         ("indent_sw", "indent"),
         ("sheet_reaxff_speed", "sheetonsheet"),
         ("sheet_sw_ilp", "sheetonsheet"),
         ("flake_slide_sw", "sheetonsheet"),
         ("pes_tip_sw", "pes_tip"),
-        ("pes_sheet_ljg", "pes_sheet"),
-        ("sheet_mace_d3", "sheetonsheet"),
+        ("pes_sheet_ljg", "pes_sheet"),            # stands in for pes-sheet + kc
+        ("sheet_mace_d3", "sheetonsheet"),         # fake model file
     ]
 ] + [c for c in EXTRA_CASES if c.name in ("afm_hetero_finite", "sheet_hetero_twist", "quench_si")]
 

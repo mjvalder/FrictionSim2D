@@ -1,4 +1,5 @@
 """`FrictionSim2D analyse` list/run/show/export, with the store monkeypatched."""
+from importlib import import_module
 from types import SimpleNamespace
 
 import pandas as pd
@@ -16,6 +17,9 @@ TABLE = pd.DataFrame({'material': ['h_MoS2', 'h_WS2'], 'cof': [0.1, 0.2]})
 @pytest.fixture
 def probe(monkeypatch):
     """A registered throwaway analysis and a fake store around it."""
+    # Register the catalogue first: copied before its lazy import, the copy would
+    # receive the registrations and later tests would see an empty registry.
+    import_module('frictionsim2d.analysis.catalogue')
     monkeypatch.setattr(base, 'ANALYSES', dict(base.ANALYSES))
 
     @register

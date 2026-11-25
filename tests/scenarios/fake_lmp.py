@@ -16,7 +16,9 @@ commands only:
 
 The deck is walked once per element of the cartesian product of its ``index``
 variables' values; ``${NAME}``/``$NAME``/``$(v_NAME)`` expand as LAMMPS would
-(``index``/``string`` verbatim, ``equal`` and immediates as ``%.15g``). Commands
+(``index``/``string`` verbatim, ``equal`` and immediates as ``%.15g``; an
+``equal`` it cannot evaluate warns and expands to ``0``, and ``**`` is never
+evaluated). Commands
 inside an ``if`` are never run, so a halt registry is never written. Finally it
 writes a log (``log.lammps`` in ``cwd``, or ``-log``) with a ``Loop time`` and a
 ``Total wall time`` line.
@@ -31,6 +33,7 @@ import re
 import shlex
 import shutil
 import sys
+import warnings
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -120,7 +123,8 @@ class _Deck:
     def evaluate(self, expr: str) -> float:
         """A constant arithmetic expression over known ``v_`` references."""
         expr = _VREF.sub(lambda m: repr(self.number(m.group(1))), expr.strip())
-        if not _ARITHMETIC.match(expr):
+        # `**` refused: a constant like 9**9**9 would hang eval.
+        if not _ARITHMETIC.match(expr) or '**' in expr:
             raise _Unknown(expr)
         try:
             return float(eval(expr, {'__builtins__': {}}, {}))  # pylint: disable=eval-used
@@ -134,6 +138,8 @@ class _Deck:
             try:
                 return _fmt(self.evaluate(value))
             except _Unknown:
+                warnings.warn(f'fake_lmp: equal-style ${{{name}}} = {value!r} cannot be '
+                              "evaluated; substituted '0'", stacklevel=2)
                 return '0'
         return value
 

@@ -11,7 +11,7 @@ pytest -m lammps                         # real LAMMPS runs: 80 tests
 pytest -m 'integration and not lammps'   # cross-package tier: 105 tests
 pytest -m integration                    # the same tier PLUS the LAMMPS smoke: 116 tests
 pytest tests/aiida -m aiida              # the AiiDA tier: 291 tests, ~11 min, broker-less SQLite profile
-pytest -m scenario                       # fake-LAMMPS end-to-end tier: 16 tests, < 60 s
+pytest -m scenario                       # fake-LAMMPS end-to-end tier: 17 tests, < 60 s
 pytest -m ""                             # everything
 pytest tests/builders                    # one package
 pytest tests/core/test_config.py::test_name              # one test
@@ -111,7 +111,9 @@ files a deck would: each `fix ave/time ... file` (two header lines, five rows), 
 `print ... file|append`, each `write_data` (a copy of the last `read_data` input), once
 per value of the deck's `index` variables, plus a finished log. Only eight rows also run
 `aiida import` (one per family, plus the MLIP row): importing all of them breaks the
-60 s budget, which `test_tier_budget` asserts.
+60 s budget. The budget is a session check (`tests/scenarios/conftest.py`): the summed
+setup + call + teardown time of every selected scenario test, judged only when all of
+them finished; over budget, the session exits 1 with a summary line.
 
 ## Conventions
 
