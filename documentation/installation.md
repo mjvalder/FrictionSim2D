@@ -8,15 +8,28 @@ Environment setup, optional extras, verification, and troubleshooting.
 - LAMMPS executable available in your environment
 - Atomsk executable available in your environment (optional)
 
-Optional features require extra dependencies:
+## Install layers
 
-| Extra | Adds | Needs |
-|---|---|---|
-| `aiida` | the local provenance store (`aiida-core`) | Python 3.9+ |
-| `plotting` | `matplotlib`, `seaborn`, `scipy` | Python 3.9+ |
-| `gui` | the desktop builder (`ovito`, `PySide6`) | see [gui.md](gui.md) |
-| `agent` | the GUI [Assistant](assistant.md) (`pydantic-ai`, `huggingface_hub`) | Python 3.11+ |
-| `dev` | `pytest`, `pytest-cov`, `pylint`, `pytest-qt` | |
+The core install is enough to build simulations, generate HPC scripts and read results
+(`FrictionSim2D run`, `hpc`, `settings`, `fetch`, `--help`). Everything else is an extra;
+none of the extras is imported by the core package, so each can be added later.
+Quote the extras so the shell does not glob the brackets.
+
+| Layer | Command | Adds | Needs |
+|---|---|---|---|
+| core | `pip install -e .` | builders, LAMMPS decks, HPC scripts, `numpy`, `ase`, `pandas`, `pydantic` | Python 3.9+ |
+| + aiida | `pip install -e ".[aiida]"` | the local provenance store (`aiida-core`): `aiida`, `compare` | Python 3.9+ |
+| + plotting | `pip install -e ".[plotting]"` | `postprocess plot` (`matplotlib`, `seaborn`, `scipy`) | Python 3.9+ |
+| + gui | `pip install -e ".[gui]"` | the desktop builder (`ovito`, `PySide6`) | see [gui.md](gui.md) |
+| + agent | `pip install -e ".[agent]"` | the GUI [Assistant](assistant.md) (`pydantic-ai`, `anthropic`, `huggingface_hub`) | Python 3.11+ |
+| dev | `pip install -e ".[dev]"` | `pytest`, `pytest-cov`, `pylint`, `pytest-qt`, `hatchling`, `build` | |
+| all | `pip install -e ".[all]"` | aiida + plotting + gui + agent (not dev) | Python 3.11+ for the agent part |
+
+Layers combine, for example `pip install -e ".[aiida,plotting,dev]"`.
+`tests/repo/test_core_install.py` checks that the core install imports and serves `--help`
+with every extra blocked.
+
+External binaries: LAMMPS (`lmp`) is required to run simulations; Atomsk is optional.
 
 ## Install from source
 
@@ -26,16 +39,7 @@ From the project root:
 pip install -e .
 ```
 
-Install optional extras as needed. Quote the extras so the shell does not glob the
-brackets:
-
-```bash
-pip install -e ".[aiida]"
-pip install -e ".[plotting]"
-pip install -e ".[gui]"
-pip install -e ".[agent]"
-pip install -e ".[all]"
-```
+See [Install layers](#install-layers) for the extras.
 
 ## Verify the installation
 

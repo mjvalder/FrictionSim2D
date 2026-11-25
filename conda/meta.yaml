@@ -1,5 +1,6 @@
 {% set name = "FrictionSim2D" %}
-{% set version = "0.2.0" %}
+{% set data = load_file_regex(load_file='frictionsim2d/__init__.py', regex_pattern='__version__ = "(.+)"') %}
+{% set version = data.group(1) %}
 
 package:
   name: {{ name|lower }}-meta

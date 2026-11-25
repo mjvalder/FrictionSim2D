@@ -67,6 +67,8 @@ dev = [
   "pytest-cov>=4.0",
   "pylint>=2.15",
   "pytest-qt>=4.2",
+  "hatchling",  # tests/repo/test_wheel_contents.py builds a wheel
+  "build>=1.0",
 ]
 all = [
   "FrictionSim2D[aiida,plotting,gui,agent]",
