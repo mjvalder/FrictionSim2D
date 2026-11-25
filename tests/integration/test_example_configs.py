@@ -305,15 +305,19 @@ def test_the_box_matches_the_requested_sheet_footprint(example, build_example):
     """Within one lattice constant. The builder replicates whole unit cells and
     picks the count NEAREST the request, so a realised span sits on either side
     of it -- 98.71 for a requested 100 (h-MoS2), 59.13 for 60. Asserting only
-    "rounds up" would fail every example. A hetero stack is sized by its
+    "rounds up" would fail every example. A finite sheet's box is its [sub]
+    x/y, not the sheet's. A hetero stack is sized by its
     coincidence cell, not by [2D] x/y, so it is exempt."""
     if example.hetero:
         pytest.skip(f"{example.rel}: a hetero cell is sized by coincidence matching")
     raw = read_config(example.path)
-    requested_x = _first_float(raw.get('2D', {}).get('x'))
-    requested_y = _first_float(raw.get('2D', {}).get('y'))
+    # A finite sheet is an island: the periodic box is the substrate it rests on.
+    finite = str(raw.get('general', {}).get('finite_sheet', '')).lower() == 'true'
+    box_section = 'sub' if finite else '2D'
+    requested_x = _first_float(raw.get(box_section, {}).get('x'))
+    requested_y = _first_float(raw.get(box_section, {}).get('y'))
     if requested_x is None or requested_y is None:
-        pytest.skip(f"{example.rel} does not request a [2D] footprint")
+        pytest.skip(f"{example.rel} does not request a [{box_section}] footprint")
     result = build_example(example)
 
     for root, _build, texts in _builds_of(result):

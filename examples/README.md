@@ -31,7 +31,17 @@ the frozen copy in `tests/fixtures/examples/` instead.
 |---|---|---|
 | `afm/basic.ini` | tip + sheet + amorphous substrate; load and layer sweeps | |
 | `afm/flake.ini` | a shaped flake between the tip and the sheet | |
+| `afm/finite_sheet.ini` | a finite sheet (island, free edges) on a larger substrate | |
+| `afm/finite_sheet_spring_edges.ini` | the same island with spring-tethered edge atoms | settings |
+| `afm/crystalline_substrate.ini` | a crystalline Si substrate under a finite sheet | |
+| `afm/hetero.ini` | MoS2/WS2 heterostructure on a lattice-matched crystalline substrate | lammps |
+| `afm/hetero_finite.ini` | a finite MoS2/WS2 island on an amorphous substrate | lammps |
+| `afm/rebomos.ini` | the sheet described by REBO-MoS instead of SW | |
+| `afm/reaxff.ini` | the sheet described by ReaxFF instead of SW | |
 | `afm/mlip_full.ini` | one DeePMD instance over tip, sheet and substrate | MLIP model |
+
+`afm/basic.ini` is also the load- and scan-angle-sweep example: `force` and
+`scan_angle` lists there sweep inside one run directory.
 
 ## sheetonsheet/ -- a driven sheet over a sheet (`run sheetonsheet`)
 

@@ -1,0 +1,6 @@
+# Partial settings.yaml for examples/afm/finite_sheet_spring_edges.ini.
+# Pass it with --settings-file; every key left out keeps its default.
+geometry:
+  finite_sheet_afm_edge_mode: spring  # none (free edges, default) or spring
+  finite_sheet_edge_spring_k: 10.0    # spring constant, eV/Angstrom^2
+  finite_sheet_edge_width: 4.0        # edge band width, Angstrom (1-2 atoms)
