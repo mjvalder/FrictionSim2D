@@ -12,7 +12,7 @@ on-disk tree. The pieces this file pins live only in that seam:
   break the moment the tree is rsynced to a cluster);
 * the MLIP flavour token (``pot_deepmd-d3_<stem>``) reaches the directory name,
   so two dispersion settings of one material cannot overwrite each other;
-* the shipped ``examples/mlip/*.ini`` files still generate.
+* the shipped MLIP examples in ``examples/<mode>/`` files still generate.
 
 The model file is faked. Nothing here runs LAMMPS — the point is the generated
 tree, and a real DPA/MACE model is multi-GB and lives outside the repo.
@@ -26,18 +26,18 @@ import pytest
 from frictionsim2d.core.config import parse_config, write_config
 from frictionsim2d.potentials.manager import stage_model_file
 from frictionsim2d.run.simulate import run_simulations
+from tests.helpers.examples import discover
 
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples' / 'mlip'
+EXAMPLES = REPO_ROOT / 'examples'
 
-#: (example config, `run` model name). Both are single-component sheet cells —
-#: the only topology the v4 capability matrix leaves reachable.
-MLIP_EXAMPLES = [
-    ('pes_sheet_mlip.ini', 'pes_sheet'),
-    ('sheet_mlip_full.ini', 'sheetonsheet'),
-]
+#: (example config relative to examples/, `run` model name): the discovered MLIP
+#: examples that are single-component sheet cells. The AFM one is validated by
+#: test_examples_mlip.py, not generated here (it is a known-invalid cell there).
+MLIP_EXAMPLES = [(e.rel, e.model) for e in discover()
+                 if e.mlip and e.model in ('sheetonsheet', 'pes_sheet')]
 
 
 def _fake_model(tmp_path: Path, name: str = 'dpa_fake.pth') -> Path:
@@ -63,13 +63,13 @@ def _config_pointing_at(example: str, tmp_path: Path) -> Path:
     """Rewrite a shipped example so `pot_path` names a local fake model."""
     raw = parse_config(EXAMPLES / example)
     raw['2D']['pot_path'] = str(_fake_model(tmp_path))
-    return write_config(raw, tmp_path / example)
+    return write_config(raw, tmp_path / Path(example).name)
 
 
 @pytest.mark.parametrize('example, model', MLIP_EXAMPLES)
 def test_shipped_mlip_example_generates_end_to_end(example, model, tmp_path,
                                                    monkeypatch):
-    """`run <model> examples/mlip/<example>` must produce a tree, not a stack trace."""
+    """`run <model> examples/<mode>/<mlip example>` must produce a tree, not a stack trace."""
     monkeypatch.chdir(REPO_ROOT)
     config_path = _config_pointing_at(example, tmp_path)
 
@@ -150,7 +150,7 @@ def test_the_deck_carries_a_full_element_list(tmp_path, monkeypatch):
     so it is worth pinning outside the unit tests too.
     """
     monkeypatch.chdir(REPO_ROOT)
-    config_path = _config_pointing_at('sheet_mlip_full.ini', tmp_path)
+    config_path = _config_pointing_at('sheetonsheet/mlip_full.ini', tmp_path)
 
     created, _, _, _ = run_simulations(
         config_file=str(config_path), model='sheetonsheet', settings_file=None,

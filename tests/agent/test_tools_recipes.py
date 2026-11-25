@@ -113,7 +113,7 @@ def test_the_afm_note_lists_what_it_filled_in(deps):
     setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
                                     loads_nN=[5, 10, 20, 30, 50]))
     cs = deps.pending[-1]
-    note = next(n for n in cs.notes if 'examples/afm_config.ini' in n)
+    note = next(n for n in cs.notes if 'examples/afm/basic.ini' in n)
     for text in ('2D.x=100', '2D.y=100', '2D.layers=[1]', 'tip.r=25', 'sub.thickness=12',
                  'change if needed'):
         assert text in note
@@ -126,7 +126,7 @@ def test_request_and_document_values_beat_the_example_defaults(deps):
     ops = _ops(deps)
     assert (ops[('2D', 'x')], ops[('2D', 'y')], ops[('2D', 'layers')]) == (150, 120, [2])
     assert ('tip', 'r') not in ops
-    note = next(n for n in deps.pending[-1].notes if 'examples/afm_config.ini' in n)
+    note = next(n for n in deps.pending[-1].notes if 'examples/afm/basic.ini' in n)
     assert '2D.x' not in note and 'tip.r' not in note and 'sub.thickness=12' in note
 
 
@@ -138,15 +138,15 @@ def test_request_tip_radius_beats_the_default(deps):
 @pytest.mark.parametrize('setup, request_, source, expected', [
     ('setup_afm', AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
                                   loads_nN=[5, 10, 20, 30, 50]),
-     'afm_config.ini', {('2D', 'x'): 100, ('2D', 'y'): 100, ('2D', 'layers'): [1],
+     'afm/basic.ini', {('2D', 'x'): 100, ('2D', 'y'): 100, ('2D', 'layers'): [1],
                         ('tip', 'r'): 25, ('sub', 'thickness'): 12}),
     ('setup_sheet', SheetSetupRequest(materials=['h-MoS2'], potential_type='sw',
                                       pressures_GPa=[1]),
-     'sheet_config.ini', {('2D', 'x'): 100, ('2D', 'layers'): [3]}),
-    ('setup_indent', None, 'indent_config.ini', {('2D', 'x'): 60, ('tip', 'r'): 15}),
+     'sheetonsheet/basic.ini', {('2D', 'x'): 100, ('2D', 'layers'): [3]}),
+    ('setup_indent', None, 'indent/basic.ini', {('2D', 'x'): 60, ('tip', 'r'): 15}),
     ('setup_pes_tip', PESTipSetupRequest(materials=['h-MoS2'], potential_type='sw', load_nN=2),
-     'pes_tip_config.ini', {('2D', 'x'): 100, ('2D', 'y'): 100, ('tip', 'r'): 25}),
-    ('setup_pes_sheet', None, 'pes_sheet_config.ini', {('2D', 'x'): 30, ('2D', 'layers'): [2]}),
+     'pes-tip/basic.ini', {('2D', 'x'): 100, ('2D', 'y'): 100, ('tip', 'r'): 25}),
+    ('setup_pes_sheet', None, 'pes-sheet/basic.ini', {('2D', 'x'): 30, ('2D', 'layers'): [2]}),
 ])
 def test_each_model_uses_its_own_example(deps, setup, request_, source, expected):
     from frictionsim2d.agent.tools import setup as tools
@@ -172,7 +172,7 @@ def test_example_defaults_match_the_example_files():
     examples = Path(__file__).resolve().parents[2] / 'examples'
     for _model, (source, values) in EXAMPLE_DEFAULTS.items():
         parser = configparser.ConfigParser(inline_comment_prefixes=('#',))
-        parser.read(examples / Path(source).name)
+        parser.read(examples.parent / source)
         for (section, key), value in values.items():
             raw = json.loads(parser[section][key])
             if key == 'layers':
@@ -182,7 +182,7 @@ def test_example_defaults_match_the_example_files():
 
 
 def test_pes_tip_override_is_explained(deps):
-    """examples/pes_tip_config.ini's 60 x 60 sheet breaks the 2x-tip rule; the
+    """examples/pes-tip/basic.ini's 60 x 60 sheet breaks the 2x-tip rule; the
     assistant raises it and says why instead of copying a failing value."""
     from frictionsim2d.agent.tools import setup as tools
     tools.setup_pes_tip(deps, tools.PESTipSetupRequest(materials=['h-MoS2'],

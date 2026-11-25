@@ -52,7 +52,7 @@ _PBS_PHASE_RE = re.compile(r'-in\s+"\$SIM/(lammps/\w+\.in)"')
 
 
 @pytest.fixture(scope='module', name='hpc_tree')
-def _hpc_tree(build_example, tmp_path_factory):
+def _hpc_tree(build_frozen, tmp_path_factory):
     """Return ``hpc_tree(name, model, scheduler) -> simulation root``.
 
     The tree is copied before generation so the two schedulers cannot overwrite
@@ -64,7 +64,7 @@ def _hpc_tree(build_example, tmp_path_factory):
     def hpc_tree(name: str, model: str, scheduler: str) -> Path:
         key = (name, scheduler)
         if key not in cache:
-            source = Path(build_example(name, model).simulation_root)
+            source = Path(build_frozen(name, model).simulation_root)
             root = tmp_path_factory.mktemp(f"{model}_{scheduler}") / source.name
             shutil.copytree(source, root)
             settings = GlobalSettings()

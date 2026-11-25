@@ -347,29 +347,29 @@ FIELD_MAP = {
 #: request nor the document has a value; the card names the source.
 #: tests/agent/test_tools_recipes.py checks every value against its file.
 EXAMPLE_DEFAULTS = {
-    # examples/afm_config.ini sweeps layers [1,2,3]; one layer is the default here.
-    'afm': ('examples/afm_config.ini', {
+    # examples/afm/basic.ini sweeps layers [1,2,3]; one layer is the default here.
+    'afm': ('examples/afm/basic.ini', {
         ('2D', 'x'): 100, ('2D', 'y'): 100, ('2D', 'layers'): [1],
         ('tip', 'r'): 25, ('sub', 'thickness'): 12}),
-    # examples/sheet_config.ini: three layers is SheetOnSheetSimulation.MIN_LAYERS.
-    'sheetonsheet': ('examples/sheet_config.ini', {
+    # examples/sheetonsheet/basic.ini: three layers is SheetOnSheetSimulation.MIN_LAYERS.
+    'sheetonsheet': ('examples/sheetonsheet/basic.ini', {
         ('2D', 'x'): 100, ('2D', 'y'): 100, ('2D', 'layers'): [3]}),
-    # examples/indent_config.ini sweeps layers [1, 2]; one layer is the default here.
-    'indent': ('examples/indent_config.ini', {
+    # examples/indent/basic.ini sweeps layers [1, 2]; one layer is the default here.
+    'indent': ('examples/indent/basic.ini', {
         ('2D', 'x'): 60, ('2D', 'y'): 60, ('2D', 'layers'): [1],
         ('tip', 'r'): 15, ('sub', 'thickness'): 12}),
-    # examples/pes_tip_config.ini
-    'pes_tip': ('examples/pes_tip_config.ini', {
+    # examples/pes-tip/basic.ini
+    'pes_tip': ('examples/pes-tip/basic.ini', {
         ('2D', 'x'): 60, ('2D', 'y'): 60, ('2D', 'layers'): [1],
         ('tip', 'r'): 25, ('sub', 'thickness'): 12}),
-    # examples/pes_sheet_config.ini: a frozen bottom layer + a scanned top one.
-    'pes_sheet': ('examples/pes_sheet_config.ini', {
+    # examples/pes-sheet/basic.ini: a frozen bottom layer + a scanned top one.
+    'pes_sheet': ('examples/pes-sheet/basic.ini', {
         ('2D', 'x'): 30, ('2D', 'y'): 30, ('2D', 'layers'): [2]}),
 }
 
 
 #: Example values that would fail validation, replaced with the reason shown on
-#: the change note. examples/pes_tip_config.ini (fixture data, left as is) uses a
+#: the change note. examples/pes-tip/basic.ini (fixture data, left as is) uses a
 #: 60 x 60 Angstrom sheet with [tip] r = 25, below the 2x-tip-diameter footprint
 #: (100 Angstrom) the AFM models require.
 EXAMPLE_OVERRIDES = {
@@ -398,7 +398,7 @@ def _tip_and_substrate_ops(deps, probe, request: BaseModel) -> Tuple[List[Op], L
 
     A blank AFM-family document has no tip or substrate material, so without
     this no setup could ever validate. The defaults (Si tip, amorphous Si
-    substrate) are what examples/afm_config.ini uses.
+    substrate) are what examples/afm/basic.ini uses.
     """
     ops, described = [], []
     for field_name, section, label, extra in _TIP_PARTS:

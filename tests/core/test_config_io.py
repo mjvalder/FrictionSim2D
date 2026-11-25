@@ -17,7 +17,7 @@ from frictionsim2d.core.config import parse_config
 from frictionsim2d.core.config import format_ini_value, load_settings, read_config, write_config
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[2] / 'examples'
-EXAMPLE_CONFIGS = sorted(EXAMPLES_DIR.glob('*.ini'))
+EXAMPLE_CONFIGS = sorted(EXAMPLES_DIR.rglob('*.ini'))
 
 
 def test_examples_directory_is_not_empty():
@@ -25,14 +25,14 @@ def test_examples_directory_is_not_empty():
     assert EXAMPLE_CONFIGS, f"no .ini configs found under {EXAMPLES_DIR}"
 
 
-@pytest.mark.parametrize('config_path', EXAMPLE_CONFIGS, ids=lambda p: p.name)
+@pytest.mark.parametrize('config_path', EXAMPLE_CONFIGS, ids=lambda p: p.relative_to(EXAMPLES_DIR).as_posix())
 def test_ini_round_trip_is_semantically_identical(config_path, tmp_path):
     original = parse_config(config_path)
     out = write_config(original, tmp_path / config_path.name)
     assert parse_config(out) == original
 
 
-@pytest.mark.parametrize('config_path', EXAMPLE_CONFIGS, ids=lambda p: p.name)
+@pytest.mark.parametrize('config_path', EXAMPLE_CONFIGS, ids=lambda p: p.relative_to(EXAMPLES_DIR).as_posix())
 def test_ini_round_trip_is_stable_on_a_second_pass(config_path, tmp_path):
     """Writing an already-written config must not drift further."""
     original = parse_config(config_path)

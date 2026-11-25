@@ -310,10 +310,10 @@ def test_pes_sheet_ilp_z_relax_runs(tmp_path, monkeypatch):
 # The shipped example (fast, no LAMMPS run)
 # --------------------------------------------------------------------------
 
-def test_example_interlayer_builds(build_example):
+def test_example_interlayer_builds(build_frozen):
     """tests/fixtures/examples/sheet_config_interlayer.ini: three runs, one per style, all on
     the reaction-force branch (comparison mode), each with its own term."""
-    result = build_example("sheet_config_interlayer.ini", "sheetonsheet")
+    result = build_frozen("sheet_config_interlayer.ini", "sheetonsheet")
     assert result.ok, result.render()
     members = sorted(Path(p) for p in result.created)
     assert len(members) == 3

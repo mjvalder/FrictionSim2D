@@ -5,7 +5,7 @@ Task 2 owns the full render set; this covers what ``examples/*.ini`` trigger.
 import pytest
 
 from tests.helpers.deck_snapshot import render, render_set
-from tests.helpers.examples import CASES, FROZEN_EXAMPLES, HETERO, build
+from tests.helpers.examples import FROZEN_CASES as CASES, FROZEN_EXAMPLES, FROZEN_HETERO as HETERO, build
 
 _CASES = CASES + [HETERO]
 

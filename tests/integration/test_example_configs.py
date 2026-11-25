@@ -44,14 +44,12 @@ import pytest
 from frictionsim2d.core.config import read_config
 from frictionsim2d.run.expand import count_expansion
 from tests.helpers.examples import (
-    CAMPAIGNS, CASES, EXAMPLES, HETERO, REPO_ROOT,
+    CAMPAIGN_MIN_ENTRIES, REPO_ROOT, friction_examples, list_entries,
 )
 
 pytestmark = pytest.mark.integration
 
 LMP = shutil.which('lmp_serial')
-
-ALL_BUILT = CASES + [(n, m, 1) for n, m, _ in CAMPAIGNS]
 
 #: LAMMPS commands that take a group-ID, and which argument it is.
 #: ``fix``/``compute``/``dump`` are ``<cmd> ID group-ID style ...``; ``velocity``
@@ -237,33 +235,51 @@ def _builds_of(result) -> List[Tuple[Path, Path, List[Tuple[Path, str]]]]:
 # The tests
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize('name,model,members', CASES, ids=[c[0] for c in CASES])
-def test_every_example_config_builds_the_number_of_members_it_declares(
-        name, model, members, build_example):
+def _param(example):
+    """Hetero builds shell out to lmp_serial (hetero_stack.run_lammps): the
+    skipif is what conftest derives the ``lammps`` marker from."""
+    marks = [pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")] if example.hetero else []
+    return pytest.param(example, id=example.rel, marks=marks)
+
+
+#: Every live friction example. MLIP ones name multi-GB model files that are not
+#: in the repo; tests/integration/test_examples_mlip.py and
+#: test_mlip_end_to_end.py cover them with a stub model.
+EXAMPLES_BUILT = [_param(e) for e in friction_examples() if not e.mlip]
+
+
+def _expected_members(example) -> int:
+    if example.campaign:
+        return 1  # the one-material copy (decision D4)
+    return count_expansion(read_config(example.path), example.model,
+                           base_dir=REPO_ROOT).configs
+
+
+@pytest.mark.parametrize('example', EXAMPLES_BUILT)
+def test_every_example_config_builds_the_number_of_members_it_expands_to(
+        example, build_example):
     """`generate_package` returns ok=False rather than raising when every member
     fails validation, which is how `indent_campaign.ini` sat 156-for-156 broken
     with nothing noticing."""
-    result = build_example(name, model)
+    result = build_example(example)
     assert result.ok, result.render()
-    assert len(result.created) == members, [str(p) for p in result.created]
+    assert len(result.created) == _expected_members(example), [str(p) for p in result.created]
 
 
-@pytest.mark.parametrize('name,model,members', CAMPAIGNS,
-                         ids=[c[0] for c in CAMPAIGNS])
-def test_every_campaign_expands_to_its_full_material_list(
-        name, model, members):
+@pytest.mark.parametrize('example', [e for e in friction_examples() if e.campaign],
+                         ids=lambda e: e.rel)
+def test_every_campaign_expands_to_its_full_material_list(example):
     """Counted, not built (decision D4): 156 real members cost 98 s to build and
     render the same script shape. `count_expansion` reads the real file."""
-    summary = count_expansion(read_config(EXAMPLES / name), model,
+    summary = count_expansion(read_config(example.path), example.model,
                               base_dir=REPO_ROOT)
-    assert summary.configs == members, summary.render()
+    listed = list_entries(example.path.read_text(encoding='utf-8'))
+    assert summary.configs == listed > CAMPAIGN_MIN_ENTRIES, summary.render()
 
 
-@pytest.mark.parametrize('name,model,_members', ALL_BUILT,
-                         ids=[c[0] for c in ALL_BUILT])
-def test_every_pair_coeff_names_an_atom_type_the_system_has(
-        name, model, _members, build_example):
-    for root, build, texts in _builds_of(build_example(name, model)):
+@pytest.mark.parametrize('example', EXAMPLES_BUILT)
+def test_every_pair_coeff_names_an_atom_type_the_system_has(example, build_example):
+    for root, build, texts in _builds_of(build_example(example)):
         n_types = _atom_type_count(root, [x for _s, x in texts])
         for script, text in texts:
             for lo_field, hi_field, _rest in _PAIR_COEFF_RE.findall(text):
@@ -273,11 +289,9 @@ def test_every_pair_coeff_names_an_atom_type_the_system_has(
                         f"type {token}, but the system has {n_types}")
 
 
-@pytest.mark.parametrize('name,model,_members', ALL_BUILT,
-                         ids=[c[0] for c in ALL_BUILT])
-def test_every_group_a_fix_names_is_defined(name, model, _members,
-                                            build_example):
-    for _root, build, texts in _builds_of(build_example(name, model)):
+@pytest.mark.parametrize('example', EXAMPLES_BUILT)
+def test_every_group_a_fix_names_is_defined(example, build_example):
+    for _root, build, texts in _builds_of(build_example(example)):
         for script, text in texts:
             defined = _groups_defined(text)
             for command, group in _groups_used(text):
@@ -286,20 +300,21 @@ def test_every_group_a_fix_names_is_defined(name, model, _members,
                     f"'{group}', which nothing defines")
 
 
-@pytest.mark.parametrize('name,model,_members', ALL_BUILT,
-                         ids=[c[0] for c in ALL_BUILT])
-def test_the_box_matches_the_requested_sheet_footprint(name, model, _members,
-                                                       build_example):
+@pytest.mark.parametrize('example', EXAMPLES_BUILT)
+def test_the_box_matches_the_requested_sheet_footprint(example, build_example):
     """Within one lattice constant. The builder replicates whole unit cells and
     picks the count NEAREST the request, so a realised span sits on either side
     of it -- 98.71 for a requested 100 (h-MoS2), 59.13 for 60. Asserting only
-    "rounds up" would fail every example."""
-    result = build_example(name, model)
-    raw = read_config(EXAMPLES / name)
+    "rounds up" would fail every example. A hetero stack is sized by its
+    coincidence cell, not by [2D] x/y, so it is exempt."""
+    if example.hetero:
+        pytest.skip(f"{example.rel}: a hetero cell is sized by coincidence matching")
+    raw = read_config(example.path)
     requested_x = _first_float(raw.get('2D', {}).get('x'))
     requested_y = _first_float(raw.get('2D', {}).get('y'))
     if requested_x is None or requested_y is None:
-        pytest.skip(f"{name} does not request a [2D] footprint")
+        pytest.skip(f"{example.rel} does not request a [2D] footprint")
+    result = build_example(example)
 
     for root, _build, texts in _builds_of(result):
       for script, text in texts:
@@ -313,14 +328,12 @@ def test_the_box_matches_the_requested_sheet_footprint(name, model, _members,
                 f"unit cell away from the requested {requested}")
 
 
-@pytest.mark.parametrize('name,model,_members', ALL_BUILT,
-                         ids=[c[0] for c in ALL_BUILT])
-def test_every_potential_file_a_pair_coeff_names_resolves(name, model, _members,
-                                                          build_example):
+@pytest.mark.parametrize('example', EXAMPLES_BUILT)
+def test_every_potential_file_a_pair_coeff_names_resolves(example, build_example):
     """From the simulation root, not the script's directory -- the same rule
     `test_orchestration.py` applies to read_data. A path that resolves only
     relative to the script would make every generated job fail at step 0."""
-    for root, script in _scripts_of(build_example(name, model)):
+    for root, script in _scripts_of(build_example(example)):
         refs = _potential_refs(_script_text(root, script))
         assert refs, f"{script.name}: no many-body potential referenced"
         for ref in refs:
@@ -330,30 +343,6 @@ def test_every_potential_file_a_pair_coeff_names_resolves(name, model, _members,
             assert not (script.parent / ref).is_file(), (
                 f"{script.name}: '{ref}' resolves from the script directory; "
                 f"paths must be simulation-root-relative")
-
-
-@pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")
-def test_the_hetero_example_builds_and_renders(build_example):
-    """A hetero build runs lmp_serial as a subprocess (hetero_stack.run_lammps),
-    so this one case cannot live in the LAMMPS-free fast tier."""
-    name, model, members = HETERO
-    result = build_example(name, model)
-    assert result.ok, result.render()
-    assert len(result.created) == members
-
-    for root, build, texts in _builds_of(result):
-        n_types = _atom_type_count(root, [x for _s, x in texts])
-        for script, text in texts:
-            defined = _groups_defined(text)
-            for lo_field, hi_field, _rest in _PAIR_COEFF_RE.findall(text):
-                for token in _type_tokens(lo_field) + _type_tokens(hi_field):
-                    assert 1 <= token <= n_types, (build.name, script.name,
-                                                   token, n_types)
-            for command, group in _groups_used(text):
-                assert group in defined, (build.name, script.name, command,
-                                          group)
-            for ref in _potential_refs(text):
-                assert (root / ref).is_file(), (build.name, script.name, ref)
 
 
 # --------------------------------------------------------------------------

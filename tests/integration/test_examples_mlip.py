@@ -1,4 +1,4 @@
-"""Every shipped ``examples/mlip/*.ini`` must actually validate.
+"""Every shipped MLIP example (any ``examples/<mode>/*.ini`` with an MLIP pot_type) must validate.
 
 These files are the documented entry point for MLIP runs
 (``documentation/mlip.md``), so a config that no longer parses is a broken
@@ -49,22 +49,20 @@ from frictionsim2d.run.simulate import _select_afm_builder_cls, _select_sheet_bu
 
 pytestmark = pytest.mark.integration
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES_MLIP = REPO_ROOT / 'examples' / 'mlip'
-
-#: Which ``FrictionSim2D run <model>`` subcommand each example is written for.
-#: Kept explicit rather than inferred from the filename: the routing decides
-#: which pydantic model validates the file, so a wrong guess would silently
-#: test the wrong thing.
-EXAMPLE_MODELS = {
-    'sheet_mlip_full.ini': 'sheetonsheet',
-    'pes_sheet_mlip.ini': 'pes_sheet',
-    'afm_mlip_full.ini': 'afm',
-}
+from tests.helpers.examples import EXAMPLES, discover
+#: Every live MLIP example, wherever its mode folder is. The folder is the
+#: ``FrictionSim2D run`` subcommand, so it decides which pydantic model
+#: validates the file (tests/helpers/examples.py).
+MLIP_EXAMPLES = [e for e in discover() if e.mlip]
+EXAMPLE_MODELS = {e.rel: e.model for e in MLIP_EXAMPLES}
 
 
 def _example_paths():
-    return sorted(EXAMPLES_MLIP.glob('*.ini'))
+    return [e.path for e in MLIP_EXAMPLES]
+
+
+def _rel(path: Path) -> str:
+    return path.relative_to(EXAMPLES).as_posix()
 
 
 #: Examples kept as they are although they fail validation, by user decision
@@ -74,16 +72,16 @@ def _example_paths():
 #: its 30x30 sheet under an r=15 tip. strict=True: the day the cell is fixed,
 #: these xfails turn into failures and the marker must be removed.
 KNOWN_INVALID = {
-    'afm_mlip_full.ini': 'sheet footprint 30x30 < 2x tip diameter (r=15); kept for the AFM gate',
+    'afm/mlip_full.ini': 'sheet footprint 30x30 < 2x tip diameter (r=15); kept for the AFM gate',
 }
 
 
 def _validated_example_params():
     """The examples, with KNOWN_INVALID ones as strict xfails (tests that validate)."""
-    return [pytest.param(p, id=p.name, marks=pytest.mark.xfail(
-                reason=KNOWN_INVALID[p.name], strict=True,
+    return [pytest.param(p, id=_rel(p), marks=pytest.mark.xfail(
+                reason=KNOWN_INVALID[_rel(p)], strict=True,
                 raises=ValidationError))
-            if p.name in KNOWN_INVALID else pytest.param(p, id=p.name)
+            if _rel(p) in KNOWN_INVALID else pytest.param(p, id=_rel(p))
             for p in _example_paths()]
 
 
@@ -117,15 +115,15 @@ def _sheets_of(config_obj):
     return sheets
 
 
-def test_examples_mlip_directory_is_populated():
-    """Guard the glob: an empty directory would make every test below vacuous."""
-    assert sorted(p.name for p in _example_paths()) == sorted(EXAMPLE_MODELS)
+def test_mlip_examples_exist():
+    """Guard the discovery: no MLIP example would make every test below vacuous."""
+    assert MLIP_EXAMPLES, "no examples/<mode>/*.ini names an MLIP pot_type"
 
 
 @pytest.mark.parametrize('path', _validated_example_params())
 def test_example_config_is_valid(path, tmp_path):
     """Each example parses, expands and validates, cell rules included."""
-    model = EXAMPLE_MODELS[path.name]
+    model = EXAMPLE_MODELS[_rel(path)]
     base = parse_config(path)
     configs = expand_config_sweeps(base)
     assert configs, f"{path.name} expanded to no runs"
@@ -133,8 +131,8 @@ def test_example_config_is_valid(path, tmp_path):
     settings = load_settings()
     for run_dict in configs:
         assert _stub_models(run_dict, tmp_path) >= 1, (
-            f"{path.name} names no MLIP sheet -- it does not belong in "
-            f"examples/mlip/"
+            f"{path.name} names no MLIP sheet -- it is not an MLIP example"
+            f""
         )
         run_dict['settings'] = settings.model_dump()
 
@@ -174,7 +172,7 @@ def test_example_declares_explicit_lat_c(path, tmp_path):
     _stub_models(run_dict, tmp_path)
     run_dict['settings'] = load_settings().model_dump()
 
-    model = EXAMPLE_MODELS[path.name]
+    model = EXAMPLE_MODELS[_rel(path)]
     cls = (AFMSimulationConfig if model in AFM_LIKE_MODELS
            else SheetOnSheetSimulationConfig)
     for sheet in _sheets_of(cls(**run_dict)):
@@ -195,7 +193,7 @@ def test_example_satisfies_its_builder_layer_floor(path, tmp_path):
     scan needs exactly 2. Every one of those raises only from ``build()``,
     i.e. after a full geometry build -- far too late for an example file.
     """
-    model = EXAMPLE_MODELS[path.name]
+    model = EXAMPLE_MODELS[_rel(path)]
     run_dict = expand_config_sweeps(parse_config(path))[0]
     _stub_models(run_dict, tmp_path)
     run_dict['settings'] = load_settings().model_dump()
@@ -229,7 +227,7 @@ def test_example_gets_its_own_flavour_directory(path):
     directory) would silently collide with the plain run.
     """
     run_dict = expand_config_sweeps(parse_config(path))[0]
-    model = EXAMPLE_MODELS[path.name]
+    model = EXAMPLE_MODELS[_rel(path)]
     rel = output_dir_for(run_dict, model)
     flavors = [f for f in map(mlip_flavor_from_pot_token, rel.parts) if f]
     assert len(flavors) == 1, f"{path.name}: no MLIP pot_ segment in {rel}"
@@ -260,7 +258,7 @@ def test_example_is_uniformly_one_mlip(path, tmp_path):
     _stub_models(run_dict, tmp_path)
     run_dict['settings'] = load_settings().model_dump()
 
-    model = EXAMPLE_MODELS[path.name]
+    model = EXAMPLE_MODELS[_rel(path)]
     if model in AFM_LIKE_MODELS:
         config_obj = AFMSimulationConfig(**run_dict)
         components = [('tip', config_obj.tip), ('sub', config_obj.sub)]

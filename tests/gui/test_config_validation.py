@@ -18,41 +18,39 @@ from frictionsim2d.core.config import (
 )
 from frictionsim2d.gui.config_validation import preflight_paths, validate_config
 from tests.helpers.config_issues import issues_for
+from tests.helpers.examples import FROZEN_EXAMPLES, friction_examples
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = REPO_ROOT / 'examples'
+#: Tests that name one config read the FROZEN copy (exact contents pinned);
+#: the parametrized tests below read every LIVE example, discovered.
+EXAMPLES = FROZEN_EXAMPLES
+LIVE_INDENT = REPO_ROOT / 'examples' / 'indent' / 'basic.ini'
 
-# Which root model each example config belongs to.
-AFM_EXAMPLES = {
-    'afm_config.ini', 'afm_flake_config.ini', 'indent_config.ini',
-    'pes_tip_config.ini', 'afm_freestanding_pes_config.ini',
-    'indent_campaign.ini', 'afm_freestanding_pes_campaign.ini',
-}
+#: ``run`` models whose root config is AFMSimulationConfig.
+_AFM_MODELS = {'afm', 'indent', 'pes_tip'}
 
-#: Configs that construct cleanly from the repo root.
-#:
-#: `afm_config.ini` and `sheet_config.ini` moved here from UNRESOLVABLE_EXAMPLES
-#: in `8129508`: both used to point their cif_path/pot_path outside the repo
-#: (`run/cif/{mat}.cif`, `../tribo_2D/...`) and neither could build at all, which
-#: is why the GUI listed them as unresolvable. They are now self-contained.
-BUILDABLE_EXAMPLES = [
-    'afm_config.ini', 'afm_flake_config.ini', 'afm_freestanding_pes_config.ini',
-    'indent_config.ini', 'pes_sheet_config.ini', 'pes_tip_config.ini',
-    'sheet_config.ini', 'sheet_config_interlayer.ini',
-]
-
-#: Configs that cannot construct: a missing file, or an unexpanded {mat}.
-UNRESOLVABLE_EXAMPLES = [
-    'indent_campaign.ini', 'afm_freestanding_pes_campaign.ini',
-    # Pair sweep: {mat1}/{mat2} must report as unexpanded_template, NOT as
-    # missing_file -- the latter is a hard error that would block the GUI's
-    # Render/Generate for every pair config.
-    'hetero_pair_sweep.ini',
-]
+#: Live friction examples, MLIP ones excluded: their multi-GB model files are
+#: not in the repo (tests/integration/test_examples_mlip.py stubs them).
+_LIVE = [e for e in friction_examples() if not e.mlip]
 
 
-def _model_for(name: str):
-    return AFMSimulationConfig if name in AFM_EXAMPLES else SheetOnSheetSimulationConfig
+def _is_template(example) -> bool:
+    """A ``{mat}``/``{mat1}`` placeholder in a value (comments do not count):
+    resolvable only after list expansion."""
+    lines = example.path.read_text(encoding='utf-8').splitlines()
+    return any('{mat' in line.split('#', 1)[0] for line in lines)
+
+
+BUILDABLE_EXAMPLES = [e for e in _LIVE if not _is_template(e)]
+#: Configs that cannot construct as written: an unexpanded {mat}. The pair
+#: sweep's {mat1}/{mat2} must report as unexpanded_template, NOT as
+#: missing_file -- the latter is a hard error that would block the GUI's
+#: Render/Generate for every pair config.
+UNRESOLVABLE_EXAMPLES = [e for e in _LIVE if _is_template(e)]
+
+
+def _model_for(model: str):
+    return AFMSimulationConfig if model in _AFM_MODELS else SheetOnSheetSimulationConfig
 
 
 def _raw(name: str):
@@ -61,35 +59,34 @@ def _raw(name: str):
     return raw
 
 
-#: Not friction configs: `run quench` reads a [quench] section (the GUI
-#: "Amorphous block" family validates it, Task 7b).
-QUENCH_EXAMPLES = ['quench_config.ini']
+def _raw_example(example):
+    raw = parse_config(example.path)
+    raw['settings'] = load_settings(example.settings).model_dump()
+    return raw
 
 
-def test_the_two_example_lists_cover_every_config():
-    on_disk = {p.name for p in EXAMPLES.glob('*.ini')}
-    assert (set(BUILDABLE_EXAMPLES) | set(UNRESOLVABLE_EXAMPLES)
-            | set(QUENCH_EXAMPLES)) == on_disk
+def test_both_example_lists_are_populated():
+    assert BUILDABLE_EXAMPLES and UNRESOLVABLE_EXAMPLES
 
 
-@pytest.mark.parametrize('name', BUILDABLE_EXAMPLES)
-def test_buildable_examples_validate(name, monkeypatch):
+@pytest.mark.parametrize('example', BUILDABLE_EXAMPLES, ids=lambda e: e.rel)
+def test_buildable_examples_validate(example, monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     # A sweep example (interlayer_style = [lj, lj_g, ilp]) is validated member
     # by member, as the builder sees it; a plain config expands to itself.
     from frictionsim2d.run.expand import expand_config_sweeps
-    members = expand_config_sweeps(_raw(name))
+    members = expand_config_sweeps(_raw_example(example))
     assert members
     for member in members:
-        result = validate_config(member, _model_for(name))
+        result = validate_config(member, _model_for(example.model))
         assert result.ok, result.render()
         assert result.config is not None
 
 
-@pytest.mark.parametrize('name', UNRESOLVABLE_EXAMPLES)
-def test_unresolvable_examples_report_issues_instead_of_raising(name, monkeypatch):
+@pytest.mark.parametrize('example', UNRESOLVABLE_EXAMPLES, ids=lambda e: e.rel)
+def test_unresolvable_examples_report_issues_instead_of_raising(example, monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
-    result = validate_config(_raw(name), _model_for(name))
+    result = validate_config(_raw_example(example), _model_for(example.model))
     assert not result.ok
     assert result.config is None
     # Every issue must be locatable, otherwise the GUI has nothing to decorate.
@@ -192,35 +189,38 @@ def _repo_relative(raw):
 
 
 class TestBaseDirResolution:
-    """Config-relative paths must resolve from any working directory."""
+    """Config-relative paths must resolve from any working directory.
+
+    Reads the LIVE indent example: its portable ``materials/...`` names are the
+    subject (the frozen copy still spells the legacy ``examples/materials/...``)."""
 
     def test_relative_paths_fail_from_an_unrelated_cwd(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        result = validate_config(_repo_relative(_raw('indent_config.ini')),
+        result = validate_config(_repo_relative(_raw(LIVE_INDENT)),
                                  AFMSimulationConfig)
         assert not result.ok
         assert any(i.kind == 'missing_file' for i in result.issues)
 
     def test_library_names_resolve_from_any_cwd(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        result = validate_config(_raw('indent_config.ini'), AFMSimulationConfig)
+        result = validate_config(_raw(LIVE_INDENT), AFMSimulationConfig)
         assert result.ok, result.render()
 
     def test_base_dir_makes_them_resolve(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = validate_config(
-            _repo_relative(_raw('indent_config.ini')), AFMSimulationConfig, base_dir=REPO_ROOT
+            _repo_relative(_raw(LIVE_INDENT)), AFMSimulationConfig, base_dir=REPO_ROOT
         )
         assert result.ok, result.render()
 
     def test_preflight_alone_reports_the_same(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        raw = _repo_relative(parse_config(EXAMPLES / 'indent_config.ini'))
+        raw = _repo_relative(parse_config(LIVE_INDENT))
         assert preflight_paths(raw) != []
         assert preflight_paths(raw, base_dir=REPO_ROOT) == []
 
     def test_a_missing_file_names_the_directory_it_was_searched_from(self, tmp_path):
-        raw = parse_config(EXAMPLES / 'indent_config.ini')
+        raw = parse_config(LIVE_INDENT)
         raw['tip']['pot_path'] = 'no/such/potential.sw'
         issues = [i for i in preflight_paths(raw, base_dir=tmp_path)
                   if i.kind == 'missing_file' and i.key == 'pot_path']

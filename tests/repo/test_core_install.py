@@ -57,7 +57,7 @@ def test_core_install_builds_a_deck(tmp_path):
     """A real build, not just --help: the builder path must not reach an extra."""
     out = tmp_path / "out"
     code = _DRIVER.format(blocked=_BLOCKED, args=[
-        "run", "sheetonsheet", "examples/sheet_config.ini", "--output-dir", str(out)])
+        "run", "sheetonsheet", "examples/sheetonsheet/basic.ini", "--output-dir", str(out)])
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                             check=False, timeout=600, cwd=REPO)
     assert result.returncode == 0, result.stderr[-2000:]

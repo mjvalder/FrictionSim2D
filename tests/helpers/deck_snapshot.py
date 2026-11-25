@@ -125,7 +125,7 @@ SCENARIO_CASES: List[RenderCase] = [
 def render_set() -> List[RenderCase]:
     """Every frozen ``examples/*.ini`` copy (``tests/fixtures/examples``) that is
     a run config, plus ``EXTRA_CASES`` and the scenario matrix's own configs."""
-    from tests.helpers.examples import CASES, CAMPAIGNS, HETERO, FROZEN_EXAMPLES
+    from tests.helpers.examples import FROZEN_CASES as CASES, FROZEN_CAMPAIGNS as CAMPAIGNS, FROZEN_HETERO as HETERO, FROZEN_EXAMPLES
     cases = [RenderCase(Path(n).stem, m, FROZEN_EXAMPLES / n)
              for n, m, _ in CASES + CAMPAIGNS + [HETERO]]
     extra = list(EXTRA_CASES)

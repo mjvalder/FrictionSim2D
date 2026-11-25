@@ -80,7 +80,7 @@ def test_output_dir_for_numbered_only_uses_first_sheet_for_size():
 
 
 class TestShippedPairSweepExample:
-    """`examples/hetero_pair_sweep.ini` is documented as runnable.
+    """`examples/sheetonsheet/hetero_pair_sweep.ini` is documented as runnable.
 
     A shipped example that does not run is worse than none, and the ways it
     rots are silent: a renamed CIF, a pair that stops matching, a placeholder
@@ -97,7 +97,7 @@ class TestShippedPairSweepExample:
 
         root = self.REPO_ROOT
         return expand_config_sweeps(
-            parse_config(root / 'examples' / 'hetero_pair_sweep.ini'), root)
+            parse_config(root / 'examples' / 'sheetonsheet' / 'hetero_pair_sweep.ini'), root)
 
     def test_it_expands_to_the_documented_runs(self, expanded):
         assert [str(output_dir_for(c, 'sheetonsheet')) for c in expanded] == [

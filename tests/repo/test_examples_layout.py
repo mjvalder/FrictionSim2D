@@ -1,0 +1,60 @@
+"""The shape of ``examples/``: one folder per ``run`` subcommand, every file runnable.
+
+These pin what a new user relies on when they copy an example -- the file sits
+in the folder of the command that runs it, its header gives that exact command,
+and every list it names ships next to it -- and what the test suite relies on
+when it discovers the examples instead of listing them.
+"""
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from tests.helpers.examples import EXAMPLES, MODES, REPO_ROOT, discover
+
+_EXAMPLES = discover()
+_MATERIALS_LIST_RE = re.compile(r'^\s*materials_list\s*=\s*([^#\s]+)', re.M)
+
+
+def test_no_ini_outside_a_mode_folder():
+    assert not list(EXAMPLES.glob('*.ini')), "an .ini at the examples/ top level"
+    folders = {p.parent.relative_to(EXAMPLES).as_posix()
+               for p in EXAMPLES.rglob('*.ini')}
+    assert folders <= set(MODES), sorted(folders - set(MODES))
+    top = {p.name for p in EXAMPLES.iterdir() if p.is_dir()}
+    assert top <= set(MODES) | {'lists', 'settings'}, sorted(top)
+
+
+def test_every_mode_has_an_example():
+    assert {e.mode for e in _EXAMPLES} == set(MODES)
+
+
+@pytest.mark.parametrize('example', _EXAMPLES, ids=lambda e: e.rel)
+def test_every_example_header_runs_itself(example):
+    text = example.path.read_text(encoding='utf-8')
+    run_re = re.compile(
+        rf'^#\s+FrictionSim2D run {re.escape(example.mode)} '
+        rf'examples/{re.escape(example.rel)}(\s.*)?$', re.M)
+    match = run_re.search(text)
+    assert match, f"{example.rel}: no '#   FrictionSim2D run {example.mode} examples/{example.rel}' line"
+    if example.settings is not None:
+        wanted = f"--settings-file {example.settings.relative_to(REPO_ROOT).as_posix()}"
+        assert wanted in match.group(0), f"{example.rel}: run line lacks {wanted}"
+
+
+@pytest.mark.parametrize('example', _EXAMPLES, ids=lambda e: e.rel)
+def test_every_materials_list_is_in_lists(example):
+    text = example.path.read_text(encoding='utf-8')
+    for value in _MATERIALS_LIST_RE.findall(text):
+        path = REPO_ROOT / value
+        assert path.parent == EXAMPLES / 'lists', f"{example.rel}: {value} is not in examples/lists/"
+        assert path.is_file(), f"{example.rel}: {value} does not exist"
+
+
+def test_a_missing_settings_header_file_raises(tmp_path):
+    (tmp_path / 'afm').mkdir()
+    (tmp_path / 'afm' / 'x.ini').write_text(
+        "# settings: examples/settings/nope.yaml\n[2D]\nmat = a\n", encoding='utf-8')
+    with pytest.raises(ValueError, match='x.ini'):
+        discover(tmp_path)
