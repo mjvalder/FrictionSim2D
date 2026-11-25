@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional, NoReturn, Tuple
 import click
 
+from . import __version__
 from .core.config import load_settings, settings_origin, _global_settings_path
 from .run.hpc_dispatch import (
     ensure_hpc_settings,
@@ -125,7 +126,7 @@ _profile_option = click.option('--profile', default=None,
 # =============================================================================
 
 @click.group()
-@click.version_option(prog_name='FrictionSim2D')
+@click.version_option(version=__version__, prog_name='FrictionSim2D')
 def cli():
     """FrictionSim2D - Generate LAMMPS input files for 2D material friction simulations."""
 

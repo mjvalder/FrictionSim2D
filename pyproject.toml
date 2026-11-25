@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "FrictionSim2D"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A tool for generating LAMMPS input scripts for 2D material friction simulations."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -97,6 +97,9 @@ markers = [
     "scenario: tiny end-to-end runs with a fake LAMMPS; whole tier < 60 s",
     "agent_eval: live-LLM evaluation of the GUI assistant (AGENT_EVAL_PROVIDER: gemini needs GEMINI_API_KEY, ollama a running server; deselected by default)",
 ]
+
+[tool.hatch.version]
+path = "frictionsim2d/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["frictionsim2d"]

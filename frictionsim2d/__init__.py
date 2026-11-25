@@ -9,11 +9,7 @@ friction simulations with automatic potential generation.
 
 from __future__ import annotations
 
-try:
-    from importlib.metadata import PackageNotFoundError, version as _dist_version
-    __version__ = _dist_version("FrictionSim2D")
-except PackageNotFoundError:  # source tree without installed metadata
-    __version__ = "0.0.0+unknown"
+__version__ = "0.2.0"
 
 import logging
 from pathlib import Path
