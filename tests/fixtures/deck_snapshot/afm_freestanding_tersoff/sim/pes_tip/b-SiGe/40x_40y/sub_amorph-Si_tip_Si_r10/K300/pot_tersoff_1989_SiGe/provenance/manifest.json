@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "b-SiGe.cif",
+      "original_path": "<REPO>/examples/materials/b-SiGe.cif",
+      "stored_path": "provenance/cif/b-SiGe.cif",
+      "category": "cif",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "c9ece08ba1caed96111486c3ce90086dbe17de55dd0b862b5f2b752d7e45b16f",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "1989_SiGe.tersoff",
+      "original_path": "<REPO>/examples/potentials/tersoff/1989_SiGe.tersoff",
+      "stored_path": "provenance/potentials/1989_SiGe.tersoff",
+      "category": "potential",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "c5184cb80d5ea36c75818a8cdc42ffeda8aa86762192559ebda8c3a9224bd76a",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "Si.cif",
+      "original_path": "<REPO>/examples/materials/Si.cif",
+      "stored_path": "provenance/cif/Si.cif",
+      "category": "cif",
+      "components": [
+        "tip"
+      ],
+      "checksum": "209feb4266a2198f0da226f01d44a4bd9639e1636b15acf6966691fad70dc5ed",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "Si.sw",
+      "original_path": "<REPO>/examples/potentials/sw/Si.sw",
+      "stored_path": "provenance/potentials/Si.sw",
+      "category": "potential",
+      "components": [
+        "tip"
+      ],
+      "checksum": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

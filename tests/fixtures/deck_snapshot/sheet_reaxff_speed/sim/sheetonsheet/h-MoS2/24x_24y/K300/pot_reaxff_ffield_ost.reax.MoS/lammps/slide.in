@@ -1,0 +1,167 @@
+# LAMMPS Input Script for Sheet-vs-Sheet Sliding
+# 3-layer model, constraint_mode: none
+
+variable        speed index 1.0 2.0
+label           speed_loop
+
+variable        pressure equal 0.1
+
+variable        a equal 0.0
+
+
+clear
+units           metal
+atom_style      charge
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+comm_style      tiled
+
+region          box block 0.0 25.47253171747674 0.0 22.059859566039712 -9.650000 26.427113 units box
+create_box      7 box
+
+read_data       sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/build/h-MoS2_3.lmp add append group bot
+
+include         sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/lammps/system.in.settings
+
+fix             qeq all qeq/reaxff 1 0.0 10.0 1.0e-6 reaxff
+
+
+dump            sys all atom 10000 sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/visuals/slide_p${pressure}_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+
+# Thermostat on middle layers (2 through 2)
+group           center union layer_2
+velocity        center create 300.0 <SEED>
+fix             lang center langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix             nve_center center nve
+
+timestep        0.001
+thermo          100000
+
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error continue message yes
+
+# Top layer (layer 3): driven
+fix             fstage_top layer_3 rigid/nve single force * on on on torque * off off off
+# Bottom layer (layer 1): fixed
+fix             fsbot layer_1 setforce 0.0 0.0 0.0
+velocity        layer_1 set 0.0 0.0 0.0 units box
+
+# COM computes for key layers
+compute         COM_top layer_3 com
+variable        comx_top equal c_COM_top[1]
+variable        comy_top equal c_COM_top[2]
+variable        comz_top equal c_COM_top[3]
+
+# --- observable registry channels (spec §3) ---------------------------------
+compute T_center center temp
+compute T_layer_1 layer_1 temp
+compute T_Ltop layer_3 temp
+compute COM_L1 layer_1 com
+compute COM_L2 layer_2 com
+compute COM_L3 layer_3 com
+variable etot equal etotal
+variable pe_now equal pe
+variable ke_now equal ke
+variable w_lang_center equal f_lang
+variable temp_center_3d equal c_T_center
+variable temp_L1_3d equal c_T_layer_1
+variable temp_Ltop_3d equal c_T_Ltop
+variable comx_L1 equal c_COM_L1[1]
+variable comy_L1 equal c_COM_L1[2]
+variable comz_L1 equal c_COM_L1[3]
+variable comx_L2 equal c_COM_L2[1]
+variable comy_L2 equal c_COM_L2[2]
+variable comz_L2 equal c_COM_L2[3]
+variable comx_L3 equal c_COM_L3[1]
+variable comy_L3 equal c_COM_L3[2]
+variable comz_L3 equal c_COM_L3[3]
+
+
+# Apply Uniform Pressure
+# 1 eV/Å³ = 160.2176634 GPa
+variable        A equal (25.47253171747674-0.0)*(22.059859566039712-0.0)
+variable        p equal v_pressure/160.2176634
+variable        f equal -v_p*v_A/(count(layer_3))
+
+fix             force layer_3 aveforce 0.0 0.0 $f
+
+variable        fx equal f_force[1]*1.602176634
+variable        fy equal f_force[2]*1.602176634
+variable        fz equal f_force[3]*1.602176634
+variable        sx equal f_fsbot[1]*1.602176634
+variable        sy equal f_fsbot[2]*1.602176634
+variable        sz equal f_fsbot[3]*1.602176634
+
+# Many-body potential (reaxff): compute group/group not supported.
+# Using bottom-layer reaction forces as lateral friction proxy.
+# If friction values look wrong, verify pot_type classification in
+# PotentialManager.is_sheet_lj() (frictionsim2d/core/potential_manager.py).
+variable        xfrict equal v_sx
+variable        yfrict equal v_sy
+
+run             10000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
+
+# --- Constant-pressure compression hold (spec §6.1): the sheet's penetration
+# analogue, closing the KEY_RESULTS §5 parity gap. d(P) is defined at the
+# SHEARING interface (layer_2/layer_1); the
+# other gaps are reported alongside. channel_role=diagnostic.
+variable        d_shear equal v_comz_L2-v_comz_L1
+variable        gap_L1_L2 equal v_comz_L2-v_comz_L1
+variable        gap_L2_L3 equal v_comz_L3-v_comz_L2
+fix             hold_ave all ave/time 1 1000 1000 v_d_shear v_gap_L1_L2 v_gap_L2_L3 v_fz file sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/data/hold_p$(v_pressure)GPa.txt
+run             20000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
+unfix           hold_ave
+
+
+variable        speed_x equal cos(v_a*PI/180)
+variable        speed_y equal sin(v_a*PI/180)
+
+create_atoms    7 single $(xcm(layer_3,x)) $(xcm(layer_3,y)) $(xcm(layer_3,z)+10) units box
+group           virtual type 7
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr layer_3 spring couple virtual 3.1207545372303813 0.0 0.0 NULL 0
+fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
+
+# Three sampling tiers (spec §4). Column order is registry-driven (Task 14).
+# NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
+# exemption: it is the label itself and its cost was already paid campaign-wide.
+fix             fc_win all ave/time 1 1000 1000 v_etot v_pe_now v_ke_now v_w_lang_center v_temp_center_3d v_temp_L1_3d v_temp_Ltop_3d v_xfrict v_yfrict v_fz v_fx v_fy v_comx_top v_comy_top v_comz_top v_sx v_sy v_sz v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 file sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/results/raw_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+
+
+run             500000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
+
+# Final-state retention (spec §5 F6)
+write_data      sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/data/final_p$(v_pressure)GPa_a$(v_a).data
+
+# A halted point (common/halt.lmp) jumps here, past the rest of its slide.
+label           slide_next
+
+
+
+
+next            speed
+clear
+jump            SELF speed_loop

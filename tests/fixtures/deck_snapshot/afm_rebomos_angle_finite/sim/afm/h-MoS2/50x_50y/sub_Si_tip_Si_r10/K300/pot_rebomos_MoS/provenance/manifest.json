@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "h-MoS2.cif",
+      "original_path": "<REPO>/examples/materials/h-MoS2.cif",
+      "stored_path": "provenance/cif/h-MoS2.cif",
+      "category": "cif",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "5f616f04f1ea45fa178fabd6070b616c71c07214c0b78968e986e2a22fa55ee7",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "MoS.rebomos",
+      "original_path": "<REPO>/examples/potentials/rebo/MoS.rebomos",
+      "stored_path": "provenance/potentials/MoS.rebomos",
+      "category": "potential",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "d2da7e66c62043f1669866c6cf88fd6b509e322917b8d9af12e3cc6459e5cfae",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "Si.cif",
+      "original_path": "<REPO>/examples/materials/Si.cif",
+      "stored_path": "provenance/cif/Si.cif",
+      "category": "cif",
+      "components": [
+        "tip",
+        "sub"
+      ],
+      "checksum": "209feb4266a2198f0da226f01d44a4bd9639e1636b15acf6966691fad70dc5ed",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "Si.sw",
+      "original_path": "<REPO>/examples/potentials/sw/Si.sw",
+      "stored_path": "provenance/potentials/Si.sw",
+      "category": "potential",
+      "components": [
+        "tip",
+        "sub"
+      ],
+      "checksum": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

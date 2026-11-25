@@ -88,11 +88,34 @@ EXTRA_CASES: List[RenderCase] = [
 ]
 
 
+_SCENARIO_DIR = _REPO_ROOT / "tests" / "scenarios" / "configs"
+#: The scenario tier's matrix (``tests/scenarios/test_scenarios.py``): one row
+#: per (family, potential, condition). Three rows are existing ``EXTRA_CASES``
+#: (afm-hetero with the default lj interlayer, sheet-hetero twist, quench),
+#: reused rather than copied so the snapshot holds each build once.
+SCENARIO_CASES: List[RenderCase] = [
+    RenderCase(n, m, _SCENARIO_DIR / f"{n}.ini") for n, m in [
+        ("afm_sw_load", "afm"),
+        ("afm_rebomos_angle_finite", "afm"),
+        ("afm_freestanding_tersoff", "pes_tip"),
+        ("indent_sw", "indent"),
+        ("sheet_reaxff_speed", "sheetonsheet"),
+        ("sheet_sw_ilp", "sheetonsheet"),
+        ("flake_slide_sw", "sheetonsheet"),
+        ("pes_tip_sw", "pes_tip"),
+        ("pes_sheet_ljg", "pes_sheet"),
+        ("sheet_mace_d3", "sheetonsheet"),
+    ]
+] + [c for c in EXTRA_CASES if c.name in ("afm_hetero_finite", "sheet_hetero_twist", "quench_si")]
+
+
 def render_set() -> List[RenderCase]:
-    """Every ``examples/*.ini`` that is a run config, plus ``EXTRA_CASES``."""
+    """Every ``examples/*.ini`` that is a run config, plus ``EXTRA_CASES`` and
+    the scenario matrix's own configs."""
     from tests.helpers.examples import CASES, CAMPAIGNS, HETERO, EXAMPLES
     cases = [RenderCase(Path(n).stem, m, EXAMPLES / n) for n, m, _ in CASES + CAMPAIGNS + [HETERO]]
-    return cases + list(EXTRA_CASES)
+    extra = list(EXTRA_CASES)
+    return cases + extra + [c for c in SCENARIO_CASES if c not in extra]
 
 
 class _FixedDatetime(_dt.datetime):

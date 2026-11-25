@@ -1,0 +1,217 @@
+# LAMMPS input script for the AFM indentation "indent" run: hold + pull-off retract.
+#
+# One vertical-contact run per load, merging the two contact measurements that the
+# lateral PES scan cannot see (the sliding phase, afm/slide.lmp, is NEVER invoked):
+#
+#   PHASE 1 -- HOLD (finite-T damped MD).  Read the loaded contact written by the
+#     system.in aveforce ramp (load_<f>N.data), re-apply the target normal load via
+#     aveforce and hold the rigid, laterally-fixed tip for a short DAMPED hold,
+#     recording only the out-of-plane channels. The thermally-averaged penetration
+#     depth (tip_z - sheet_com_z) is the vertical-compliance descriptor. The output
+#     cadence + 10-column layout match afm/slide.lmp, so postprocessing/read_data.py
+#     parses the hold file unchanged. No lateral motion.
+#
+#   PHASE 2 -- RETRACT (T=0 minimization).  Tear down every dynamics fix from the
+#     hold, freeze the rigid tip, and RETRACT it quasi-statically in small z-steps
+#     -- minimizing the sheet + substrate at each step -- from the held contact,
+#     through zero load, past the pull-off instability, to full detachment. The
+#     force-distance curve (z_tip, fz_tip, pe per step -> CSV) yields the pull-off
+#     force, work of adhesion and contact stiffness. No sliding.
+#
+# See frictionsim2d/builders/indent.py, frictionsim2d/postprocessing/indent.py and POKE_SIM_RECIPE.md.
+
+variable        a equal 0.0
+variable        speed equal 2.0
+
+variable        find equal 5.0
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+timestep        0.001
+thermo          100000
+comm_style      tiled
+
+# The loaded contact state written by the system.in aveforce ramp (fresh seed).
+# A load whose system.in ramp halted (common/halt.lmp) or never ran has no
+# load_*.data: skip it rather than let read_data end the whole script.
+variable        load_file string indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/data/load_$(v_find)N.data
+variable        have_load equal is_file(${load_file})
+if              "${have_load} == 0" then &
+                "print '# SKIP no ${load_file}'" &
+                "jump SELF indent_next"
+read_data       ${load_file}
+include         indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/lammps/system.in.settings
+
+group           2D type 7 8
+velocity        2D zero angular
+
+
+dump            sys all atom 10000 indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/visuals/slide_f$(v_find)_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+# =====================================================================================
+# PHASE 1 -- finite-T damped hold at the target load (penetration).  No sliding.
+# =====================================================================================
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0
+# Rigid tip, free only in z (laterally fixed): a pure vertical hold, never a slide.
+fix             tip_f tip_fix rigid/nve single force * off off on torque * off off off
+
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin 300.0 300.0 $(100.0*dt) <SEED> zero yes tally yes
+fix_modify      lang_sub temp temp_sub
+
+group           nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error continue message yes
+
+# Out-of-plane channels: sheet-COM z (comz) and tip-COM z (tipz). Penetration
+# depth = tipz - comz; both use the exact groups the sliding campaign records so
+# the indent penetration is directly comparable to the campaign contact features.
+compute         COM_top 2D_all com
+variable        comx equal c_COM_top[1]
+variable        comy equal c_COM_top[2]
+variable        comz equal c_COM_top[3]
+
+compute         COM_tip tip_fix com
+variable        comx_tip equal c_COM_tip[1]
+variable        comy_tip equal c_COM_tip[2]
+variable        comz_tip equal c_COM_tip[3]
+
+run             0
+
+# Re-apply the target normal load (nN -> eV/A per atom) and hold it.
+variable        Ftotal equal -v_find/1.602176634
+variable        n equal v_Ftotal/count(tip_fix)
+fix             forcetip tip_fix aveforce 0.0 0.0 $n
+
+# nf = felt normal force; aveforce stores the pre-constraint group force in
+# f_forcetip[1..3], so [3] is the normal channel and [1]/[2] the lateral reaction.
+variable        fz_tip equal f_forcetip[3]*1.602176634
+variable        fx_spr equal f_forcetip[1]*1.602176634
+variable        fy_spr equal f_forcetip[2]*1.602176634
+
+# --- observable registry channels (spec §3) ---------------------------------
+compute T_sheet 2D_all temp
+compute COM_L1 layer_1 com
+compute eint tip_all group/group 2D_all pair yes
+compute peat_tip_all tip_all pe/atom
+compute pesum_tip_all tip_all reduce sum c_peat_tip_all
+compute peat_sub_all sub_all pe/atom
+compute pesum_sub_all sub_all reduce sum c_peat_sub_all
+compute peat_2D_all 2D_all pe/atom
+compute pesum_2D_all 2D_all reduce sum c_peat_2D_all
+compute coordc 2D_all coord/atom cutoff 6.2475 group tip_all
+compute contacts 2D_all reduce sum c_coordc
+compute satom 2D_all stress/atom NULL
+compute sxx 2D_all reduce sum c_satom[1]
+compute syy 2D_all reduce sum c_satom[2]
+variable etot equal etotal
+variable pe_now equal pe
+variable ke_now equal ke
+variable w_lang_tip equal f_lang_tip
+variable w_lang_sub equal f_lang_sub
+variable temp_sheet equal c_T_sheet
+variable comx_L1 equal c_COM_L1[1]
+variable comy_L1 equal c_COM_L1[2]
+variable comz_L1 equal c_COM_L1[3]
+variable e_int equal c_eint
+variable pe_tip_all equal c_pesum_tip_all
+variable pe_sub_all equal c_pesum_sub_all
+variable pe_2D_all equal c_pesum_2D_all
+variable n_contact equal c_contacts
+variable sxx_2d equal c_sxx
+variable syy_2d equal c_syy
+
+fix             fc_win all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip v_etot v_pe_now v_ke_now v_w_lang_tip v_w_lang_sub v_temp_sheet v_comx_L1 v_comy_L1 v_comz_L1 file indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=indent"
+fix             fc_raw all ave/time 100 1 100 v_fx_spr v_fy_spr v_fz_tip v_comx_tip v_comy_tip v_comz_tip file indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/raw_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=indent"
+fix             fc_pa all ave/time 1000 1 1000 v_e_int v_pe_tip_all v_pe_sub_all v_pe_2D_all v_n_contact v_sxx_2d v_syy_2d file indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/peratom_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=indent"
+
+
+fix             damp tip_fix viscous 0.0
+
+# --- quasi-static damped hold at the target load (no sliding) ---------------------
+run             2000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=indent load=$(v_find) T=$(v_halt_T) step=$(step)' append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/halted.txt screen yes" &
+                "jump SELF indent_next"
+
+
+# =====================================================================================
+# PHASE 2 -- displacement-controlled T=0 retract from the held contact (pull-off).
+# =====================================================================================
+# Remove every dynamics fix from the hold so the minimization sees only conservative
+# forces (langevin random forces, the aveforce load and the viscous drag would each
+# corrupt the sub-nN pull-off curve). Then release the rigid-body tip so the whole
+# tip (tip_all) can be frozen and displaced as a unit.
+unfix           fc_win
+unfix           fc_raw
+unfix           fc_pa
+unfix           damp
+unfix           forcetip
+unfix           nve_all
+unfix           lang_tip
+unfix           lang_sub
+uncompute       temp_tip
+uncompute       temp_sub
+unfix           tip_f
+uncompute       COM_tip
+
+min_style       cg
+
+# Substrate base stays held (sub_fix, carried over from the hold); the rigid tip
+# (all tip atoms, group tip_all) is frozen and moved only by displace_atoms -- a
+# displacement-controlled quasi-static retract, never a slide. setforce stores the
+# pre-zero total group force in f_tip_hold[1..3]: [3] is the normal force the surface
+# exerts on the tip, [1]/[2] the lateral reaction.
+fix             tip_hold tip_all setforce 0.0 0.0 0.0
+
+# Relax the held +load contact to its quasi-static configuration before the first
+# sample so the retract curve starts from a converged reference state.
+minimize 0.0 1.0e-6 10000 100000
+
+compute         COM_tip_r tip_all com
+variable        ztip equal c_COM_tip_r[3]
+variable        fztip equal f_tip_hold[3]*1.602176634
+variable        fxtip equal f_tip_hold[1]*1.602176634
+variable        fytip equal f_tip_hold[2]*1.602176634
+variable        pe_now equal pe
+
+run             0
+
+# CSV: step index, tip COM z (Angstrom), fz/fx/fy on the tip (nN), total PE (eV).
+print           "step,z_tip,fz_tip,fx_tip,fy_tip,pe" file indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/indent_f$(v_find)N_l1.csv screen no
+print           "0,$(v_ztip),$(v_fztip),$(v_fxtip),$(v_fytip),$(v_pe_now)" append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/indent_f$(v_find)N_l1.csv screen no
+
+# --- quasi-static displacement-controlled retract (no sliding) --------------------
+# Move the tip up by z_step and relax the sheet + substrate at each step; the felt
+# fz_tip runs from repulsive (+) through zero, dips into the adhesive well (-), and
+# returns toward zero at full detachment -- the pull-off curve.
+variable        zstep equal 0.2
+variable        k loop 10
+label           retract_loop
+displace_atoms  tip_all move 0.0 0.0 ${zstep} units box
+minimize 0.0 1.0e-6 10000 100000
+print           "$(v_k),$(v_ztip),$(v_fztip),$(v_fxtip),$(v_fytip),$(v_pe_now)" append indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/results/indent_f$(v_find)N_l1.csv screen no
+next            k
+jump            SELF retract_loop
+
+# End-of-point snapshot (integrity stage 3); a skipped load jumps past it.
+write_data      indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r15/K300/pot_sw_MoS2_wen/L1/data/final_f$(v_find)N_a$(v_a).data
+
+# A halted or skipped load jumps here, past its retract.
+label           indent_next
+

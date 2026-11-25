@@ -94,6 +94,7 @@ markers = [
     "integration: cross-package artifact-level tests in tests/integration/ (a file may also carry lammps; Phase 3 adds the lmp_serial-free ones)",
     "aiida: needs aiida-core; runs against a temporary broker-less SQLite profile (aiida_profile_clean), never the daemon",
     "publication: checks against the frozen publication tables and the friction2d_pub profile (read-only; skips when absent; deselected by default)",
+    "scenario: tiny end-to-end runs with a fake LAMMPS; whole tier < 60 s",
     "agent_eval: live-LLM evaluation of the GUI assistant (AGENT_EVAL_PROVIDER: gemini needs GEMINI_API_KEY, ollama a running server; deselected by default)",
 ]
 

@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "h-MoS2.cif",
+      "original_path": "<REPO>/examples/materials/h-MoS2.cif",
+      "stored_path": "provenance/cif/h-MoS2.cif",
+      "category": "cif",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "5f616f04f1ea45fa178fabd6070b616c71c07214c0b78968e986e2a22fa55ee7",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "fake_mace.json",
+      "original_path": "<REPO>/tests/scenarios/configs/fake_mace.json",
+      "stored_path": "provenance/potentials/fake_mace.json",
+      "category": "potential",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "3f0c2391721cef1d7b8513e02e8a753d5d81e77c487c720f7ac187cd3c19d4ae",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

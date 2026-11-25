@@ -1,0 +1,98 @@
+{
+  "schema_version": "2.2.0",
+  "run_uuid": "<UUID>",
+  "family": "sheetonsheet",
+  "model": "sheetonsheet",
+  "materials": [
+    {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "examples/potentials/sw/MoS2_sevik.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "b6e5058c0419272937feaf546fe9b80d0e97181948d455f58cea997fc8186658"
+    }
+  ],
+  "twist_angle": null,
+  "seed_thermal_tip": null,
+  "seed_thermal_sub": null,
+  "seed_velocity": null,
+  "seed_sheet_center": 48014721,
+  "substrate_realization_id": null,
+  "damping_ratio": null,
+  "damp_ev": null,
+  "git_commit": "<GITHASH>",
+  "git_dirty": <GITDIRTY>,
+  "config_hash": "4beff79a5d276226d1586f177252d326b15dad2bae70aed23221ee1efdb2e911",
+  "lammps_version": null,
+  "layer_type_map": {
+    "layer_1": [
+      1,
+      4,
+      5
+    ],
+    "layer_2": [
+      2,
+      6,
+      7
+    ],
+    "layer_3": [
+      3,
+      8,
+      9
+    ]
+  },
+  "unloaded_reference_z": null,
+  "contact_cutoff": 6.0525,
+  "cutoff_source": "uff_sigma_k1.5",
+  "thermostat_scheme": "langevin_center_nve",
+  "tip_group_sizes": null,
+  "run_role": "label",
+  "load_requested": null,
+  "load_achieved": null,
+  "pressure_requested": 1.0,
+  "pressure_achieved": null,
+  "ramp_converged": null,
+  "ramp_r": null,
+  "ramp_iterations": null,
+  "drive_k": 3.1207545372303813,
+  "drive_rest_length": 0.0,
+  "geometry": {
+    "lat_c": 6.15,
+    "lat_c_source": "config",
+    "unit_cell": {
+      "xlo": 0.0,
+      "xhi": 3.184066464685,
+      "ylo": 0.0,
+      "yhi": 5.51496489151,
+      "zlo": 0.0,
+      "zhi": 18.127112646352
+    },
+    "cell_a": 3.184066464685,
+    "cell_b": 5.51496489151,
+    "sheet_dims": {
+      "xlo": 0.0,
+      "xhi": 41.392864040904996,
+      "ylo": 0.0,
+      "yhi": 38.60475424057,
+      "zlo": -7.5,
+      "zhi": 10.627112646352
+    },
+    "atoms_per_layer": 546,
+    "layer_thickness": 3.127112646352,
+    "tip_r": null
+  },
+  "interlayer": {
+    "style": "ilp",
+    "file": "TMD.ILP",
+    "sha256": "fd3f7fa6b7e7a98ea50a34ecc355d38e43a833300e37ce379721e3c8484d304d",
+    "g_meV": {},
+    "generated_files": {},
+    "comparison": false
+  },
+  "ramp_by_load": null,
+  "load_achieved_by_load": null,
+  "wall_time_s": null,
+  "n_procs": null,
+  "atoms_per_proc": null
+}

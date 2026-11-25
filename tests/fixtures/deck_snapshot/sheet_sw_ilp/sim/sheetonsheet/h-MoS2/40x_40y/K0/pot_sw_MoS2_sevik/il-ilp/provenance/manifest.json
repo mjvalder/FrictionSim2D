@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "created": "<TIMESTAMP>",
+  "files": [
+    {
+      "filename": "h-MoS2.cif",
+      "original_path": "<REPO>/examples/materials/h-MoS2.cif",
+      "stored_path": "provenance/cif/h-MoS2.cif",
+      "category": "cif",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "5f616f04f1ea45fa178fabd6070b616c71c07214c0b78968e986e2a22fa55ee7",
+      "added_at": "<TIMESTAMP>"
+    },
+    {
+      "filename": "MoS2_sevik.sw",
+      "original_path": "<REPO>/examples/potentials/sw/MoS2_sevik.sw",
+      "stored_path": "provenance/potentials/MoS2_sevik.sw",
+      "category": "potential",
+      "components": [
+        "sheet"
+      ],
+      "checksum": "b6e5058c0419272937feaf546fe9b80d0e97181948d455f58cea997fc8186658",
+      "added_at": "<TIMESTAMP>"
+    }
+  ],
+  "last_updated": "<TIMESTAMP>"
+}

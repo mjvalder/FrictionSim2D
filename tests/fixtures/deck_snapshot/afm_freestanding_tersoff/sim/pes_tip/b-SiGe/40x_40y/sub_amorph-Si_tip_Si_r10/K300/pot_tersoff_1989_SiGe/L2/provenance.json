@@ -1,0 +1,91 @@
+{
+  "schema_version": "2.2.0",
+  "run_uuid": "<UUID>",
+  "family": "pes_tip",
+  "model": "pes_tip",
+  "materials": [
+    {
+      "name": "b-SiGe",
+      "role": "sheet",
+      "pot_path": "examples/potentials/tersoff/1989_SiGe.tersoff",
+      "pot_type": "tersoff",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c5184cb80d5ea36c75818a8cdc42ffeda8aa86762192559ebda8c3a9224bd76a"
+    },
+    {
+      "name": "Si",
+      "role": "tip",
+      "pot_path": "examples/potentials/sw/Si.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": null,
+      "pot_file_sha256": "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
+    }
+  ],
+  "twist_angle": null,
+  "seed_thermal_tip": 12011594,
+  "seed_thermal_sub": 319798551,
+  "seed_velocity": 48014721,
+  "seed_sheet_center": null,
+  "substrate_realization_id": null,
+  "damping_ratio": null,
+  "damp_ev": 0.0,
+  "git_commit": "<GITHASH>",
+  "git_dirty": <GITDIRTY>,
+  "config_hash": "9c3aba9c448e19c3aa38b010a2c5e3f82eaea763fb7a1d8baddd72abded638d6",
+  "lammps_version": null,
+  "layer_type_map": {
+    "layer_1": [
+      4,
+      6
+    ],
+    "layer_2": [
+      5,
+      7
+    ]
+  },
+  "unloaded_reference_z": null,
+  "contact_cutoff": 6.4425,
+  "cutoff_source": "uff_sigma_k1.5",
+  "thermostat_scheme": "langevin_y_tip_sub_nve_sheet",
+  "tip_group_sizes": null,
+  "run_role": "label",
+  "load_requested": 2.0,
+  "load_achieved": null,
+  "pressure_requested": null,
+  "pressure_achieved": null,
+  "ramp_converged": null,
+  "ramp_r": null,
+  "ramp_iterations": null,
+  "drive_k": null,
+  "drive_rest_length": null,
+  "geometry": {
+    "lat_c": 4.593623764200901,
+    "lat_c_source": "minimised",
+    "unit_cell": {
+      "xlo": 0.0,
+      "xhi": 3.89,
+      "ylo": 0.0,
+      "yhi": 6.737677641442933,
+      "zlo": 0.0,
+      "zhi": 106.0
+    },
+    "cell_a": 3.89,
+    "cell_b": 6.737677641442933,
+    "sheet_dims": {
+      "xlo": 0.0,
+      "xhi": 38.9,
+      "ylo": 0.0,
+      "yhi": 40.4260658486576,
+      "zlo": -52.999999999999986,
+      "zhi": 53.000000000000014
+    },
+    "atoms_per_layer": 240,
+    "layer_thickness": 0.540400000000012,
+    "tip_r": 10.0
+  },
+  "ramp_by_load": null,
+  "load_achieved_by_load": null,
+  "wall_time_s": null,
+  "n_procs": null,
+  "atoms_per_proc": null
+}

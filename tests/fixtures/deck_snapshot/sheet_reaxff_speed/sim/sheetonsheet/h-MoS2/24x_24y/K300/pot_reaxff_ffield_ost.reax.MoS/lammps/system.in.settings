@@ -1,0 +1,14 @@
+mass 1*3 95.950000 #Mo
+mass 4*6 32.060000 #S
+mass 7 1.0 #Virtual atom
+group 2D_all type 1 2 3 4 5 6
+group 2D_core type 1 2 3 4 5 6
+group layer_1 type 1 4
+group layer_2 type 2 5
+group layer_3 type 3 6
+pair_style hybrid reaxff NULL safezone 1.2 mincap 50 lj/cut 11.0
+# Self-interactions (intra-component)
+pair_coeff * * reaxff sheetonsheet/h-MoS2/24x_24y/K300/pot_reaxff_ffield_ost.reax.MoS/provenance/potentials/ffield_ost.reax.MoS Mo Mo Mo S S S NULL # sheet
+
+# Virtual atom (minimal LJ)
+pair_coeff * 7 lj/cut 1e-100 1e-100

@@ -11,6 +11,7 @@ pytest -m lammps                         # real LAMMPS runs: 80 tests
 pytest -m 'integration and not lammps'   # cross-package tier: 105 tests
 pytest -m integration                    # the same tier PLUS the LAMMPS smoke: 116 tests
 pytest tests/aiida -m aiida              # the AiiDA tier: 291 tests, ~11 min, broker-less SQLite profile
+pytest -m scenario                       # fake-LAMMPS end-to-end tier: 16 tests, < 60 s
 pytest -m ""                             # everything
 pytest tests/builders                    # one package
 pytest tests/core/test_config.py::test_name              # one test
@@ -31,12 +32,13 @@ the default.
 
 ## Markers
 
-Two, both registered in `pyproject.toml`:
+The main ones, all registered in `pyproject.toml`:
 
 | marker | meaning |
 |---|---|
 | `lammps` | executes a real LAMMPS run. Skipped when `lmp_serial` is absent. |
 | `integration` | cross-package, artifact-level. Lives in `tests/integration/`. |
+| `scenario` | tiny end-to-end runs with a fake LAMMPS. Lives in `tests/scenarios/`; part of the default run. |
 
 A file may carry both. **`lammps` is derived, not written by hand**: `tests/conftest.py`
 reads each test's `skipif(... lmp_serial ...)` guard and applies the marker from it, so a
@@ -79,6 +81,37 @@ example set and the build helper live in `tests/helpers/examples.py`.
 
 One case in `test_example_configs.py` also carries `lammps`: a hetero build shells out to
 `lmp_serial` while building, so it cannot run in the LAMMPS-free tier.
+
+## The scenario tier
+
+`tests/scenarios/` runs each row of a small matrix end to end without LAMMPS:
+build (build-time LAMMPS replayed from `tests/fixtures/lammps_replay/`) -> every deck
+through `fake_lmp.py` -> `FrictionSim2D postprocess read --export` -> `FrictionSim2D
+aiida import` into a throwaway profile -> `point_table()`. The rows
+(`tests/helpers/deck_snapshot.py::SCENARIO_CASES`, also in the deck snapshot):
+
+| row | family | potential | condition |
+|---|---|---|---|
+| `afm_sw_load` | afm | sw | load sweep |
+| `afm_rebomos_angle_finite` | afm | rebomos | angle sweep, finite sheet, spring edges |
+| `afm_hetero_finite` | afm (hetero) | sw + lj interlayer | — |
+| `afm_freestanding_tersoff` | pes_tip (freestanding) | tersoff (b-SiGe) | — |
+| `indent_sw` | indent | sw | hold + retract |
+| `sheet_reaxff_speed` | sheetonsheet | reaxff | speed sweep |
+| `sheet_sw_ilp` | sheetonsheet | sw | ilp interlayer |
+| `sheet_hetero_twist` | hetero | sw | twist |
+| `flake_slide_sw` | flake | sw | — |
+| `pes_tip_sw` | pes_tip | sw | — |
+| `pes_sheet_ljg` | pes_sheet | sw + lj_g | stands in for kc (C/H only) |
+| `sheet_mace_d3` | sheetonsheet | mace (fake model file) | d3 |
+| `quench_si` | quench | sw | `quench import` -> `find_block` |
+
+`fake_lmp.py` (`python tests/scenarios/fake_lmp.py -in DECK [-log FILE]`) writes the
+files a deck would: each `fix ave/time ... file` (two header lines, five rows), each
+`print ... file|append`, each `write_data` (a copy of the last `read_data` input), once
+per value of the deck's `index` variables, plus a finished log. Only eight rows also run
+`aiida import` (one per family, plus the MLIP row): importing all of them breaks the
+60 s budget, which `test_tier_budget` asserts.
 
 ## Conventions
 

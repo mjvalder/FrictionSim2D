@@ -1,0 +1,28 @@
+mass 1*2 95.950000 #Mo
+mass 5*6 95.950000 #Mo
+mass 3*4 32.060000 #S
+mass 7*8 32.060000 #S
+mass 9 1.0 #Virtual atom
+group 2D_all type 1 2 3 4
+group 2D_core type 1 2 3 4
+group layer_1 type 1 3
+group layer_2 type 2 4
+group flake_all type 5 6 7 8
+pair_style hybrid sw sw sw lj/cut 11.0
+# Self-interactions (intra-component)
+pair_coeff * * sw 1 sheetonsheet/h-MoS2+flake-h-MoS2/24x_24y/K300/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw Mo NULL S NULL NULL NULL NULL NULL NULL # sheet Layer 1
+pair_coeff * * sw 2 sheetonsheet/h-MoS2+flake-h-MoS2/24x_24y/K300/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw NULL Mo NULL S NULL NULL NULL NULL NULL # sheet Layer 2
+pair_coeff * * sw 3 sheetonsheet/h-MoS2+flake-h-MoS2/24x_24y/K300/pot_sw_MoS2_wen/provenance/potentials/MoS2_wen.sw NULL NULL NULL NULL Mo Mo S S NULL # flake
+
+# Cross-interactions (inter-component LJ)
+pair_coeff 1 2 lj/cut 0.0024283504 3.052 # Mo(L1)-Mo(L2)
+pair_coeff 1 4 lj/cut 0.00537146340837286 3.5435 # Mo(L1)-S(L2)
+pair_coeff 2 3 lj/cut 0.00537146340837286 3.5435 # S(L1)-Mo(L2)
+pair_coeff 3 4 lj/cut 0.0118815716 4.035 # S(L1)-S(L2)
+pair_coeff 1*2 5*6 lj/cut 0.0024283504 3.052 # Mo(sheet)-Mo(flake)
+pair_coeff 1*2 7*8 lj/cut 0.00537146340837286 3.5435 # Mo(sheet)-S(flake)
+pair_coeff 3*4 5*6 lj/cut 0.00537146340837286 3.5435 # S(sheet)-Mo(flake)
+pair_coeff 3*4 7*8 lj/cut 0.0118815716 4.035 # S(sheet)-S(flake)
+
+# Virtual atom (minimal LJ)
+pair_coeff * 9 lj/cut 1e-100 1e-100
