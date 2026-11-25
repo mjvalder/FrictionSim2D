@@ -9,7 +9,7 @@ are out of scope.
 Where the evidence lives, all on this page:
 
 - the capability matrix and the executed feasibility results: section 1 and
-  section 12 (the hand-written Milestone-0 decks are in `scripts/milestone0/`);
+  section 12 (the hand-written Milestone-0 decks are kept outside this repository);
 - the AFM physics gate: section 13. Gates 1-3 (deck shape, Si sanity, energy
   agreement vs ASE) **pass**; Gate 4 (cross-framework) is **open**: MACE-MPA-0
   and the DPA-3.2 MPtrj head disagree by 44 % RMS on forces on the reference
@@ -511,7 +511,7 @@ type 2 = Mo layer 2   type 5 = S layer 2
 type 3 = Mo layer 3   type 6 = S layer 3
 ```
 
-(The hand-written Milestone-0 decks in `scripts/milestone0/` use a *different*,
+(The hand-written Milestone-0 decks, kept outside this repository, use a *different*,
 per-layer-pair layout — 1 = Mo L1, 2 = S L1, 3 = Mo L2, … — because ASE writes
 them directly; do not copy a type map from one context into the other.)
 
@@ -916,15 +916,10 @@ styles; `build_lammps_deepmd.sh` pins a 2025 tag at which the deepmd plugin will
 **not** load, so it is useful for standalone `dispersion/d3` only. All scripts
 are idempotent; a re-run after a failure resumes.
 
-**2. Re-run the feasibility decks (optional).** Section 12 records the results;
-the decks are in `scripts/milestone0/`, geometries first. The DeePMD and D3 items
-are executed; the decks for the ACEsuit `pair_style mace` (M0.3, M0.3b, M0.6) were
+**2. Feasibility decks (done).** Section 12 records the results. The
+hand-written Milestone-0 decks were one-off work and are no longer in this
+repository. The decks for the ACEsuit `pair_style mace` (M0.3, M0.3b, M0.6) were
 superseded by symmetrix and have no recorded result.
-
-```bash
-cd scripts/milestone0
-python make_geometries.py --outdir .
-```
 
 **3. Run the physics gate.** The bilayer binding benchmark is the explicit
 go/no-go before any production run: a foundation model that gets MoS2 interlayer
@@ -1020,7 +1015,7 @@ MACE-MP is *not* a workaround: it double-counts against SW/LJ.
 **`neigh_modify exclude type 7 *` is rejected.**
 There is no wildcard form. `neigh_modify exclude type M N` takes two explicit
 numeric type IDs; the generator emits one line per type (§6, and
-`scripts/milestone0/m0_4_virtual_exclude.in`).
+the Milestone-0 deck `m0_4_virtual_exclude.in`).
 
 **Imports resolve to the wrong FrictionSim2D checkout.**
 This machine's shell profile sets `PYTHONPATH` to a *different* checkout, which
@@ -1116,7 +1111,7 @@ Documented, not implemented:
 ## 12. Feasibility results (the Milestone-0 decks)
 
 Before any builder code existed, the mechanisms the design depends on were
-tested with hand-written LAMMPS decks in `scripts/milestone0/` (no FrictionSim2D
+tested with hand-written LAMMPS decks, now kept outside this repository (no FrictionSim2D
 code in the loop, so a failure is LAMMPS's or the model's, never the builder's).
 `make_geometries.py --outdir .` writes the three data files they read
 (`bilayer_mos2.data`, 24 atoms; `trilayer_mos2.data`, 36 atoms;

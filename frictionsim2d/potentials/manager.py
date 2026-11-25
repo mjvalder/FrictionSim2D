@@ -1045,8 +1045,8 @@ class PotentialManager:
         DELIBERATELY one line per type rather than a single wildcard line:
         ``neigh_modify exclude type M N`` takes two explicit numeric type IDs
         and has **no** wildcard form, so ``exclude type <v> *`` is a parse error
-        that would kill every MLIP run. ``scripts/milestone0/m0_4_virtual_exclude.in``
-        enumerates the same pairs (including the v-v self pair) for this reason.
+        that would kill every MLIP run. The Milestone-0 deck ``m0_4_virtual_exclude.in``
+        enumerated the same pairs (including the v-v self pair) for this reason.
         """
         v = self.virtual_atom_type
         if v is None:

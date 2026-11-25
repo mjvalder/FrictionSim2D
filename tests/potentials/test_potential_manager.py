@@ -1218,7 +1218,7 @@ class TestMLIPEmission:
         assert f"pair_coeff * * symmetrix/mace {model} Mo Mo Mo S S S Mo # sheet" in lines
         assert "pair_coeff * * dispersion/d3 Mo Mo Mo S S S Mo" in lines
         # `neigh_modify exclude type` has NO wildcard form: enumerate the pairs
-        # (see scripts/milestone0/m0_4_virtual_exclude.in).
+        # (as the Milestone-0 deck m0_4_virtual_exclude.in did).
         for t in range(1, 8):
             assert f"neigh_modify exclude type 7 {t}" in lines
         assert "neigh_modify exclude type 7 *" not in text
@@ -1229,7 +1229,7 @@ class TestMLIPEmission:
     def test_deepmd_native_fullcell_emission(self, mock_settings, tmp_path):
         """Non-hybrid deepmd takes its type map with NO sub-style selector.
 
-        (`pair_coeff * * Mo S ...` -- the form scripts/milestone0/m0_4 documents.)
+        (`pair_coeff * * Mo S ...` -- the form the Milestone-0 deck m0_4 used.)
         """
         model = _fake_model(tmp_path, "m.pth")
         pm = PotentialManager(mock_settings, use_langevin=False)

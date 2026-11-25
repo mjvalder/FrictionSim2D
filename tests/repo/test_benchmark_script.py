@@ -363,26 +363,8 @@ def test_assemble_results_marks_d3():
 
 
 # ---------------------------------------------------------------------------
-# geometry — consistency with scripts/milestone0/make_geometries.py
+# geometry
 # ---------------------------------------------------------------------------
-
-def test_bilayer_geometry_matches_milestone0_at_default_spacing():
-    """Same MoS2 recipe as the Milestone-0 decks (orthogonal cell, per-layer types)."""
-    pytest.importorskip("ase")
-    import numpy as np
-
-    mg = _load(REPO_ROOT / "scripts" / "milestone0" / "make_geometries.py",
-               "m0_make_geometries")
-    reference = mg._assign_layer_types(mg._stack(2), 2)
-    atoms = bench.build_bilayer(separation=mg.INTERLAYER, a=mg.LATTICE_A)
-
-    assert len(atoms) == len(reference) == 24
-    assert atoms.get_chemical_symbols() == reference.get_chemical_symbols()
-    assert np.allclose(np.array(atoms.cell), np.array(reference.cell))
-    assert np.allclose(atoms.positions, reference.positions, atol=1e-9)
-    assert list(atoms.arrays["type"]) == list(reference.arrays["type"])
-    assert sorted(set(atoms.arrays["type"])) == [1, 2, 3, 4]
-
 
 def test_build_bilayer_honours_separation_and_in_plane_scale():
     pytest.importorskip("ase")

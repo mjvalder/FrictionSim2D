@@ -8,8 +8,8 @@ integrity check finds those points so they can be left out before any friction i
 It judges only whether the system is intact. Ploughing, tip deformation, pinned sheets and
 departures from steady sliding are not judged; they stay part of your analysis.
 
-The rules are a port of the checker used for the published run campaigns. `tools/integrity/compare_reference.py`
-compares the port with that reference on the two campaigns: on every point both call `complete`,
+The rules are a port of the checker used for the published run campaigns. A one-off script (kept outside this
+repository) compared the port with that reference on the two campaigns: on every point both call `complete`,
 the rule set and the snapshot measures are identical.
 
 ## Three stages

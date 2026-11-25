@@ -9,7 +9,6 @@ ptest
 # descend into the directory and these negations would never be consulted.
 /scripts/*
 !/scripts/hpc/
-!/scripts/milestone0/
 !/scripts/run_local.sh
 !/scripts/mlip_bilayer_benchmark.py
 !/scripts/fetch_mlip_models.sh
